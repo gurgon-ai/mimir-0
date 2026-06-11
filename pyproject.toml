@@ -55,6 +55,11 @@ target-version = "py311"
 # E722 = bare except. We ban it explicitly: DESIGN §10 — no silent swallow.
 select = ["E", "F", "W", "I", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# server.py embeds a single-page UI (HTML/CSS/JS) as a string literal; line length doesn't
+# apply to that template the way it does to Python source.
+"src/mimir/server.py" = ["E501"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true

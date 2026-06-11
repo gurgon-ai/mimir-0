@@ -28,6 +28,13 @@ No Ollama, no GPU, no network needed — Mimir ships a mock provider and a stdli
 embedder so the core loop boots on literally Python + SQLite. For a real conversation with a
 local model, see [`docs/SETUP.md`](docs/SETUP.md).
 
+Prefer a browser? Point it at a local model and run the **reference web UI** (stdlib, zero deps —
+chat, the identity interview, and document ingest):
+
+```bash
+python -m mimir.server --config mimir.toml   # → http://127.0.0.1:8765
+```
+
 ## What makes it different
 
 Most memory libraries store text in a vector blob and retrieve by similarity. Mimir 0 adds:
