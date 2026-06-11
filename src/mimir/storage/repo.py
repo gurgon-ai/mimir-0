@@ -209,6 +209,35 @@ def delete_by_source(gateway: StorageGateway, source: str) -> int:
     return gateway.submit(_write)
 
 
+def set_identity_anchor(gateway: StorageGateway, key: str, value: str) -> None:
+    """Upsert a foundational identity anchor (name/operator/location/purpose, …).
+
+    Re-establishing an anchor updates it in place rather than duplicating — identity is a
+    single coherent record, not an accreting log.
+    """
+    now = time.time()
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "INSERT INTO identity (key, value, established_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
+            "established_at = excluded.established_at",
+            (key, value, now),
+        )
+
+    gateway.submit(_write)
+
+
+def get_identity_anchors(gateway: StorageGateway) -> dict[str, str]:
+    """All established identity anchors as a ``{key: value}`` map."""
+
+    def _read(conn: sqlite3.Connection) -> dict[str, str]:
+        rows = conn.execute("SELECT key, value FROM identity").fetchall()
+        return {r["key"]: r["value"] for r in rows}
+
+    return gateway.read(_read)
+
+
 def count_memories(gateway: StorageGateway, *, kind: MemoryKind | None = None) -> int:
     def _read(conn: sqlite3.Connection) -> int:
         if kind is None:

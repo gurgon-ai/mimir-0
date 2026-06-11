@@ -245,8 +245,10 @@ needs.
   itself.
 - **v0.1+ — cognition layers:** working memory, ~~self-model~~ _(landed: an evolving, generic
   self-model — the reasoning model authors a first-person identity grounded only in the store's
-  own operational signals, refreshed off the hot path and injected first, always-on)_, procedural
-  memory, entity graph, sleep/consolidation, inner council, the qualification battery.
+  own operational signals, refreshed off the hot path and injected first, always-on; bootstrapped
+  from the first boot by an **identity interview** that establishes universal anchors — name,
+  operator, location, purpose — interactively or from config)_, procedural memory, entity graph,
+  sleep/consolidation, inner council, the qualification battery.
 - **Adapters (separate extras/packages):** a reference HTTP server (+ streaming), an optional
   voice adapter, a demo UI, and example plugins (home-automation, etc.) that show the extension
   pattern without being core dependencies.

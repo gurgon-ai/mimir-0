@@ -13,6 +13,14 @@ text = "You are Mimir, a local-first assistant with an evidence-aware memory. Yo
 # (whoever speaks is then treated as the primary user).
 # primary_user = "alex"
 
+# Foundational identity anchors. Set them here for a non-interactive deployment, or leave them
+# out and run the interview: `python -m mimir.interview --config mimir.toml`. Either way they
+# ground the always-on self-model from the first boot.
+# name = "Mimir"
+# operator = "the Korpela household"
+# location = "a home server in Colorado"
+# purpose = "to remember, reflect, and assist the household"
+
 [embeddings]
 # "bootstrap" = stdlib locality-hashing (offline, zero deps, LEXICAL ONLY — not semantic).
 # "endpoint"  = real semantic embeddings via [roles.embed] (recommended for real use).

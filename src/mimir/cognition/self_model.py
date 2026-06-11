@@ -23,6 +23,7 @@ from ..prompts import SELF_MODEL_SYSTEM
 from ..storage.gateway import StorageGateway
 from ..storage.models import EvidenceTier, Memory, MemoryKind
 from ..storage.repo import count_memories, list_memories, recent_by_kind, save_memory
+from .identity import current_anchors, render_anchors
 
 log = logging.getLogger("mimir.self_model")
 
@@ -85,6 +86,9 @@ def synthesize_self_model(
     hot path (a self-model failure must never break the turn loop).
     """
     brief = build_brief(gather_signals(storage))
+    anchors = render_anchors(current_anchors(storage))
+    if anchors:
+        brief = f"Foundational identity (operator-established): {anchors}\n{brief}"
     text = model.chat(
         "reasoning",
         [

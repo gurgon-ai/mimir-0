@@ -130,6 +130,32 @@ The second turn recalls the first, attributed to its source and evidence tier.
 
 ---
 
+## 5a. Establishing identity (the init interview)
+
+A fresh Mimir has no history, so its self-model starts thin. Give it a foundational identity —
+its **name, who it serves, where it is, and its purpose** — either interactively or in config.
+
+Interactively (Mimir asks the questions it still needs):
+
+```bash
+python -m mimir.interview --config mimir.toml
+```
+
+Or declaratively in `mimir.toml` (auto-established at boot — good for headless deployments):
+
+```toml
+[identity]
+name = "Mimir"
+operator = "the Korpela household"
+location = "a home server in Colorado"
+purpose = "to remember, reflect, and assist the household"
+```
+
+These anchors are injected verbatim at the top of the always-on self-model every turn, so the
+foundational facts are reliably present, and they also seed the self-model's evolving narrative.
+From code you can drive your own interview with `brain.pending_identity_questions()` and
+`brain.establish_identity({...})`.
+
 ## 5b. Ingesting documents (v0.1)
 
 Give Mimir documents to recall from. Plain text and markdown work with **no extra dependencies**;
