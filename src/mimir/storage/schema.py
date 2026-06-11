@@ -55,6 +55,19 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "CREATE INDEX idx_memories_source ON memories(source)",
         ],
     ),
+    (
+        3,
+        [
+            # Identity anchors: foundational, operator-established identity facts (name, operator,
+            # location, purpose) that ground the always-on self-model from the very first boot,
+            # before any history exists. Key-value with upsert semantics — re-answering updates.
+            "CREATE TABLE identity ("
+            " key TEXT PRIMARY KEY,"
+            " value TEXT NOT NULL,"
+            " established_at REAL NOT NULL"
+            ")",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -80,4 +93,5 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
         "meta",
         "source",
     },
+    "identity": {"key", "value", "established_at"},
 }

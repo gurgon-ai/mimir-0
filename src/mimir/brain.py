@@ -21,6 +21,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .cognition.bake import bake
+from .cognition.identity import (
+    current_anchors,
+    establish_identity,
+    pending_questions,
+    render_anchors,
+)
 from .cognition.ingest import IngestResult, ingest_document
 from .cognition.self_model import synthesize_self_model
 from .cognition.sentinel import run_sentinel
@@ -97,6 +103,11 @@ class Mimir:
         self._last_sentinel_error: BaseException | None = None
         self._turn_count = 0
 
+        # Establish any identity anchors declared in config (idempotent upsert at boot), so a
+        # non-interactive deployment is grounded without running the interactive interview.
+        if config.identity_anchors:
+            establish_identity(self._storage, config.identity_anchors)
+
     @classmethod
     def from_config(cls, path: str) -> Mimir:
         """Construct from a ``mimir.toml`` path."""
@@ -115,7 +126,7 @@ class Mimir:
         candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY)
         retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
         note = latest_sentinel_note(self._storage, user)
-        self_model = latest_self_model(self._storage)
+        self_knowledge = self._compose_self_knowledge()
 
         # 2. Assemble the epistemic prompt.
         bundle = build_context(
@@ -126,7 +137,7 @@ class Mimir:
             sentinel_note=note,
             embed_mode=self._embedder.mode,
             budget_tokens=self.config.context_budget_tokens,
-            self_knowledge=self_model.text if self_model else None,
+            self_knowledge=self_knowledge,
         )
 
         # 3. Generate the reply through the model gateway.
@@ -177,6 +188,36 @@ class Mimir:
             target_tokens=target_tokens,
             overlap_tokens=overlap_tokens,
         )
+
+    # -- identity ---------------------------------------------------------------------
+
+    def establish_identity(self, answers: dict[str, str]) -> dict[str, str]:
+        """Record foundational identity anchors (name/operator/location/purpose, …).
+
+        The interactive interview (``python -m mimir.interview``) and config both flow through
+        here. Returns the full anchor set after the update. Anchors ground the always-on
+        self-model from the first boot, before any history exists.
+        """
+        return establish_identity(self._storage, answers)
+
+    def identity_anchors(self) -> dict[str, str]:
+        """The established identity anchors as a ``{key: value}`` map."""
+        return current_anchors(self._storage)
+
+    def pending_identity_questions(self) -> list[tuple[str, str]]:
+        """The ``(key, question)`` pairs the interview still needs answered."""
+        return pending_questions(self._storage)
+
+    def _compose_self_knowledge(self) -> str | None:
+        """The self-model section body: identity anchors (verbatim) + synthesized self-model.
+
+        Anchors go first and verbatim so foundational facts (name, purpose) are reliably present;
+        the synthesized paragraph adds the evolving narrative grounded in operational history.
+        """
+        anchors_text = render_anchors(current_anchors(self._storage))
+        self_model = latest_self_model(self._storage)
+        parts = [p for p in (anchors_text, self_model.text if self_model else None) if p]
+        return "\n\n".join(parts) if parts else None
 
     # -- self-model -------------------------------------------------------------------
 

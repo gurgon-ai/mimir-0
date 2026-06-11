@@ -49,6 +49,10 @@ class Config:
     # The owner whose statements earn the top evidence tier. If None, Mimir runs in
     # single-user mode and treats whoever speaks as the primary user (DESIGN §3b).
     primary_user: str | None = None
+    # Foundational identity anchors (name/operator/location/purpose), set declaratively here
+    # for non-interactive deployments. Re-established (upserted) at boot. The interview sets
+    # the same anchors interactively. See cognition/identity.py.
+    identity_anchors: dict[str, Any] = field(default_factory=dict)
     embed_mode: EmbeddingMode = EmbeddingMode.BOOTSTRAP
     embed_dim: int = 256
     # Per chat-turn token budget for the assembled prompt (context accounting, DESIGN §10).
@@ -122,6 +126,7 @@ def load_config(path: str | Path) -> Config:
     )
 
     identity_raw = raw.get("identity", {})
+    anchor_keys = ("name", "operator", "location", "purpose")
     config = Config(
         storage_path=str(storage["path"]),
         roles=_parse_roles(raw.get("roles", {})),
@@ -130,6 +135,9 @@ def load_config(path: str | Path) -> Config:
         primary_user=(
             str(identity_raw["primary_user"]) if "primary_user" in identity_raw else None
         ),
+        identity_anchors={
+            k: str(identity_raw[k]) for k in anchor_keys if k in identity_raw
+        },
         embed_mode=embed_mode,
         embed_dim=int(embeddings.get("dim", 256)),
         context_budget_tokens=int(raw.get("context", {}).get("budget_tokens", 4096)),
