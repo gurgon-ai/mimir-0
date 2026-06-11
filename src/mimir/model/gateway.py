@@ -13,6 +13,7 @@ thin role→model resolver, so cognition never touches scheduling concerns. Call
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 
 from ..config import RoleSpec
 from ..errors import ModelGatewayError
@@ -59,6 +60,15 @@ class ModelGateway:
         """Route a chat completion for ``role`` through the pool (retry/failover handled there)."""
         spec = self._role(role)
         return self._pool.chat(
+            spec.model, messages, spec.params, priority=self._priority(role, priority)
+        )
+
+    def chat_stream(
+        self, role: str, messages: list[Message], *, priority: Priority | None = None
+    ) -> Iterator[str]:
+        """Stream a chat completion for ``role`` through the pool (token-by-token)."""
+        spec = self._role(role)
+        return self._pool.chat_stream(
             spec.model, messages, spec.params, priority=self._priority(role, priority)
         )
 

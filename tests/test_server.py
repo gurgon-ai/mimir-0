@@ -46,6 +46,49 @@ def base_url(mock_config: Config) -> Iterator[str]:
         brain.close()
 
 
+def _sse(url: str, body: dict) -> tuple[str, dict | None]:
+    """POST and parse the SSE stream into (joined token text, introspect dict)."""
+    data = json.dumps(body).encode()
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        raw = r.read().decode("utf-8")
+    text, introspect = "", None
+    for block in raw.split("\n\n"):
+        if not block.strip():
+            continue
+        event, payload = "message", ""
+        for line in block.split("\n"):
+            if line.startswith("event:"):
+                event = line[6:].strip()
+            elif line.startswith("data:"):
+                payload += line[5:].strip()
+        if not payload:
+            continue
+        obj = json.loads(payload)
+        if event == "token":
+            text += obj["text"]
+        elif event == "done":
+            introspect = obj["introspect"]
+    return text, introspect
+
+
+def test_turn_stream_sse_recalls(base_url: str) -> None:
+    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "greg"})
+    text, introspect = _sse(
+        base_url + "/api/turn/stream", {"text": "What is my favorite color?", "user": "greg"}
+    )
+    assert "teal" in text.lower()  # streamed tokens reconstruct the reply
+    assert introspect is not None and introspect["source_count"] >= 1
+
+
+def test_turn_stream_missing_text_is_4xx(base_url: str) -> None:
+    status, data = _json("POST", base_url + "/api/turn/stream", {})
+    assert status == 400
+    assert "error" in data
+
+
 def test_index_serves_ui(base_url: str) -> None:
     status, html = _get_html(base_url + "/")
     assert status == 200

@@ -16,9 +16,10 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .cognition.bake import bake
 from .cognition.identity import (
@@ -165,6 +166,58 @@ class Mimir:
         self._maybe_refresh_self_model()
 
         return TurnResult(reply=reply, context=bundle, baked=baked)
+
+    def turn_stream(
+        self, text: str, user: str | None = None
+    ) -> Generator[str, None, dict[str, Any]]:
+        """Like ``turn`` but yields the reply token-by-token; returns the introspection dict.
+
+        The side effects (record access, bake, sentinel, self-model) run after the stream
+        completes, so a fully-consumed stream behaves exactly like ``turn``. If the consumer
+        abandons the stream early, the turn is treated as interrupted — nothing is baked. The
+        generator's *return value* (via ``StopIteration.value``) is ``context.introspect()``.
+        """
+        self._join_background()
+        self._turn_count += 1
+
+        query_vec = self._embedder.embed(text)
+        candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY)
+        retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
+        note = latest_sentinel_note(self._storage, user)
+        self_knowledge = self._compose_self_knowledge()
+        bundle = build_context(
+            query=text,
+            user=user,
+            identity=self.config.identity,
+            retrieved=retrieved,
+            sentinel_note=note,
+            embed_mode=self._embedder.mode,
+            budget_tokens=self.config.context_budget_tokens,
+            self_knowledge=self_knowledge,
+        )
+        messages = [
+            {"role": "system", "content": bundle.prompt},
+            {"role": "user", "content": text},
+        ]
+
+        chunks: list[str] = []
+        for delta in self._model.chat_stream("chat", messages):
+            chunks.append(delta)
+            yield delta
+        reply = "".join(chunks)
+
+        record_access(self._storage, bundle.retrieved_ids)
+        bake(
+            self._model,
+            self._storage,
+            self._embedder,
+            turn_text=text,
+            user=user,
+            primary_user=self.config.primary_user,
+        )
+        self._spawn_sentinel(user=user, turn_text=text, reply=reply)
+        self._maybe_refresh_self_model()
+        return bundle.introspect()
 
     # -- document ingestion (v0.1) ----------------------------------------------------
 
