@@ -243,7 +243,9 @@ needs.
   extra (`pypdf`), so the runtime contract holds. EPUB and *LLM compilation of documents into
   integrated, contradiction-resolved knowledge* remain later, optional layers — not the ingestion
   itself.
-- **v0.1+ — cognition layers:** working memory, ~~self-model~~ _(landed: an evolving, generic
+- **v0.1+ — cognition layers:** ~~working memory~~ _(landed: rolling cross-session salient
+  context — a capped recency log of recent exchanges plus a periodically compressed summary,
+  injected always-on just before the sentinel note)_, ~~self-model~~ _(landed: an evolving, generic
   self-model — the reasoning model authors a first-person identity grounded only in the store's
   own operational signals, refreshed off the hot path and injected first, always-on; bootstrapped
   from the first boot by a re-runnable **identity interview** that establishes eight universal
@@ -322,6 +324,6 @@ against a live local model. Both gateways are hardened (priority queue, batching
 retry/backoff, provider pool with health/failover). **v0.1 has begun**: document
 ingestion (`ingest()` for text + markdown in core, PDF behind the `[documents]` extra) and an
 evolving, generic **self-model** (identity authored from the store's own operational history,
-refreshed off the hot path, injected always-on). Still pre-alpha and evolving; the remaining
-cognition layers (working memory, procedural, entity graph, sleep/consolidation, inner council,
-qualification battery) are the road ahead.
+refreshed off the hot path, injected always-on) and working memory (rolling recent-context recency
++ compression). Still pre-alpha and evolving; the remaining cognition layers (procedural, entity
+graph, sleep/consolidation, inner council, qualification battery) are the road ahead.

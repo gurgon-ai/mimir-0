@@ -231,6 +231,10 @@ budget_tokens = 4096            # per-turn prompt budget for assembly + accounti
 [self_model]
 refresh_every = 5               # turns between self-model re-synthesis; 0 disables (seed only)
 
+[working_memory]
+refresh_every = 4               # turns between folding recent exchanges into the rolling summary;
+                                # 0 disables compression (recency-only)
+
 [provider]
 type = "ollama"                 # "ollama" | "mock"
 host = "http://localhost:11434" # ollama only
