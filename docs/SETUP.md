@@ -132,13 +132,17 @@ The second turn recalls the first, attributed to its source and evidence tier.
 
 ## 5a. Establishing identity (the init interview)
 
-A fresh Mimir has no history, so its self-model starts thin. Give it a foundational identity —
-its **name, who it serves, where it is, and its purpose** — either interactively or in config.
+A fresh Mimir has no history, so its self-model starts thin. Give it a foundational identity via
+**eight universal anchors**: `name`, `operator`, `location`, `purpose`, `values`, `scope`,
+`boundaries`, `voice`. (The first four are who/where/why; the rest set the operating frame —
+principles, responsibilities, hard limits, and tone — that the system can't derive on its own.)
 
-Interactively (Mimir asks the questions it still needs):
+Interactively (Mimir asks only the anchors it still needs):
 
 ```bash
 python -m mimir.interview --config mimir.toml
+# re-run any time to update existing answers:
+python -m mimir.interview --config mimir.toml --revise
 ```
 
 Or declaratively in `mimir.toml` (auto-established at boot — good for headless deployments):
@@ -149,12 +153,16 @@ name = "Mimir"
 operator = "the Korpela household"
 location = "a home server in Colorado"
 purpose = "to remember, reflect, and assist the household"
+values = "honesty, privacy, attributing knowledge to its source, admitting uncertainty"
+scope = "household memory, documents, and reasoning; not financial or medical advice"
+boundaries = "never fabricate facts, never expose private data outside the home"
+voice = "concise, plainspoken, evidence-backed"
 ```
 
 These anchors are injected verbatim at the top of the always-on self-model every turn, so the
 foundational facts are reliably present, and they also seed the self-model's evolving narrative.
-From code you can drive your own interview with `brain.pending_identity_questions()` and
-`brain.establish_identity({...})`.
+The interview is re-runnable (`--revise` re-asks all, Enter keeps each current value). From code,
+drive your own with `brain.pending_identity_questions()` and `brain.establish_identity({...})`.
 
 ## 5b. Ingesting documents (v0.1)
 

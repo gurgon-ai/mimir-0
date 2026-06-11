@@ -126,7 +126,9 @@ def load_config(path: str | Path) -> Config:
     )
 
     identity_raw = raw.get("identity", {})
-    anchor_keys = ("name", "operator", "location", "purpose")
+    anchor_keys = (
+        "name", "operator", "location", "purpose", "values", "scope", "boundaries", "voice"
+    )
     config = Config(
         storage_path=str(storage["path"]),
         roles=_parse_roles(raw.get("roles", {})),
