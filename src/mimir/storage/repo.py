@@ -269,6 +269,33 @@ def get_identity_anchors(gateway: StorageGateway) -> dict[str, str]:
     return gateway.read(_read)
 
 
+def prune_kind(gateway: StorageGateway, kind: MemoryKind, keep: int) -> int:
+    """Keep only the most recent ``keep`` rows of a kind; delete the rest. Returns rows removed.
+
+    Bounds the recency logs (e.g. EXCHANGE) so they never grow without limit.
+    """
+
+    def _write(conn: sqlite3.Connection) -> int:
+        cur = conn.execute(
+            "DELETE FROM memories WHERE kind = ? AND id NOT IN "
+            "(SELECT id FROM memories WHERE kind = ? ORDER BY created_at DESC, id DESC LIMIT ?)",
+            (kind.value, kind.value, keep),
+        )
+        return cur.rowcount
+
+    return gateway.submit(_write)
+
+
+def delete_kind(gateway: StorageGateway, kind: MemoryKind) -> int:
+    """Delete all rows of a kind (e.g. clear the EXCHANGE log after folding it into a summary)."""
+
+    def _write(conn: sqlite3.Connection) -> int:
+        cur = conn.execute("DELETE FROM memories WHERE kind = ?", (kind.value,))
+        return cur.rowcount
+
+    return gateway.submit(_write)
+
+
 def count_memories(gateway: StorageGateway, *, kind: MemoryKind | None = None) -> int:
     def _read(conn: sqlite3.Connection) -> int:
         if kind is None:

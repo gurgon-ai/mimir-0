@@ -142,6 +142,7 @@ def build_context(
     embed_mode: EmbeddingMode,
     budget_tokens: int,
     self_knowledge: str | None = None,
+    working_memory: str | None = None,
     extra_sections: list[Section] | None = None,
 ) -> ContextBundle:
     """Assemble the epistemic prompt for one turn. Pure: no I/O, no model calls.
@@ -179,6 +180,7 @@ def build_context(
 
     # Reserve budget for the always-present pieces, then give the rest to knowledge.
     self_model_tokens = self_model_section.admitted_tokens if self_model_section else 0
+    working_memory_tokens = estimate_tokens(working_memory) + 8 if working_memory else 0
     sentinel_tokens = (
         estimate_tokens(sentinel_note.text) + 8 if sentinel_note is not None else 0
     )
@@ -188,6 +190,7 @@ def build_context(
         budget_tokens
         - self_model_tokens
         - identity_section.admitted_tokens
+        - working_memory_tokens
         - sentinel_tokens
         - extra_reserved
         - _UNCERTAINTY_RESERVE,
@@ -210,7 +213,20 @@ def build_context(
     # v0 has one such layer (memory); each admitted fact counts as a source within it.
     source_count = len(retrieved_ids)
 
-    # 4. Sentinel note — the high-attention END slot (DESIGN §3e).
+    # 4. Working memory — rolling salient context, just before the end slot (DESIGN §3e).
+    if working_memory:
+        sections.append(
+            Section(
+                name="working_memory",
+                title="Recent context you're carrying (working memory):",
+                body=working_memory,
+                tier=SectionTier.MEDIUM,
+                requested_tokens=estimate_tokens(working_memory),
+                admitted_tokens=estimate_tokens(working_memory),
+            )
+        )
+
+    # 5. Sentinel note — the high-attention END slot (DESIGN §3e).
     if sentinel_note is not None:
         sections.append(
             Section(
@@ -223,7 +239,7 @@ def build_context(
             )
         )
 
-    # 5. Uncertainty gate — deterministic, zero model cost (DESIGN §3d).
+    # 6. Uncertainty gate — deterministic, zero model cost (DESIGN §3d).
     uncertainty_triggered = is_question(query) and source_count <= 1
     if uncertainty_triggered:
         flag = uncertainty_flag(source_count)

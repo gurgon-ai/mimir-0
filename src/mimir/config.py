@@ -60,6 +60,9 @@ class Config:
     # How often (in turns) the self-model is re-synthesized off the hot path. 0 disables it
     # (the seed identity is then the whole self-model). The first turn always seeds one.
     self_model_refresh_every: int = 5
+    # How often (in turns) working memory's rolling summary is re-synthesized (folding the
+    # accumulated exchanges). 0 disables compression (recency-only working memory).
+    working_memory_refresh_every: int = 4
 
     def validate(self) -> None:
         """Raise ``ConfigError`` loud on any unrunnable configuration."""
@@ -145,6 +148,9 @@ def load_config(path: str | Path) -> Config:
         context_budget_tokens=int(raw.get("context", {}).get("budget_tokens", 4096)),
         self_model_refresh_every=int(
             raw.get("self_model", {}).get("refresh_every", 5)
+        ),
+        working_memory_refresh_every=int(
+            raw.get("working_memory", {}).get("refresh_every", 4)
         ),
     )
     config.validate()

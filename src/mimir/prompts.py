@@ -33,6 +33,15 @@ SENTINEL_SYSTEM = (
     "Respond with the note text only."
 )
 
+WORKING_MEMORY_MARKER = "Update the working memory"
+WORKING_MEMORY_SYSTEM = (
+    f"{WORKING_MEMORY_MARKER} — a compact running summary of the recent conversation that carries "
+    "forward what is currently salient (open threads, the user's current focus, anything to keep "
+    "in mind next). Given the previous working memory and the latest exchanges below, write an "
+    "updated summary in three sentences or fewer. Keep concrete specifics, drop stale detail. "
+    "Respond with the summary text only."
+)
+
 SELF_MODEL_MARKER = "Write a brief self-description"
 SELF_MODEL_SYSTEM = (
     f"{SELF_MODEL_MARKER} for an AI memory system, in the first person, grounded ONLY in the "

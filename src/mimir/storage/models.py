@@ -66,6 +66,8 @@ class MemoryKind(Enum):
     MEMORY = "memory"
     SENTINEL_NOTE = "sentinel_note"
     SELF_MODEL = "self_model"
+    EXCHANGE = "exchange"  # a raw recent turn, for working-memory recency (capped, then folded)
+    WORKING_MEMORY = "working_memory"  # the rolling compressed summary of recent context
 
 
 @dataclass(slots=True)

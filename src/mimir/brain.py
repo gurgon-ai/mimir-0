@@ -31,6 +31,11 @@ from .cognition.identity import (
 from .cognition.ingest import IngestResult, ingest_document
 from .cognition.self_model import synthesize_self_model
 from .cognition.sentinel import run_sentinel
+from .cognition.working_memory import (
+    current_working_memory,
+    record_exchange,
+    synthesize_working_memory,
+)
 from .config import Config, ProviderSpec, load_config
 from .context.build import ContextBundle, build_context
 from .embed.base import Embedder, EmbeddingMode
@@ -128,6 +133,7 @@ class Mimir:
         retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
         note = latest_sentinel_note(self._storage, user)
         self_knowledge = self._compose_self_knowledge()
+        working_memory = current_working_memory(self._storage)
 
         # 2. Assemble the epistemic prompt.
         bundle = build_context(
@@ -139,6 +145,7 @@ class Mimir:
             embed_mode=self._embedder.mode,
             budget_tokens=self.config.context_budget_tokens,
             self_knowledge=self_knowledge,
+            working_memory=working_memory,
         )
 
         # 3. Generate the reply through the model gateway.
@@ -160,10 +167,12 @@ class Mimir:
             user=user,
             primary_user=self.config.primary_user,
         )
+        record_exchange(self._storage, user=user, user_text=text, reply=reply)
 
-        # 5. Fire the sentinel off the hot path, and refresh the self-model on cadence.
+        # 5. Background cognition off the hot path: sentinel, self-model, working memory.
         self._spawn_sentinel(user=user, turn_text=text, reply=reply)
         self._maybe_refresh_self_model()
+        self._maybe_refresh_working_memory()
 
         return TurnResult(reply=reply, context=bundle, baked=baked)
 
@@ -185,6 +194,7 @@ class Mimir:
         retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
         note = latest_sentinel_note(self._storage, user)
         self_knowledge = self._compose_self_knowledge()
+        working_memory = current_working_memory(self._storage)
         bundle = build_context(
             query=text,
             user=user,
@@ -194,6 +204,7 @@ class Mimir:
             embed_mode=self._embedder.mode,
             budget_tokens=self.config.context_budget_tokens,
             self_knowledge=self_knowledge,
+            working_memory=working_memory,
         )
         messages = [
             {"role": "system", "content": bundle.prompt},
@@ -215,8 +226,10 @@ class Mimir:
             user=user,
             primary_user=self.config.primary_user,
         )
+        record_exchange(self._storage, user=user, user_text=text, reply=reply)
         self._spawn_sentinel(user=user, turn_text=text, reply=reply)
         self._maybe_refresh_self_model()
+        self._maybe_refresh_working_memory()
         return bundle.introspect()
 
     # -- document ingestion (v0.1) ----------------------------------------------------
@@ -301,6 +314,30 @@ class Mimir:
                     )
 
             self._start_background("mimir-self-model", _run)
+
+    # -- working memory ---------------------------------------------------------------
+
+    def refresh_working_memory(self) -> Memory | None:
+        """Fold the accumulated exchanges into the rolling working-memory summary now (sync)."""
+        return synthesize_working_memory(self._model, self._storage)
+
+    def _maybe_refresh_working_memory(self) -> None:
+        every = self.config.working_memory_refresh_every
+        if every <= 0:
+            return
+        if self._turn_count % every == 0:
+
+            def _run() -> None:
+                try:
+                    synthesize_working_memory(self._model, self._storage)
+                except BaseException as exc:  # logged downgrade — never touches the turn
+                    log.error(
+                        "working-memory refresh failed (off the hot path; turn unaffected): %s",
+                        exc,
+                        exc_info=True,
+                    )
+
+            self._start_background("mimir-working-memory", _run)
 
     # -- background plumbing ----------------------------------------------------------
 

@@ -21,6 +21,7 @@ from ...prompts import (
     RECALL_OPEN,
     SELF_MODEL_MARKER,
     SENTINEL_MARKER,
+    WORKING_MEMORY_MARKER,
 )
 from ..provider import Message
 
@@ -43,6 +44,8 @@ class MockProvider:
 
         if BAKE_MARKER in system:
             return self._bake(user)
+        if WORKING_MEMORY_MARKER in system:
+            return self._working_memory(user)
         if SELF_MODEL_MARKER in system:
             return self._self_model(user)
         if SENTINEL_MARKER in system:
@@ -69,6 +72,12 @@ class MockProvider:
         if not stripped or stripped.endswith("?"):
             return json.dumps({"facts": []})
         return json.dumps({"facts": [stripped]})
+
+    @staticmethod
+    def _working_memory(brief: str) -> str:
+        """Deterministic rolling summary referencing how much context it folded."""
+        exchanges = brief.count("you:")
+        return f"Working summary: tracking {exchanges} recent exchange(s) of context."
 
     @staticmethod
     def _self_model(brief: str) -> str:

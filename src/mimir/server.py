@@ -31,6 +31,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .brain import Mimir
 from .cognition.self_model import gather_signals
+from .cognition.working_memory import current_working_memory
 from .errors import IngestError, MimirError
 from .storage.models import Memory, MemoryKind
 from .storage.repo import browse_memories, count_memories, latest_self_model
@@ -240,8 +241,10 @@ class _Handler(BaseHTTPRequestHandler):
             signals = gather_signals(brain._storage)
             self_model = latest_self_model(brain._storage)
             anchors = brain.identity_anchors()
+            working_memory = current_working_memory(brain._storage)
         return {
             "self_model": self_model.text if self_model else None,
+            "working_memory": working_memory,
             "anchors": anchors,
             "stats": {
                 "total": signals.total_memories,
@@ -402,6 +405,8 @@ _HTML = """<!doctype html>
       <h2>Self-model</h2>
       <div class="selfmodel" id="selfModel">—</div>
       <div class="stats" id="mindStats"></div>
+      <h2>Working memory</h2>
+      <div class="selfmodel" id="workingMemory">—</div>
       <h2>Recent reflections</h2>
       <div id="reflections"></div>
     </div>
@@ -565,6 +570,7 @@ async function loadMind() {
   try {
     const m = await api("GET", "/api/mind");
     $("selfModel").textContent = m.self_model || "(not yet synthesized — keep talking)";
+    $("workingMemory").textContent = m.working_memory || "(empty)";
     const s = m.stats || {};
     const tiers = Object.entries(s.by_tier || {}).map(([k,v]) => `${k}: ${v}`).join(", ") || "none";
     $("mindStats").innerHTML =
