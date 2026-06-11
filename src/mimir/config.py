@@ -67,6 +67,9 @@ class Config:
     # facts to inject. hops=0 disables graph retrieval (triples are still extracted/stored).
     graph_hops: int = 2
     graph_max_facts: int = 8
+    # How often (in turns) consolidation (sleep) runs off the hot path. 0 = manual only
+    # (call brain.sleep() or the web UI button / scheduler).
+    sleep_every: int = 0
 
     def validate(self) -> None:
         """Raise ``ConfigError`` loud on any unrunnable configuration."""
@@ -158,6 +161,7 @@ def load_config(path: str | Path) -> Config:
         ),
         graph_hops=int(raw.get("entity_graph", {}).get("hops", 2)),
         graph_max_facts=int(raw.get("entity_graph", {}).get("max_facts", 8)),
+        sleep_every=int(raw.get("sleep", {}).get("every", 0)),
     )
     config.validate()
     return config

@@ -138,6 +138,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._establish(body))
             elif route == "/api/ingest":
                 self._send_json(self._ingest(body))
+            elif route == "/api/sleep":
+                self._send_json(self._sleep())
             else:
                 self._send_json({"error": "not found"}, status=404)
         except json.JSONDecodeError:
@@ -243,6 +245,17 @@ class _Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
 
+    def _sleep(self) -> dict[str, Any]:
+        with self.server.brain_lock:
+            report = self.server.brain.sleep()
+        return {
+            "deduped": report.deduped,
+            "decayed": report.decayed,
+            "archived": report.archived,
+            "contradictions_resolved": report.contradictions_resolved,
+            "total_changes": report.total_changes,
+        }
+
     def _mind(self) -> dict[str, Any]:
         brain = self.server.brain
         with self.server.brain_lock:
@@ -299,6 +312,7 @@ def _memory_to_dict(mem: Memory) -> dict[str, Any]:
         "source": mem.source,
         "user": mem.user,
         "access_count": mem.access_count,
+        "archived": mem.archived,
         "created_at": mem.created_at,
     }
 
@@ -433,6 +447,8 @@ _HTML = """<!doctype html>
       <h2>Self-model</h2>
       <div class="selfmodel" id="selfModel">—</div>
       <div class="stats" id="mindStats"></div>
+      <button class="secondary" id="sleepBtn" type="button">Consolidate now</button>
+      <div id="sleepResult" class="hint"></div>
       <h2>Working memory</h2>
       <div class="selfmodel" id="workingMemory">—</div>
       <h2>Recent reflections</h2>
@@ -640,6 +656,7 @@ async function loadMemories() {
       add("tier", m.evidence_tier);
       if (m.provenance) add("", m.provenance);
       if (m.user) add("", "user: " + m.user);
+      if (m.archived) add("", "archived");
       add("", "conf " + m.confidence); add("", "sal " + m.salience);
       d.appendChild(tags); list.appendChild(d);
     });
@@ -663,6 +680,15 @@ async function loadGraph() {
     });
   } catch (e) { $("graphList").innerHTML = "error: " + e.message; }
 }
+
+$("sleepBtn").addEventListener("click", async () => {
+  $("sleepResult").textContent = "Consolidating…";
+  try {
+    const r = await api("POST", "/api/sleep");
+    $("sleepResult").textContent = `Deduped ${r.deduped} · decayed ${r.decayed} · archived ${r.archived} · contradictions ${r.contradictions_resolved}.`;
+    loadMind(); refreshState();
+  } catch (e) { $("sleepResult").textContent = "Error: " + e.message; }
+});
 
 $("memKind").addEventListener("change", loadMemories);
 $("memQuery").addEventListener("input", () => { clearTimeout(window._mt); window._mt = setTimeout(loadMemories, 250); });

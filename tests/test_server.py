@@ -161,6 +161,15 @@ def test_graph_endpoint_lists_connections(base_url: str) -> None:
     assert mind["stats"]["triples"] >= 1
 
 
+def test_sleep_endpoint_runs_consolidation(base_url: str) -> None:
+    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "g"})
+    status, data = _json("POST", base_url + "/api/sleep", {})
+    assert status == 200
+    assert {"deduped", "decayed", "archived", "contradictions_resolved", "total_changes"} <= set(
+        data
+    )
+
+
 def test_memories_bad_kind_is_4xx(base_url: str) -> None:
     status, data = _json("GET", base_url + "/api/memories?kind=bogus")
     assert status == 400

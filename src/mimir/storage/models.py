@@ -92,6 +92,9 @@ class Memory:
     created_at: float = 0.0
     last_accessed: float = 0.0
     access_count: int = 0
+    # Archived by consolidation: excluded from active recall, kept in the store. Archiving is
+    # not disbelieving — a resurfaced archived memory is still trusted (DESIGN §3c).
+    archived: bool = False
     id: int | None = None
     # Free-form extension bag, serialized to JSON. Kept tiny in v0 (DESIGN: resist breadth).
     meta: dict[str, str] = field(default_factory=dict)

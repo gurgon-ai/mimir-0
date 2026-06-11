@@ -32,6 +32,7 @@ from .cognition.identity import (
 from .cognition.ingest import IngestResult, ingest_document
 from .cognition.self_model import synthesize_self_model
 from .cognition.sentinel import run_sentinel
+from .cognition.sleep import SleepReport, consolidate
 from .cognition.working_memory import (
     current_working_memory,
     record_exchange,
@@ -176,6 +177,7 @@ class Mimir:
         self._spawn_sentinel(user=user, turn_text=text, reply=reply)
         self._maybe_refresh_self_model()
         self._maybe_refresh_working_memory()
+        self._maybe_sleep()
 
         return TurnResult(reply=reply, context=bundle, baked=baked)
 
@@ -235,6 +237,7 @@ class Mimir:
         self._spawn_sentinel(user=user, turn_text=text, reply=reply)
         self._maybe_refresh_self_model()
         self._maybe_refresh_working_memory()
+        self._maybe_sleep()
         return bundle.introspect()
 
     def _connected_facts(self, query: str, user: str | None) -> list[str]:
@@ -356,6 +359,29 @@ class Mimir:
                     )
 
             self._start_background("mimir-working-memory", _run)
+
+    # -- sleep / consolidation --------------------------------------------------------
+
+    def sleep(self) -> SleepReport:
+        """Run a consolidation pass now (dedup, decay, archive, contradiction resolution)."""
+        return consolidate(self._storage)
+
+    def _maybe_sleep(self) -> None:
+        every = self.config.sleep_every
+        if every <= 0 or self._turn_count % every != 0:
+            return
+
+        def _run() -> None:
+            try:
+                consolidate(self._storage)
+            except BaseException as exc:  # logged downgrade — never touches the turn
+                log.error(
+                    "consolidation failed (off the hot path; turn unaffected): %s",
+                    exc,
+                    exc_info=True,
+                )
+
+        self._start_background("mimir-sleep", _run)
 
     # -- background plumbing ----------------------------------------------------------
 

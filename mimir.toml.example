@@ -51,6 +51,12 @@ refresh_every = 4
 hops = 2
 max_facts = 8
 
+[sleep]
+# How often (in turns) consolidation runs off the hot path: dedup, salience/confidence decay,
+# archival of stale provisionals, contradiction resolution. 0 = manual only (brain.sleep() or the
+# web UI "Consolidate now" button, or an external scheduler / nightly cron).
+every = 0
+
 [provider]
 # "ollama" talks to a local Ollama server with stdlib HTTP (no extra deps).
 # "mock" is a deterministic, offline stand-in for tests/demos (needs no model server).

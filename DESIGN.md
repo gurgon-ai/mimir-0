@@ -252,8 +252,10 @@ needs.
   anchors — name, operator, location, purpose, values, scope, boundaries, voice — interactively
   or from config)_, procedural memory, ~~entity graph~~ _(landed: subject–relation–object triples
   extracted at bake time, deduped, retrieved by 1–2 hop traversal seeded on the query's entities
-  and injected as a distinct connected-facts layer)_, sleep/consolidation, inner council, the
-  qualification battery.
+  and injected as a distinct connected-facts layer)_, ~~sleep/consolidation~~ _(landed: a
+  deterministic maintenance pass — dedup, salience/confidence decay with the death-spiral
+  guard, archival of low-salience provisionals, and conservative contradiction resolution over
+  functional graph relations)_, inner council, the qualification battery.
 - **Adapters (separate extras/packages):** ~~a reference HTTP server~~ _(landed: a stdlib,
   zero-dependency reference web server + single-page UI — chat, the identity interview, document
   ingest; `python -m mimir.server`)_, streaming, an optional voice adapter, and example plugins
@@ -327,6 +329,6 @@ retry/backoff, provider pool with health/failover). **v0.1 has begun**: document
 ingestion (`ingest()` for text + markdown in core, PDF behind the `[documents]` extra) and an
 evolving, generic **self-model** (identity authored from the store's own operational history,
 refreshed off the hot path, injected always-on), working memory (rolling recency + compression),
-and an entity graph (subject–relation–object triples with 1–2 hop traversal). Still pre-alpha and
-evolving; the remaining cognition layers (procedural memory, sleep/consolidation, inner council,
-qualification battery) are the road ahead.
+an entity graph (subject–relation–object triples with 1–2 hop traversal), and sleep/consolidation
+(dedup, decay, archival, contradiction resolution). Still pre-alpha and evolving; the remaining
+cognition layers (procedural memory, inner council, qualification battery) are the road ahead.
