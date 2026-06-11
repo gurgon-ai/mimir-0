@@ -170,6 +170,16 @@ def test_sleep_endpoint_runs_consolidation(base_url: str) -> None:
     )
 
 
+def test_council_endpoint_returns_positions_and_verdict(base_url: str) -> None:
+    status, data = _json(
+        "POST", base_url + "/api/council", {"question": "Breadth or depth first?"}
+    )
+    assert status == 200
+    assert data["verdict"]
+    assert len(data["positions"]) >= 3
+    assert all({"persona", "model", "text"} <= set(p) for p in data["positions"])
+
+
 def test_memories_bad_kind_is_4xx(base_url: str) -> None:
     status, data = _json("GET", base_url + "/api/memories?kind=bogus")
     assert status == 400

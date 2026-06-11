@@ -35,6 +35,37 @@ SENTINEL_SYSTEM = (
     "Respond with the note text only."
 )
 
+# --- inner council (adversarial deliberation, DESIGN §0.4/§4/§5) -------------------------
+COUNCIL_PERSONA_MARKER = "inner council persona:"
+COUNCIL_SYNTH_MARKER = "Synthesize the inner council"
+
+# Generic, domain-neutral adversarial stances. The roster is universal — deployment-specific
+# personas (if ever wanted) would register as an extension, never live in core.
+COUNCIL_PERSONAS: list[tuple[str, str]] = [
+    ("skeptic", "Challenge the assumptions and demand evidence; surface what could be wrong."),
+    ("optimist", "Find the genuine upside and what could go right; argue for the opportunity."),
+    ("pragmatist", "Focus on what is actionable and feasible now; cut to the practical path."),
+    ("analyst", "Break it down systematically; weigh the trade-offs and structure the decision."),
+    ("contrarian", "Argue against the apparent consensus; play devil's advocate in good faith."),
+]
+
+
+def council_persona_system(name: str, stance: str) -> str:
+    """The system prompt that gives one council voice its stance (marker lets the mock route)."""
+    return (
+        f"[{COUNCIL_PERSONA_MARKER} {name}] You are the {name} in Mimir's inner council, "
+        f"deliberating an open question alongside other voices. {stance} State your position in "
+        "two to four sentences; engage critically and don't hedge."
+    )
+
+
+COUNCIL_SYNTH_SYSTEM = (
+    f"{COUNCIL_SYNTH_MARKER} positions below into a balanced verdict on the question. Note where "
+    "the voices agree and where they genuinely conflict, then give your synthesized conclusion in "
+    "a short paragraph. Respond with the verdict only."
+)
+
+
 WORKING_MEMORY_MARKER = "Update the working memory"
 WORKING_MEMORY_SYSTEM = (
     f"{WORKING_MEMORY_MARKER} — a compact running summary of the recent conversation that carries "
