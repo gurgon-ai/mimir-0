@@ -12,6 +12,7 @@ that a baked memory is retrieved, attributed, and surfaced in a later turn.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 
 from ...embed.locality import LocalityHashEmbedder
 from ...prompts import (
@@ -47,6 +48,14 @@ class MockProvider:
         if SENTINEL_MARKER in system:
             return self._reflect(user)
         return self._reply(system, user)
+
+    def chat_stream(
+        self, model: str, messages: list[Message], params: dict[str, object]
+    ) -> Iterator[str]:
+        """Stream the same deterministic reply, word by word (so the UI streaming path works)."""
+        reply = self.chat(model, messages, params)
+        for i, word in enumerate(reply.split(" ")):
+            yield word if i == 0 else " " + word
 
     def embed(self, model: str, texts: list[str]) -> list[list[float]]:
         return [self._embedder.embed(t) for t in texts]

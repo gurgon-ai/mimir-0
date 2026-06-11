@@ -25,7 +25,7 @@ import logging
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import TypeVar
 
@@ -36,6 +36,17 @@ from .provider import Message, Provider
 log = logging.getLogger("mimir.model.pool")
 
 R = TypeVar("R")
+
+
+def _provider_stream(
+    provider: Provider, model: str, messages: list[Message], params: dict[str, object]
+) -> Iterator[str]:
+    """Stream from a provider, falling back to a single-shot ``chat`` if it can't stream."""
+    stream = getattr(provider, "chat_stream", None)
+    if stream is not None:
+        yield from stream(model, messages, params)
+    else:
+        yield provider.chat(model, messages, params)
 
 
 @dataclass
@@ -85,6 +96,60 @@ class ProviderPool:
         self, model: str, texts: list[str], *, priority: Priority
     ) -> list[list[float]]:
         return self._route(priority, lambda p: p.embed(model, texts), "embed")
+
+    def chat_stream(
+        self, model: str, messages: list[Message], params: dict[str, object], *, priority: Priority
+    ) -> Iterator[str]:
+        """Stream a chat completion from a healthy endpoint.
+
+        Failover happens only *before the first token* (peeking it). Once a stream has started
+        we are committed to that endpoint — a mid-stream failure propagates rather than silently
+        restarting on another backend (which would duplicate output). No mid-stream retry.
+        """
+        with self._lock:
+            self._stats["calls"] += 1
+        candidates = self._candidates(priority)
+        if not candidates:
+            with self._lock:
+                self._stats["transient_fails"] += 1
+            raise ProviderError(
+                "no available provider endpoint for chat stream (all saturated); deferring",
+                transient=True,
+            )
+
+        last_exc: ProviderError | None = None
+        for index, (endpoint, _clamp) in enumerate(candidates):
+            gen = _provider_stream(endpoint.provider, model, messages, params)
+            try:
+                first = next(gen)
+            except StopIteration:
+                self._record_success(endpoint)
+                return
+            except ProviderError as exc:
+                self._record_failure(endpoint)
+                last_exc = exc
+                if not exc.transient:
+                    raise
+                continue  # failed before any token — safe to try the next endpoint
+            except Exception as exc:
+                self._record_failure(endpoint)
+                raise ProviderError(f"{endpoint.name}: {type(exc).__name__}: {exc}") from exc
+
+            if index > 0:
+                with self._lock:
+                    self._stats["failovers"] += 1
+            self._record_success(endpoint)
+            with self._lock:
+                self._stats["ok"] += 1
+            yield first
+            yield from gen  # remaining tokens; a mid-stream error propagates as-is
+            return
+
+        with self._lock:
+            self._stats["transient_fails"] += 1
+        raise ProviderError(
+            "all provider endpoint(s) failed for chat stream; deferring", transient=True
+        ) from last_exc
 
     def get_stats(self) -> dict[str, object]:
         with self._lock:

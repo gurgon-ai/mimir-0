@@ -14,6 +14,7 @@ import json
 import logging
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 from typing import Any
 
 from ...errors import ProviderError
@@ -44,6 +45,50 @@ class OllamaProvider:
             raise ProviderError(
                 f"unexpected /api/chat response shape from Ollama: {data!r}"
             ) from exc
+
+    def chat_stream(
+        self, model: str, messages: list[Message], params: dict[str, Any]
+    ) -> Iterator[str]:
+        """Stream a chat completion: Ollama's ``stream=true`` newline-delimited JSON deltas."""
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "options": _to_options(params),
+        }
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self._host}/api/chat",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            resp = urllib.request.urlopen(req, timeout=self._timeout)
+        except urllib.error.HTTPError as exc:
+            transient = exc.code >= 500 or exc.code in (404, 422)
+            raise ProviderError(
+                f"Ollama returned HTTP {exc.code} for /api/chat (stream)", transient=transient
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise ProviderError(
+                f"could not reach Ollama at {self._host} ({exc.reason}). Is it running?",
+                transient=True,
+            ) from exc
+        with resp:
+            for raw_line in resp:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue  # skip a malformed keep-alive line; the stream continues
+                content = (obj.get("message") or {}).get("content")
+                if content:
+                    yield content
+                if obj.get("done"):
+                    break
 
     def embed(self, model: str, texts: list[str]) -> list[list[float]]:
         payload = {"model": model, "input": texts}

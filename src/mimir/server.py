@@ -117,13 +117,17 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"error": str(exc)}, status=500)
 
     def do_POST(self) -> None:  # noqa: N802
+        route = urlparse(self.path).path
+        if route == "/api/turn/stream":
+            self._turn_stream()  # manages its own (streaming) response
+            return
         try:
             body = self._read_json()
-            if self.path == "/api/turn":
+            if route == "/api/turn":
                 self._send_json(self._turn(body))
-            elif self.path == "/api/identity":
+            elif route == "/api/identity":
                 self._send_json(self._establish(body))
-            elif self.path == "/api/ingest":
+            elif route == "/api/ingest":
                 self._send_json(self._ingest(body))
             else:
                 self._send_json({"error": "not found"}, status=404)
@@ -181,6 +185,54 @@ class _Handler(BaseHTTPRequestHandler):
             "chunks_written": result.chunks_written,
             "chunks_replaced": result.chunks_replaced,
         }
+
+    def _turn_stream(self) -> None:
+        """Server-Sent-Events stream of a turn: token events, then a done event with introspect.
+
+        Manages its own response (it can't use ``_send_json``). Validation errors are sent as a
+        JSON 400 *before* the stream starts; once streaming, a failure is sent as an error event.
+        """
+        try:
+            body = self._read_json()
+            text = str(body.get("text", "")).strip()
+            if not text:
+                self._send_json({"error": "'text' is required"}, status=400)
+                return
+            user = body.get("user") or None
+        except (json.JSONDecodeError, ValueError) as exc:
+            self._send_json({"error": str(exc)}, status=400)
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+
+        def emit(event: str, data: Any) -> None:
+            self.wfile.write(f"event: {event}\ndata: {json.dumps(data)}\n\n".encode())
+            self.wfile.flush()
+
+        try:
+            with self.server.brain_lock:
+                stream = self.server.brain.turn_stream(text, user=user)
+                while True:
+                    try:
+                        token = next(stream)
+                    except StopIteration as stop:
+                        self.server.brain.wait_for_sentinel()
+                        emit("done", {"introspect": stop.value or {}})
+                        break
+                    emit("token", {"text": token})
+        except (BrokenPipeError, ConnectionResetError):
+            return  # the client went away mid-stream; the turn is interrupted
+        except Exception as exc:
+            log.exception("turn stream failed")
+            try:
+                emit("error", {"error": str(exc)})
+            except OSError:
+                pass
 
     def _mind(self) -> dict[str, Any]:
         brain = self.server.brain
@@ -399,6 +451,36 @@ function addMsg(who, body, meta) {
   if (meta) { const m = document.createElement("div"); m.className = "meta"; m.textContent = meta; div.appendChild(m); }
   $("log").appendChild(div);
   $("log").scrollTop = $("log").scrollHeight;
+  return div;
+}
+
+async function streamTurn(text) {
+  const bubble = addMsg("mimir", "");
+  const body = bubble.querySelector(".body");
+  const resp = await fetch("/api/turn/stream", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, user: "operator" }) });
+  if (!resp.ok) { const e = await resp.json().catch(() => ({ error: "HTTP " + resp.status })); throw new Error(e.error); }
+  const reader = resp.body.getReader(); const dec = new TextDecoder();
+  let buf = "", introspect = null;
+  while (true) {
+    const { value, done } = await reader.read(); if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\\n\\n")) >= 0) {
+      const evt = buf.slice(0, idx); buf = buf.slice(idx + 2);
+      let ev = "message", data = "";
+      evt.split("\\n").forEach(l => { if (l.startsWith("event:")) ev = l.slice(6).trim(); else if (l.startsWith("data:")) data += l.slice(5).trim(); });
+      if (!data) continue;
+      let obj; try { obj = JSON.parse(data); } catch (_) { continue; }
+      if (ev === "token") { body.textContent += obj.text; $("log").scrollTop = $("log").scrollHeight; }
+      else if (ev === "done") { introspect = obj.introspect; }
+      else if (ev === "error") { body.textContent += (body.textContent ? "\\n" : "") + "[error] " + obj.error; }
+    }
+  }
+  if (introspect) {
+    const m = document.createElement("div"); m.className = "meta";
+    m.textContent = `sources: ${introspect.source_count} · ${introspect.embed_mode}` + (introspect.uncertainty_triggered ? " · ⚠ thin evidence" : "");
+    bubble.appendChild(m);
+  }
 }
 
 async function refreshState() {

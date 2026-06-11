@@ -116,3 +116,41 @@ def test_embed_routes_through_pool() -> None:
     pool = ProviderPool([("A", p)], sleep=_noop_sleep)
     out = pool.embed("m", ["x", "y"], priority=Priority.USER_ADJACENT)
     assert out == [[1.0, 0.0], [1.0, 0.0]]
+
+
+class StreamFake:
+    """A provider that streams tokens."""
+
+    def __init__(self, name: str, tokens: list[str]) -> None:
+        self.name = name
+        self.tokens = tokens
+
+    def chat(self, model: str, messages: list[Message], params: dict[str, object]) -> str:
+        return "".join(self.tokens)
+
+    def chat_stream(self, model: str, messages: list[Message], params: dict[str, object]):
+        yield from self.tokens
+
+    def embed(self, model: str, texts: list[str]) -> list[list[float]]:
+        return [[0.0] for _ in texts]
+
+
+def test_chat_stream_yields_tokens() -> None:
+    p = StreamFake("S", ["a", "b", "c"])
+    pool = ProviderPool([("S", p)], sleep=_noop_sleep)
+    assert list(pool.chat_stream("m", [], {}, priority=Priority.CHAT_CRITICAL)) == ["a", "b", "c"]
+
+
+def test_chat_stream_falls_back_to_oneshot() -> None:
+    # FakeProvider has no chat_stream → the pool yields its single-shot reply once.
+    p = FakeProvider("A", reply="hello world")
+    pool = ProviderPool([("A", p)], sleep=_noop_sleep)
+    assert list(pool.chat_stream("m", [], {}, priority=Priority.CHAT_CRITICAL)) == ["hello world"]
+
+
+def test_chat_stream_fails_over_before_first_token() -> None:
+    a = FakeProvider("A", fail_times=10, transient=True)  # raises on the first token
+    b = StreamFake("B", ["from-", "b"])
+    pool = ProviderPool([("A", a), ("B", b)], max_retries=0, sleep=_noop_sleep)
+    out = "".join(pool.chat_stream("m", [], {}, priority=Priority.USER_ADJACENT))
+    assert out == "from-b"
