@@ -16,6 +16,7 @@ from .models import (
     EvidenceTier,
     Memory,
     MemoryKind,
+    Triple,
     blob_to_embedding,
     embedding_to_blob,
 )
@@ -305,5 +306,123 @@ def count_memories(gateway: StorageGateway, *, kind: MemoryKind | None = None) -
                 "SELECT COUNT(*) FROM memories WHERE kind = ?", (kind.value,)
             ).fetchone()
         return int(row[0])
+
+    return gateway.read(_read)
+
+
+# -- entity graph (triples) -----------------------------------------------------------
+
+_T_COLUMNS = "id, subject, relation, object, user, provenance, confidence, created_at"
+
+
+def _row_to_triple(row: sqlite3.Row) -> Triple:
+    return Triple(
+        id=row["id"],
+        subject=row["subject"],
+        relation=row["relation"],
+        object=row["object"],
+        user=row["user"],
+        provenance=row["provenance"],
+        confidence=row["confidence"],
+        created_at=row["created_at"],
+    )
+
+
+def save_triple(gateway: StorageGateway, triple: Triple) -> int:
+    """Persist a triple, deduped case-insensitively. Returns its row id (0 if a duplicate)."""
+    if triple.created_at == 0.0:
+        triple.created_at = time.time()
+
+    def _write(conn: sqlite3.Connection) -> int:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO triples "
+            "(subject, relation, object, user, provenance, confidence, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                triple.subject,
+                triple.relation,
+                triple.object,
+                triple.user,
+                triple.provenance,
+                triple.confidence,
+                triple.created_at,
+            ),
+        )
+        # rowcount, not lastrowid: an IGNORE'd duplicate leaves lastrowid at the previous row.
+        return int(cur.lastrowid or 0) if cur.rowcount > 0 else 0
+
+    triple.id = gateway.submit(_write)
+    return triple.id
+
+
+def all_entities(gateway: StorageGateway, *, limit: int = 1000) -> list[str]:
+    """The distinct entity nodes (subjects ∪ objects), for matching against a query."""
+
+    def _read(conn: sqlite3.Connection) -> list[str]:
+        rows = conn.execute(
+            "SELECT subject FROM triples UNION SELECT object FROM triples LIMIT ?", (limit,)
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    return gateway.read(_read)
+
+
+def traverse_from_entities(
+    gateway: StorageGateway,
+    entities: list[str],
+    *,
+    user: str | None = None,
+    limit: int = 20,
+) -> list[Triple]:
+    """Triples touching any of ``entities`` (as subject or object) — one hop, best-confidence."""
+    keys = [e.lower() for e in entities if e.strip()]
+    if not keys:
+        return []
+
+    def _read(conn: sqlite3.Connection) -> list[Triple]:
+        ph = ",".join("?" * len(keys))
+        sql = (
+            f"SELECT {_T_COLUMNS} FROM triples "
+            f"WHERE (lower(subject) IN ({ph}) OR lower(object) IN ({ph}))"
+        )
+        params: list[object] = [*keys, *keys]
+        if user is not None:
+            sql += " AND (user = ? OR user IS NULL)"
+            params.append(user)
+        sql += " ORDER BY confidence DESC, created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(sql, params).fetchall()
+        return [_row_to_triple(r) for r in rows]
+
+    return gateway.read(_read)
+
+
+def browse_triples(
+    gateway: StorageGateway, *, query: str | None = None, limit: int = 100
+) -> list[Triple]:
+    """List triples for the graph browser, newest first, optionally filtered by entity/relation."""
+
+    def _read(conn: sqlite3.Connection) -> list[Triple]:
+        if query:
+            like = f"%{query}%"
+            rows = conn.execute(
+                f"SELECT {_T_COLUMNS} FROM triples "
+                f"WHERE subject LIKE ? OR relation LIKE ? OR object LIKE ? "
+                f"ORDER BY created_at DESC, id DESC LIMIT ?",
+                (like, like, like, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"SELECT {_T_COLUMNS} FROM triples ORDER BY created_at DESC, id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [_row_to_triple(r) for r in rows]
+
+    return gateway.read(_read)
+
+
+def count_triples(gateway: StorageGateway) -> int:
+    def _read(conn: sqlite3.Connection) -> int:
+        return int(conn.execute("SELECT COUNT(*) FROM triples").fetchone()[0])
 
     return gateway.read(_read)

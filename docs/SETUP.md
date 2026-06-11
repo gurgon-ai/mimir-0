@@ -235,6 +235,10 @@ refresh_every = 5               # turns between self-model re-synthesis; 0 disab
 refresh_every = 4               # turns between folding recent exchanges into the rolling summary;
                                 # 0 disables compression (recency-only)
 
+[entity_graph]
+hops = 2                        # how far to traverse from a turn's entities (1–2); 0 disables
+max_facts = 8                   # max connected facts injected per turn
+
 [provider]
 type = "ollama"                 # "ollama" | "mock"
 host = "http://localhost:11434" # ollama only

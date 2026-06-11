@@ -45,6 +45,12 @@ refresh_every = 5
 # exchanges into a compact summary. 0 disables compression (recency-only working memory).
 refresh_every = 4
 
+[entity_graph]
+# Connected-knowledge retrieval: how many hops to traverse from the entities named in a turn,
+# and the max connected facts to inject. hops = 0 disables retrieval (triples are still stored).
+hops = 2
+max_facts = 8
+
 [provider]
 # "ollama" talks to a local Ollama server with stdlib HTTP (no extra deps).
 # "mock" is a deterministic, offline stand-in for tests/demos (needs no model server).

@@ -67,11 +67,11 @@ class MockProvider:
 
     @staticmethod
     def _bake(user_text: str) -> str:
-        """Extract a durable fact from a declarative statement; skip questions."""
+        """Extract a durable fact + a simple ``X is Y`` triple from a declarative statement."""
         stripped = user_text.strip()
         if not stripped or stripped.endswith("?"):
-            return json.dumps({"facts": []})
-        return json.dumps({"facts": [stripped]})
+            return json.dumps({"facts": [], "triples": []})
+        return json.dumps({"facts": [stripped], "triples": _mock_triples(stripped)})
 
     @staticmethod
     def _working_memory(brief: str) -> str:
@@ -100,6 +100,18 @@ class MockProvider:
         if recalled:
             return "Based on what you've told me — " + " ".join(recalled)
         return "I don't have anything on record about that yet. Could you tell me more?"
+
+
+def _mock_triples(text: str) -> list[list[str]]:
+    """A deterministic, naive triple from an ``X is Y`` statement (enough to drive the graph)."""
+    cleaned = text.strip().rstrip(".!?")
+    lowered = cleaned.lower()
+    if " is " in lowered:
+        idx = lowered.index(" is ")
+        subject, obj = cleaned[:idx].strip(), cleaned[idx + 4 :].strip()
+        if subject and obj:
+            return [[subject, "is", obj]]
+    return []
 
 
 def _extract_recall(system: str) -> list[str]:

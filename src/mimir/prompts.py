@@ -21,9 +21,11 @@ BAKE_MARKER = "Extract durable facts"
 BAKE_SYSTEM = (
     f"{BAKE_MARKER} that the user stated as true in this turn — things worth remembering "
     "later (preferences, identity, commitments, facts about their world). Do NOT record "
-    "questions, small talk, or speculation. Respond with a JSON object of the form "
-    '{"facts": ["fact one", "fact two"]}. If there is nothing durable, return '
-    '{"facts": []}.'
+    "questions, small talk, or speculation. Also extract any clear subject–relation–object "
+    "triples that capture how entities relate (e.g. [\"Greg\", \"lives in\", \"Colorado\"]). "
+    "Respond with a JSON object of the form "
+    '{"facts": ["fact one"], "triples": [["subject", "relation", "object"]]}. '
+    "Use empty lists where there is nothing."
 )
 
 SENTINEL_MARKER = "Reflect on the conversation"

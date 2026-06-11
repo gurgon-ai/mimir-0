@@ -68,6 +68,28 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             ")",
         ],
     ),
+    (
+        4,
+        [
+            # Entity graph: subject-relation-object triples — the 'what is connected' layer
+            # (DESIGN §3a). Indexed on subject and object for 1-2 hop traversal; a unique
+            # expression index dedupes case-insensitively so the same triple isn't stored twice.
+            "CREATE TABLE triples ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " subject TEXT NOT NULL,"
+            " relation TEXT NOT NULL,"
+            " object TEXT NOT NULL,"
+            " user TEXT,"
+            " provenance TEXT NOT NULL DEFAULT 'conversation',"
+            " confidence REAL NOT NULL DEFAULT 0.8,"
+            " created_at REAL NOT NULL"
+            ")",
+            "CREATE INDEX idx_triples_subject ON triples(subject)",
+            "CREATE INDEX idx_triples_object ON triples(object)",
+            "CREATE UNIQUE INDEX idx_triples_unique ON triples("
+            " lower(subject), lower(relation), lower(object), coalesce(user, ''))",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -94,4 +116,14 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
         "source",
     },
     "identity": {"key", "value", "established_at"},
+    "triples": {
+        "id",
+        "subject",
+        "relation",
+        "object",
+        "user",
+        "provenance",
+        "confidence",
+        "created_at",
+    },
 }

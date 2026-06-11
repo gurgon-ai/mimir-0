@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .cognition.bake import bake
+from .cognition.graph import render_triples, retrieve_connected
 from .cognition.identity import (
     current_anchors,
     establish_identity,
@@ -134,6 +135,7 @@ class Mimir:
         note = latest_sentinel_note(self._storage, user)
         self_knowledge = self._compose_self_knowledge()
         working_memory = current_working_memory(self._storage)
+        graph_facts = self._connected_facts(text, user)
 
         # 2. Assemble the epistemic prompt.
         bundle = build_context(
@@ -146,6 +148,7 @@ class Mimir:
             budget_tokens=self.config.context_budget_tokens,
             self_knowledge=self_knowledge,
             working_memory=working_memory,
+            graph_facts=graph_facts,
         )
 
         # 3. Generate the reply through the model gateway.
@@ -195,6 +198,7 @@ class Mimir:
         note = latest_sentinel_note(self._storage, user)
         self_knowledge = self._compose_self_knowledge()
         working_memory = current_working_memory(self._storage)
+        graph_facts = self._connected_facts(text, user)
         bundle = build_context(
             query=text,
             user=user,
@@ -205,6 +209,7 @@ class Mimir:
             budget_tokens=self.config.context_budget_tokens,
             self_knowledge=self_knowledge,
             working_memory=working_memory,
+            graph_facts=graph_facts,
         )
         messages = [
             {"role": "system", "content": bundle.prompt},
@@ -231,6 +236,19 @@ class Mimir:
         self._maybe_refresh_self_model()
         self._maybe_refresh_working_memory()
         return bundle.introspect()
+
+    def _connected_facts(self, query: str, user: str | None) -> list[str]:
+        """Connected facts from the entity graph for this turn (empty if disabled or no match)."""
+        if self.config.graph_hops <= 0:
+            return []
+        triples = retrieve_connected(
+            self._storage,
+            query,
+            hops=self.config.graph_hops,
+            max_facts=self.config.graph_max_facts,
+            user=user,
+        )
+        return render_triples(triples)
 
     # -- document ingestion (v0.1) ----------------------------------------------------
 

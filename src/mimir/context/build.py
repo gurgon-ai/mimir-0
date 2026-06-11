@@ -143,6 +143,7 @@ def build_context(
     budget_tokens: int,
     self_knowledge: str | None = None,
     working_memory: str | None = None,
+    graph_facts: list[str] | None = None,
     extra_sections: list[Section] | None = None,
 ) -> ContextBundle:
     """Assemble the epistemic prompt for one turn. Pure: no I/O, no model calls.
@@ -180,6 +181,8 @@ def build_context(
 
     # Reserve budget for the always-present pieces, then give the rest to knowledge.
     self_model_tokens = self_model_section.admitted_tokens if self_model_section else 0
+    graph_body = "\n".join(f"- {f}" for f in (graph_facts or []))
+    graph_tokens = estimate_tokens(graph_body) + 8 if graph_facts else 0
     working_memory_tokens = estimate_tokens(working_memory) + 8 if working_memory else 0
     sentinel_tokens = (
         estimate_tokens(sentinel_note.text) + 8 if sentinel_note is not None else 0
@@ -190,6 +193,7 @@ def build_context(
         budget_tokens
         - self_model_tokens
         - identity_section.admitted_tokens
+        - graph_tokens
         - working_memory_tokens
         - sentinel_tokens
         - extra_reserved
@@ -205,13 +209,27 @@ def build_context(
             warnings.append(msg)
             log.warning(msg)
 
-    # 3. Registered context sources (the seam; empty in v0 core).
+    # 3. Entity graph — connected facts, a second typed knowledge layer (DESIGN §3a).
+    if graph_facts:
+        sections.append(
+            Section(
+                name="entity_graph",
+                title="What's connected to this (entity graph):",
+                body=graph_body,
+                tier=SectionTier.HIGH,
+                substantive=True,
+                requested_tokens=estimate_tokens(graph_body),
+                admitted_tokens=estimate_tokens(graph_body),
+            )
+        )
+
+    # 4. Registered context sources (the seam; empty in v0 core).
     for extra in extra_sections or []:
         sections.append(extra)
 
-    # source_count = how many substantive typed knowledge layers fed this turn (DESIGN §3d).
-    # v0 has one such layer (memory); each admitted fact counts as a source within it.
-    source_count = len(retrieved_ids)
+    # source_count = how much substantive typed knowledge fed this turn (DESIGN §3d): admitted
+    # memory facts plus connected graph edges — two independent grounding layers.
+    source_count = len(retrieved_ids) + len(graph_facts or [])
 
     # 4. Working memory — rolling salient context, just before the end slot (DESIGN §3e).
     if working_memory:
