@@ -1,0 +1,49 @@
+# Mimir 0 — example configuration.
+#
+# Copy to `mimir.toml` and edit. See docs/SETUP.md for the full reference and recommended models.
+# The `data/*.db` brain file is gitignored and must never be committed.
+
+[storage]
+path = "data/mimir.db"
+
+[identity]
+# The always-on self-model / persona. Optional — a sensible default ships in core.
+text = "You are Mimir, a local-first assistant with an evidence-aware memory. You attribute what you recall to its source, and you say plainly when you are unsure rather than guessing."
+# The owner whose statements earn the top evidence tier. Omit for single-user mode
+# (whoever speaks is then treated as the primary user).
+# primary_user = "alex"
+
+[embeddings]
+# "bootstrap" = stdlib locality-hashing (offline, zero deps, LEXICAL ONLY — not semantic).
+# "endpoint"  = real semantic embeddings via [roles.embed] (recommended for real use).
+# "degraded"  = no vectors; keyword-only retrieval.
+mode = "endpoint"
+dim = 256          # bootstrap vector size; ignored in endpoint mode
+
+[context]
+budget_tokens = 4096
+
+[provider]
+# "ollama" talks to a local Ollama server with stdlib HTTP (no extra deps).
+# "mock" is a deterministic, offline stand-in for tests/demos (needs no model server).
+type = "ollama"
+host = "http://localhost:11434"
+
+# --- roles: one model per cognitive job. `model` is required; other keys are tuned params. ---
+
+[roles.chat]
+model = "llama3.1:8b"
+temperature = 0.7
+num_ctx = 8192
+
+[roles.bake]
+model = "llama3.1:8b"
+temperature = 0.0      # faithful extraction; no creativity
+
+[roles.reasoning]
+model = "llama3.1:8b"
+temperature = 0.3
+
+[roles.embed]
+# Required only when [embeddings] mode = "endpoint".
+model = "nomic-embed-text"

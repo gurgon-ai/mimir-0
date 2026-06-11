@@ -8,9 +8,23 @@ it's assembled into the prompt with an explicit epistemic structure. You tell it
 later it recalls that fact, cites where it came from, and tells you when it's reasoning from
 thin evidence instead of confabulating.
 
-> **Status: design phase / pre-alpha.** The architecture is specified; runnable code is being
-> built spine-first (boot → bake a memory → recall it with provenance → reflective review).
-> Not yet usable. The full design lives in `DESIGN.md`.
+> **Status: pre-alpha — the v0 spine is alive.** The §6 acceptance loop runs green: boot empty →
+> converse → bake a memory → a later turn recalls it with correct provenance & evidence tier →
+> the sentinel fires async and leaves a note for the next turn. Cognition layers beyond the spine
+> (documents, working memory, sleep/consolidation, the inner council, the qualification battery)
+> are still to come. The full design lives in `DESIGN.md`; setup lives in `docs/SETUP.md`.
+
+## Try it in 10 seconds (zero account, no model server)
+
+```bash
+pip install -e ".[dev]"
+python -m mimir.selftest        # runs the whole loop on a deterministic mock provider
+python examples/quickstart.py   # watch it bake a fact and recall it, attributed
+```
+
+No Ollama, no GPU, no network needed — Mimir ships a mock provider and a stdlib bootstrap
+embedder so the core loop boots on literally Python + SQLite. For a real conversation with a
+local model, see [`docs/SETUP.md`](docs/SETUP.md).
 
 ## What makes it different
 

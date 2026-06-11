@@ -1,0 +1,75 @@
+"""The model gateway — the second chokepoint (DESIGN §5).
+
+**The law:** every chat and every embedding call goes through here. The gateway resolves a
+*role* (``chat``, ``bake``, ``reasoning``, ``embed``) to a concrete model + tuned params from
+config and a default priority, then hands off to the provider pool behind it.
+
+The pool (``pool.py``) provides the hardened internals: retry/backoff, transient-fail signaling,
+a saturation breaker, health tracking, and failover across endpoints. The gateway itself stays a
+thin role→model resolver, so cognition never touches scheduling concerns. Callers are unchanged:
+``chat(role, messages)`` / ``embed(role, texts)`` still work; ``priority`` is an optional override.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from ..config import RoleSpec
+from ..errors import ModelGatewayError
+from .pool import ProviderPool
+from .priority import DEFAULT_ROLE_PRIORITY, Priority
+from .provider import Message, Provider
+
+log = logging.getLogger("mimir.model")
+
+
+class ModelGateway:
+    def __init__(
+        self,
+        provider: Provider | list[Provider] | ProviderPool,
+        roles: dict[str, RoleSpec],
+    ) -> None:
+        self._roles = roles
+        if isinstance(provider, ProviderPool):
+            self._pool = provider
+        elif isinstance(provider, list):
+            endpoints = [
+                (getattr(p, "name", f"endpoint-{i}"), p) for i, p in enumerate(provider)
+            ]
+            self._pool = ProviderPool(endpoints)
+        else:
+            self._pool = ProviderPool([(getattr(provider, "name", "endpoint-0"), provider)])
+
+    def _role(self, role: str) -> RoleSpec:
+        spec = self._roles.get(role)
+        if spec is None:
+            raise ModelGatewayError(
+                f"no model configured for role {role!r}; known roles: {sorted(self._roles)}"
+            )
+        return spec
+
+    def _priority(self, role: str, override: Priority | None) -> Priority:
+        if override is not None:
+            return override
+        return DEFAULT_ROLE_PRIORITY.get(role, Priority.USER_ADJACENT)
+
+    def chat(
+        self, role: str, messages: list[Message], *, priority: Priority | None = None
+    ) -> str:
+        """Route a chat completion for ``role`` through the pool (retry/failover handled there)."""
+        spec = self._role(role)
+        return self._pool.chat(
+            spec.model, messages, spec.params, priority=self._priority(role, priority)
+        )
+
+    def embed(
+        self, role: str, texts: list[str], *, priority: Priority | None = None
+    ) -> list[list[float]]:
+        """Route an embeddings call for ``role`` through the pool."""
+        spec = self._role(role)
+        return self._pool.embed(
+            spec.model, texts, priority=self._priority(role, priority)
+        )
+
+    def get_stats(self) -> dict[str, object]:
+        return self._pool.get_stats()

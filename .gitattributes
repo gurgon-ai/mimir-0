@@ -1,0 +1,9 @@
+# Normalize line endings to LF in the repository for cross-platform consistency.
+* text=auto eol=lf
+
+# Explicit for the file types we ship.
+*.py    text eol=lf
+*.toml  text eol=lf
+*.md    text eol=lf
+*.cfg   text eol=lf
+*.txt   text eol=lf
