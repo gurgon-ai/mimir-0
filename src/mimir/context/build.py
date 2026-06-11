@@ -76,8 +76,14 @@ class ContextBundle:
 
 
 def _memory_line(mem: Memory) -> str:
-    """Render one recalled fact, attributed to its tier and source (never flattened)."""
-    return f"- {mem.text} [tier={mem.evidence_tier.key}; source={mem.provenance}]"
+    """Render one recalled fact, attributed to its tier and source (never flattened).
+
+    Internal whitespace/newlines are collapsed so each memory stays a single line — the
+    ``<RECALL>`` block is one-memory-per-line, and multi-line content (e.g. a document chunk)
+    must not break that contract.
+    """
+    text = " ".join(mem.text.split())
+    return f"- {text} [tier={mem.evidence_tier.key}; source={mem.provenance}]"
 
 
 def _build_knowledge_section(

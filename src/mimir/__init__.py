@@ -8,12 +8,14 @@ architecture and ``docs/SETUP.md`` to get running.
 from __future__ import annotations
 
 from .brain import Mimir, TurnResult, build_provider, make_embedder
+from .cognition.ingest import IngestResult
 from .config import Config, ProviderSpec, RoleSpec, load_config
 from .context.build import ContextBundle, build_context
 from .embed.base import EmbeddingMode
 from .errors import (
     ConfigError,
     ContextBudgetError,
+    IngestError,
     MigrationError,
     MimirError,
     ModelGatewayError,
@@ -29,6 +31,7 @@ __version__ = "0.0.1"
 __all__ = [
     "Mimir",
     "TurnResult",
+    "IngestResult",
     "Config",
     "RoleSpec",
     "ProviderSpec",
@@ -43,6 +46,7 @@ __all__ = [
     "EvidenceTier",
     "MimirError",
     "ConfigError",
+    "IngestError",
     "SchemaError",
     "MigrationError",
     "StorageError",

@@ -235,12 +235,14 @@ needs.
 
 - **v0 — the spine:** router, `build_context()`, retrieval + epistemics, memory bake/recall,
   the two gateways (seams first), sentinel. The acceptance loop above.
-- **v0.1 — document ingestion (lead feature):** `ingest(path)` → extract → chunk → embed → a
-  `document`-tier typed layer with file/page provenance, retrieved through `build_context()` like
-  any other source (a document fact is just a memory whose evidence tier is `document`). Plain
-  text + markdown in core (zero deps); PDF/EPUB extractors ship as an optional `[documents]` extra,
-  so the runtime contract holds. *LLM compilation of documents into integrated, contradiction-
-  resolved knowledge is a later, optional layer on top — not the ingestion itself.*
+- **v0.1 — document ingestion (lead feature) — _txt/md landed_:** `ingest(path)` → extract →
+  chunk → embed → a `document`-tier typed layer with file/section provenance, retrieved through
+  `build_context()` like any other source (a document chunk is just a memory whose evidence tier
+  is `document`, with a `source` column so re-ingest replaces rather than duplicates). Plain text
+  + markdown ship in core (zero deps); PDF extraction ships behind the optional `[documents]`
+  extra (`pypdf`), so the runtime contract holds. EPUB and *LLM compilation of documents into
+  integrated, contradiction-resolved knowledge* remain later, optional layers — not the ingestion
+  itself.
 - **v0.1+ — cognition layers:** working memory, self-model, procedural memory, entity graph,
   sleep/consolidation, inner council, the qualification battery.
 - **Adapters (separate extras/packages):** a reference HTTP server (+ streaming), an optional
@@ -308,6 +310,10 @@ a defect.
 
 ## 11. Status
 
-Pre-alpha / design phase. The architecture is specified; the spine is being built against §6's
-acceptance test. Not yet usable. Contributions to anything beyond the v0 spine are frozen until the
-acceptance loop passes green — the goal is a rock-solid memory→recall→reflect core before breadth.
+Pre-alpha. **The v0 spine is alive and the §6 acceptance loop passes green** (boot → bake → recall
+with provenance & evidence tier → async sentinel note), verified under an automated self-test and
+against a live local model. Both gateways are hardened (priority queue, batching, coalescing,
+retry/backoff, provider pool with health/failover). **v0.1 document ingestion has begun**: `ingest()`
+for plain text + markdown in core, PDF behind the `[documents]` extra. Still pre-alpha and evolving;
+the remaining cognition layers (working memory, self-model, procedural, entity graph,
+sleep/consolidation, inner council, qualification battery) are the road ahead.

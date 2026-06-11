@@ -32,7 +32,7 @@ Source = "https://github.com/gurgon-ai/mimir-0"
 [project.optional-dependencies]
 # Heavy / optional things live behind extras, never in core (DESIGN §2).
 ollama = []            # the reference Ollama adapter uses only stdlib urllib; extra reserved for future niceties
-documents = []         # v0.1: PDF/EPUB extractors land here (plain text + markdown stay in core)
+documents = ["pypdf>=4.0"]   # PDF extraction (plain text + markdown stay dependency-free in core)
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",

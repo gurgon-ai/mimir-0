@@ -10,7 +10,7 @@ import pytest
 from mimir.errors import SchemaError
 from mimir.storage.gateway import StorageGateway
 from mimir.storage.migrate import check_schema, current_version, run_migrations
-from mimir.storage.schema import CURRENT_SCHEMA_VERSION, EXPECTED_SHAPE
+from mimir.storage.schema import CURRENT_SCHEMA_VERSION, EXPECTED_SHAPE, MIGRATIONS
 
 
 def test_fresh_db_migrates_and_checks(db_path: str) -> None:
@@ -59,6 +59,28 @@ def test_newer_db_than_code_fails_loud(tmp_path: Path) -> None:
         conn.commit()
         with pytest.raises(SchemaError, match="only understands"):
             run_migrations(conn)
+    finally:
+        conn.close()
+
+
+def test_v1_db_upgrades_to_current(tmp_path: Path) -> None:
+    """A store stamped at v1 is migrated forward (e.g. the v2 `source` column is added)."""
+    db = str(tmp_path / "v1.db")
+    conn = sqlite3.connect(db)
+    try:
+        # Build a v1-shaped store and stamp it at version 1.
+        for stmt in MIGRATIONS[0][1]:
+            conn.execute(stmt)
+        conn.execute("INSERT INTO schema_version (version) VALUES (1)")
+        conn.commit()
+        v1_cols = {r[1] for r in conn.execute("PRAGMA table_info(memories)").fetchall()}
+        assert "source" not in v1_cols  # v1 predates document ingestion
+
+        # Upgrade forward and confirm the v2 column landed and the schema check passes.
+        assert run_migrations(conn) == CURRENT_SCHEMA_VERSION
+        v_cols = {r[1] for r in conn.execute("PRAGMA table_info(memories)").fetchall()}
+        assert "source" in v_cols
+        check_schema(conn)
     finally:
         conn.close()
 

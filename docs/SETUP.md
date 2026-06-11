@@ -130,6 +130,33 @@ The second turn recalls the first, attributed to its source and evidence tier.
 
 ---
 
+## 5b. Ingesting documents (v0.1)
+
+Give Mimir documents to recall from. Plain text and markdown work with **no extra dependencies**;
+PDF needs the optional extra.
+
+```python
+from mimir import Mimir
+
+brain = Mimir.from_config("mimir.toml")
+brain.ingest("notes/handbook.md")      # .txt and .md work in core
+brain.ingest("research/paper.pdf")     # .pdf needs: pip install 'mimir-0[documents]'
+
+print(brain.turn("What does the handbook say about onboarding?", user="alex").reply)
+brain.close()
+```
+
+What happens: the file is **extracted** (markdown splits on headings; PDF splits by page),
+**chunked** with overlap (carrying each section/page as provenance), **embedded**, and stored as
+`document`-tier memories. On a later turn they are recalled like any other knowledge, attributed
+to the file and locator (e.g. `handbook.md:Onboarding`, `paper.pdf:p.4`). Re-ingesting the same
+path **replaces** its previous chunks rather than duplicating them.
+
+- Install PDF support: `pip install 'mimir-0[documents]'` (pulls `pypdf`). Without it, ingesting a
+  `.pdf` fails loud with that instruction — it never silently skips.
+- Recall quality on documents depends on the embedding mode (§4). Bootstrap matches words; for
+  semantic recall over documents, use **endpoint** mode.
+
 ## 6. Configuration reference
 
 ```toml

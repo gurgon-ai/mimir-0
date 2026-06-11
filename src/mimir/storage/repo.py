@@ -22,12 +22,12 @@ from .models import (
 
 _COLUMNS = (
     "id, text, kind, evidence_tier, confidence, salience, embedding, "
-    "provenance, user, created_at, last_accessed, access_count, meta"
+    "provenance, user, source, created_at, last_accessed, access_count, meta"
 )
 # The same columns minus the auto-assigned id, for INSERT.
 _INSERT_COLUMNS = (
     "text, kind, evidence_tier, confidence, salience, embedding, "
-    "provenance, user, created_at, last_accessed, access_count, meta"
+    "provenance, user, source, created_at, last_accessed, access_count, meta"
 )
 
 
@@ -42,6 +42,7 @@ def _row_to_memory(row: sqlite3.Row) -> Memory:
         embedding=blob_to_embedding(row["embedding"]),
         provenance=row["provenance"],
         user=row["user"],
+        source=row["source"],
         created_at=row["created_at"],
         last_accessed=row["last_accessed"],
         access_count=row["access_count"],
@@ -65,7 +66,7 @@ def save_memory(gateway: StorageGateway, mem: Memory) -> int:
         cur = conn.execute(
             f"""
             INSERT INTO memories ({_INSERT_COLUMNS})
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 mem.text,
@@ -76,6 +77,7 @@ def save_memory(gateway: StorageGateway, mem: Memory) -> int:
                 embedding_to_blob(mem.embedding),
                 mem.provenance,
                 mem.user,
+                mem.source,
                 mem.created_at,
                 mem.last_accessed,
                 mem.access_count,
@@ -169,6 +171,20 @@ def record_access(gateway: StorageGateway, memory_ids: list[int]) -> None:
         )
 
     gateway.submit_async(_write, priority=Priority.TOUCH)
+
+
+def delete_by_source(gateway: StorageGateway, source: str) -> int:
+    """Delete all chunks that came from a given document source. Returns rows removed.
+
+    Used by re-ingest to make ``ingest(path)`` idempotent — the old chunks are cleared
+    before the new ones are written, so a document never accumulates stale duplicates.
+    """
+
+    def _write(conn: sqlite3.Connection) -> int:
+        cur = conn.execute("DELETE FROM memories WHERE source = ?", (source,))
+        return cur.rowcount
+
+    return gateway.submit(_write)
 
 
 def count_memories(gateway: StorageGateway, *, kind: MemoryKind | None = None) -> int:

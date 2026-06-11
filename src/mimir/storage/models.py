@@ -81,6 +81,9 @@ class Memory:
     embedding: list[float] | None = None
     provenance: str = "conversation"
     user: str | None = None
+    # For document chunks (evidence_tier=DOCUMENT): the originating file/uri, so re-ingest
+    # can replace a document's chunks cleanly. NULL for conversation memories and notes.
+    source: str | None = None
     created_at: float = 0.0
     last_accessed: float = 0.0
     access_count: int = 0

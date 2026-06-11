@@ -10,9 +10,11 @@ thin evidence instead of confabulating.
 
 > **Status: pre-alpha — the v0 spine is alive.** The §6 acceptance loop runs green: boot empty →
 > converse → bake a memory → a later turn recalls it with correct provenance & evidence tier →
-> the sentinel fires async and leaves a note for the next turn. Cognition layers beyond the spine
-> (documents, working memory, sleep/consolidation, the inner council, the qualification battery)
-> are still to come. The full design lives in `DESIGN.md`; setup lives in `docs/SETUP.md`.
+> the sentinel fires async and leaves a note for the next turn. Both gateways are hardened, and
+> **v0.1 document ingestion has begun** (`ingest()` for text/markdown in core, PDF via an extra).
+> Further cognition layers (working memory, self-model, sleep/consolidation, the inner council,
+> the qualification battery) are still to come. The full design lives in `DESIGN.md`; setup lives
+> in `docs/SETUP.md`.
 
 ## Try it in 10 seconds (zero account, no model server)
 

@@ -71,3 +71,10 @@ class SelfTestError(MimirError):
 
     'No bake / no recall / no sentinel' is a *fault*, not a quiet state (DESIGN §10).
     """
+
+
+class IngestError(MimirError):
+    """A document could not be ingested — unsupported type, unreadable file, or a missing
+    optional extractor (e.g. PDF support needs the ``[documents]`` extra). Raised loud with
+    an instruction, never a silent skip.
+    """

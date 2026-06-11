@@ -17,8 +17,10 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 
 from .cognition.bake import bake
+from .cognition.ingest import IngestResult, ingest_document
 from .cognition.sentinel import run_sentinel
 from .config import Config, ProviderSpec, load_config
 from .context.build import ContextBundle, build_context
@@ -139,6 +141,29 @@ class Mimir:
         self._spawn_sentinel(user=user, turn_text=text, reply=reply)
 
         return TurnResult(reply=reply, context=bundle, baked=baked)
+
+    # -- document ingestion (v0.1) ----------------------------------------------------
+
+    def ingest(
+        self,
+        path: str | Path,
+        *,
+        target_tokens: int = 256,
+        overlap_tokens: int = 32,
+    ) -> IngestResult:
+        """Ingest a document (.txt/.md in core; .pdf via the [documents] extra).
+
+        The file is extracted, chunked, embedded, and stored as document-tier knowledge. Its
+        chunks are then recalled like any other memory on subsequent turns, attributed to the
+        file and locator (page/section). Re-ingesting the same path replaces its prior chunks.
+        """
+        return ingest_document(
+            self._storage,
+            self._embedder,
+            path=path,
+            target_tokens=target_tokens,
+            overlap_tokens=overlap_tokens,
+        )
 
     # -- sentinel plumbing ------------------------------------------------------------
 

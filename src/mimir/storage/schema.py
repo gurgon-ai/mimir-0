@@ -45,6 +45,16 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "CREATE INDEX idx_memories_kind ON memories(kind)",
         ],
     ),
+    (
+        2,
+        [
+            # v0.1 document ingestion: a chunk is just a memory with evidence_tier='document'
+            # and a `source` pointing at the file it came from. The column lets re-ingest
+            # replace a document's chunks cleanly (delete-by-source). NULL for non-document rows.
+            "ALTER TABLE memories ADD COLUMN source TEXT",
+            "CREATE INDEX idx_memories_source ON memories(source)",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -68,5 +78,6 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
         "last_accessed",
         "access_count",
         "meta",
+        "source",
     },
 }
