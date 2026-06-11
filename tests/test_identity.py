@@ -23,7 +23,10 @@ def test_establish_and_pending(brain: Mimir) -> None:
     assert {k for k, _ in brain.pending_identity_questions()} == set(ANCHOR_KEYS)
     brain.establish_identity({"name": "Mimir", "location": "a home server"})
     assert brain.identity_anchors() == {"name": "Mimir", "location": "a home server"}
-    assert {k for k, _ in brain.pending_identity_questions()} == {"operator", "purpose"}
+    assert {k for k, _ in brain.pending_identity_questions()} == set(ANCHOR_KEYS) - {
+        "name",
+        "location",
+    }
 
 
 def test_blank_and_unknown_answers_ignored(brain: Mimir) -> None:
@@ -58,15 +61,11 @@ def test_config_anchors_established_at_boot(mock_config: Config) -> None:
 
 
 def test_run_interview_collects_answers(brain: Mimir, monkeypatch: pytest.MonkeyPatch) -> None:
-    answers = iter(["Mimir", "Greg", "a home lab", "to remember and reflect"])
+    # One answer per anchor, in interview order.
+    answers = iter([f"answer_{k}" for k in ANCHOR_KEYS])
     monkeypatch.setattr("builtins.input", lambda *_: next(answers))
     result = run_interview(brain)
-    assert result == {
-        "name": "Mimir",
-        "operator": "Greg",
-        "location": "a home lab",
-        "purpose": "to remember and reflect",
-    }
+    assert result == {k: f"answer_{k}" for k in ANCHOR_KEYS}
 
 
 def test_run_interview_noop_when_already_established(brain: Mimir) -> None:
@@ -74,3 +73,18 @@ def test_run_interview_noop_when_already_established(brain: Mimir) -> None:
     # All anchors set → no questions; run_interview must not call input().
     result = run_interview(brain)
     assert result == {k: f"v_{k}" for k in ANCHOR_KEYS}
+
+
+def test_run_interview_revise_updates_and_keeps(
+    brain: Mimir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    brain.establish_identity({k: f"old_{k}" for k in ANCHOR_KEYS})
+
+    # In revise mode every anchor is re-asked; blank keeps the current value. Change only `name`.
+    def fake_input(prompt: str = "") -> str:
+        return "New Name" if prompt.strip().startswith("What is your name?") else ""
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    result = run_interview(brain, revise=True)
+    assert result["name"] == "New Name"
+    assert result["purpose"] == "old_purpose"  # untouched anchors retained

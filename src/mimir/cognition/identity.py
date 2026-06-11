@@ -17,12 +17,19 @@ from ..storage.gateway import StorageGateway
 from ..storage.repo import get_identity_anchors, set_identity_anchor
 
 # The universal identity dimensions. Order is the interview order. Extend deliberately —
-# every anchor must be domain-neutral (no deployment-specific keys in core).
+# every anchor must be domain-neutral (no deployment-specific keys in core). The first four are
+# who/where/why; the rest establish the operating frame an operator must supply at cold-start
+# because it cannot be self-derived (values, scope, boundaries, voice) — the foundational
+# complement to the history-derived facets the self-model later synthesizes.
 ANCHORS: list[tuple[str, str]] = [
     ("name", "What is your name?"),
-    ("operator", "Who do you serve — who is your primary user or operator?"),
-    ("location", "Where are you — what is your setting or deployment context?"),
+    ("operator", "Who do you serve — your primary user(s) or operator?"),
+    ("location", "Where are you — your setting or deployment context?"),
     ("purpose", "What is your purpose — what are you here to do?"),
+    ("values", "What principles or values should guide how you act?"),
+    ("scope", "What domains or responsibilities are yours — and what is out of scope?"),
+    ("boundaries", "What must you never do — your hard limits and privacy boundaries?"),
+    ("voice", "How should you communicate — your tone and style?"),
 ]
 ANCHOR_KEYS = [key for key, _ in ANCHORS]
 
@@ -32,6 +39,10 @@ _ANCHOR_TEMPLATES = {
     "operator": "I serve {value}.",
     "location": "I am situated in {value}.",
     "purpose": "My purpose is {value}.",
+    "values": "I am guided by these principles: {value}.",
+    "scope": "My scope of responsibility: {value}.",
+    "boundaries": "I must never: {value}.",
+    "voice": "I communicate like this: {value}.",
 }
 
 
