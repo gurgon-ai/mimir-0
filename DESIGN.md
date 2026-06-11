@@ -68,6 +68,7 @@ discipline and its own slot in the prompt.
 | Layer | Holds | Retrieval |
 |---|---|---|
 | **Memory** | What happened / what someone said (facts, events) | hybrid keyword + embedding |
+| **Documents** | Ingested files (notes, docs, books) — chunked, with file/page provenance | hybrid + `document` evidence-tier |
 | **Understanding** | What the system learned or concluded (syntheses) | cosine |
 | **Entity graph** | What's *connected* (subject–relation–object triples) | graph traversal (1–2 hop) |
 | **Working memory** | Rolling cross-session salient context | recency + compression |
@@ -234,6 +235,12 @@ needs.
 
 - **v0 — the spine:** router, `build_context()`, retrieval + epistemics, memory bake/recall,
   the two gateways (seams first), sentinel. The acceptance loop above.
+- **v0.1 — document ingestion (lead feature):** `ingest(path)` → extract → chunk → embed → a
+  `document`-tier typed layer with file/page provenance, retrieved through `build_context()` like
+  any other source (a document fact is just a memory whose evidence tier is `document`). Plain
+  text + markdown in core (zero deps); PDF/EPUB extractors ship as an optional `[documents]` extra,
+  so the runtime contract holds. *LLM compilation of documents into integrated, contradiction-
+  resolved knowledge is a later, optional layer on top — not the ingestion itself.*
 - **v0.1+ — cognition layers:** working memory, self-model, procedural memory, entity graph,
   sleep/consolidation, inner council, the qualification battery.
 - **Adapters (separate extras/packages):** a reference HTTP server (+ streaming), an optional
@@ -253,7 +260,53 @@ A 30-line working example earns more trust than an architecture diagram.
 
 ---
 
-## 10. Status
+## 10. Failure modes & self-observation
+
+The failure modes this design guards against hardest are not logical — they're **silent**.
+Experience building large memory systems shows the dominant bug class is *quiet death*: a swallowed
+exception, a truncated prompt section, a store that silently fell back, a route that drifted, a
+background job that starved the foreground — each invisible for weeks because nothing failed
+*loudly*. A silently-broken memory is worse than a crash: it manufactures false confidence.
+
+So the core's first doctrine is **fail loud, self-check, stay observable.** The cognition core must
+be the least-fragile, loudest-failing, self-testing part of the system.
+
+**v0 mechanisms (cheap, built in from the start):**
+- **No silent swallow** — no bare `except` in core without re-raise or an explicit, logged
+  downgrade. A swallowed error is a banned pattern.
+- **Schema versioning + migration runner** — a `schema_version`, a tiny migration runner (even with
+  only v1), and a startup check that required tables/columns exist and match the code.
+  Misconfiguration **fails loud with instructions** — it never silently falls back to an alternate
+  store.
+- **The acceptance test is also a runtime self-test** — §6's loop runs as an automated guard at
+  startup and on a schedule (synthetic turn → must bake → must recall → sentinel must fire).
+  "No writes / no recall / no sentinel over N turns" is a *fault*, not a quiet state. The self-test
+  ships a canary so a broken self-test is itself loud.
+- **Context accounting** — `build_context()` records per-section tokens requested vs admitted and
+  whether truncation occurred; truncating a high-tier section is a warning, not silence. An
+  introspection call exposes "what's in the prompt and how big," so "why did it forget X?" is
+  debuggable without reading internals.
+- **Budgeted section registry** — every registered context source declares a budget + priority; the
+  core caps or disables a misbehaving source without starving core sections.
+
+**Principles (applied as each layer lands):**
+- **Governor fail-safe** — if scheduling signals glitch, default to throttling background, never
+  starving foreground. Background tasks are idempotent/resumable and never advance a bookmark on a
+  skipped run.
+- **Routing golden-set** — a small fixed battery of inputs that must always route to a given role;
+  alert on drift. Thresholds live in versioned config, not inline constants.
+- **Commitment tracking** — when the model says it will do something, a tool call is recorded or a
+  structured pending-commitment is created; a promise is never silently lost.
+- **Proactivity is an isolated plugin** — idle/proactive behavior runs as a plugin whose failure
+  cannot touch the core turn→bake→recall loop, with a proactivity budget and an easy off-switch.
+
+**Process** (`CONTRIBUTING`): each load-bearing claim in this document has a test asserting it
+(executable spec); a change to core behavior updates this document in the same PR — prose drift is
+a defect.
+
+---
+
+## 11. Status
 
 Pre-alpha / design phase. The architecture is specified; the spine is being built against §6's
 acceptance test. Not yet usable. Contributions to anything beyond the v0 spine are frozen until the
