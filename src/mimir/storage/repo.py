@@ -23,12 +23,12 @@ from .models import (
 
 _COLUMNS = (
     "id, text, kind, evidence_tier, confidence, salience, embedding, "
-    "provenance, user, source, created_at, last_accessed, access_count, meta"
+    "provenance, user, source, created_at, last_accessed, access_count, meta, archived"
 )
 # The same columns minus the auto-assigned id, for INSERT.
 _INSERT_COLUMNS = (
     "text, kind, evidence_tier, confidence, salience, embedding, "
-    "provenance, user, source, created_at, last_accessed, access_count, meta"
+    "provenance, user, source, created_at, last_accessed, access_count, meta, archived"
 )
 
 
@@ -47,6 +47,7 @@ def _row_to_memory(row: sqlite3.Row) -> Memory:
         created_at=row["created_at"],
         last_accessed=row["last_accessed"],
         access_count=row["access_count"],
+        archived=bool(row["archived"]),
         meta=json.loads(row["meta"]),
     )
 
@@ -67,7 +68,7 @@ def save_memory(gateway: StorageGateway, mem: Memory) -> int:
         cur = conn.execute(
             f"""
             INSERT INTO memories ({_INSERT_COLUMNS})
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 mem.text,
@@ -83,6 +84,7 @@ def save_memory(gateway: StorageGateway, mem: Memory) -> int:
                 mem.last_accessed,
                 mem.access_count,
                 json.dumps(mem.meta),
+                int(mem.archived),
             ),
         )
         return int(cur.lastrowid or 0)
@@ -116,11 +118,13 @@ def list_memories(
     def _read(conn: sqlite3.Connection) -> list[Memory]:
         if user is None:
             rows = conn.execute(
-                f"SELECT {_COLUMNS} FROM memories WHERE kind = ?", (kind.value,)
+                f"SELECT {_COLUMNS} FROM memories WHERE kind = ? AND archived = 0",
+                (kind.value,),
             ).fetchall()
         else:
             rows = conn.execute(
-                f"SELECT {_COLUMNS} FROM memories WHERE kind = ? AND (user = ? OR user IS NULL)",
+                f"SELECT {_COLUMNS} FROM memories WHERE kind = ? AND archived = 0 "
+                f"AND (user = ? OR user IS NULL)",
                 (kind.value, user),
             ).fetchall()
         return [_row_to_memory(r) for r in rows]
@@ -308,6 +312,75 @@ def count_memories(gateway: StorageGateway, *, kind: MemoryKind | None = None) -
         return int(row[0])
 
     return gateway.read(_read)
+
+
+# -- consolidation (sleep) ------------------------------------------------------------
+
+
+def apply_decay(gateway: StorageGateway, updates: list[tuple[float, float, int]]) -> None:
+    """Batch-apply (salience, confidence, id) updates from a decay pass."""
+    if not updates:
+        return
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.executemany(
+            "UPDATE memories SET salience = ?, confidence = ? WHERE id = ?", updates
+        )
+
+    gateway.submit(_write)
+
+
+def archive_memories(gateway: StorageGateway, ids: list[int]) -> int:
+    """Mark memories archived (excluded from recall, kept in store). Returns rows affected."""
+    if not ids:
+        return 0
+
+    def _write(conn: sqlite3.Connection) -> int:
+        ph = ",".join("?" * len(ids))
+        cur = conn.execute(f"UPDATE memories SET archived = 1 WHERE id IN ({ph})", ids)
+        return cur.rowcount
+
+    return gateway.submit(_write)
+
+
+def delete_memories(gateway: StorageGateway, ids: list[int]) -> int:
+    """Hard-delete memories by id (used to drop exact duplicates). Returns rows removed."""
+    if not ids:
+        return 0
+
+    def _write(conn: sqlite3.Connection) -> int:
+        ph = ",".join("?" * len(ids))
+        cur = conn.execute(f"DELETE FROM memories WHERE id IN ({ph})", ids)
+        return cur.rowcount
+
+    return gateway.submit(_write)
+
+
+def bump_memory(
+    gateway: StorageGateway, memory_id: int, *, access_count: int, salience: float
+) -> None:
+    """Set a surviving memory's access_count and salience after merging duplicates into it."""
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "UPDATE memories SET access_count = ?, salience = ? WHERE id = ?",
+            (access_count, salience, memory_id),
+        )
+
+    gateway.submit(_write)
+
+
+def delete_triples(gateway: StorageGateway, ids: list[int]) -> int:
+    """Delete triples by id (used to resolve contradictions). Returns rows removed."""
+    if not ids:
+        return 0
+
+    def _write(conn: sqlite3.Connection) -> int:
+        ph = ",".join("?" * len(ids))
+        cur = conn.execute(f"DELETE FROM triples WHERE id IN ({ph})", ids)
+        return cur.rowcount
+
+    return gateway.submit(_write)
 
 
 # -- entity graph (triples) -----------------------------------------------------------

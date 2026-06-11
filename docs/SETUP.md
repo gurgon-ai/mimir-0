@@ -239,6 +239,10 @@ refresh_every = 4               # turns between folding recent exchanges into th
 hops = 2                        # how far to traverse from a turn's entities (1–2); 0 disables
 max_facts = 8                   # max connected facts injected per turn
 
+[sleep]
+every = 0                       # turns between consolidation passes (dedup/decay/archive/
+                                # contradictions); 0 = manual (brain.sleep() / web UI / cron)
+
 [provider]
 type = "ollama"                 # "ollama" | "mock"
 host = "http://localhost:11434" # ollama only

@@ -90,6 +90,15 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             " lower(subject), lower(relation), lower(object), coalesce(user, ''))",
         ],
     ),
+    (
+        5,
+        [
+            # Sleep/consolidation: archived memories are excluded from active recall but kept in
+            # the store (archiving ≠ disbelieving, DESIGN §3c) — a resurfaced one is still trusted.
+            "ALTER TABLE memories ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
+            "CREATE INDEX idx_memories_archived ON memories(archived)",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -114,6 +123,7 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
         "access_count",
         "meta",
         "source",
+        "archived",
     },
     "identity": {"key", "value", "established_at"},
     "triples": {
