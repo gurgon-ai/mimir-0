@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .cognition.bake import bake
+from .cognition.council import CouncilResult, deliberate
 from .cognition.graph import render_triples, retrieve_connected
 from .cognition.identity import (
     current_anchors,
@@ -365,6 +366,14 @@ class Mimir:
     def sleep(self) -> SleepReport:
         """Run a consolidation pass now (dedup, decay, archive, contradiction resolution)."""
         return consolidate(self._storage)
+
+    def deliberate(self, question: str, user: str | None = None) -> CouncilResult:
+        """Convene the inner council on an open question — adversarial deliberation → a verdict.
+
+        Personas spread across whatever models are installed; the verdict is stored as recallable
+        understanding (DESIGN §0.4, §4, §5).
+        """
+        return deliberate(self._model, self._storage, self._embedder, question=question, user=user)
 
     def _maybe_sleep(self) -> None:
         every = self.config.sleep_every

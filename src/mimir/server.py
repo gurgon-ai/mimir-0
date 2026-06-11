@@ -140,6 +140,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._ingest(body))
             elif route == "/api/sleep":
                 self._send_json(self._sleep())
+            elif route == "/api/council":
+                self._send_json(self._council(body))
             else:
                 self._send_json({"error": "not found"}, status=404)
         except json.JSONDecodeError:
@@ -244,6 +246,20 @@ class _Handler(BaseHTTPRequestHandler):
                 emit("error", {"error": str(exc)})
             except OSError:
                 pass
+
+    def _council(self, body: dict[str, Any]) -> dict[str, Any]:
+        question = str(body.get("question", "")).strip()
+        if not question:
+            raise ValueError("'question' is required")
+        with self.server.brain_lock:
+            result = self.server.brain.deliberate(question)
+        return {
+            "question": result.question,
+            "verdict": result.verdict,
+            "positions": [
+                {"persona": p.persona, "model": p.model, "text": p.text} for p in result.positions
+            ],
+        }
 
     def _sleep(self) -> dict[str, Any]:
         with self.server.brain_lock:
@@ -431,6 +447,7 @@ _HTML = """<!doctype html>
       <button data-tab="mind">Mind</button>
       <button data-tab="memories">Memories</button>
       <button data-tab="graph">Graph</button>
+      <button data-tab="council">Council</button>
       <button data-tab="docs">Docs</button>
     </div>
 
@@ -472,6 +489,18 @@ _HTML = """<!doctype html>
         <input type="text" id="graphQuery" placeholder="search entities / relations…"/>
       </div>
       <div id="graphList"></div>
+    </div>
+
+    <div class="tabpane hidden" id="tab-council">
+      <div class="field">
+        <input type="text" id="councilQ" placeholder="Pose an open question for the council…"/>
+      </div>
+      <button id="councilBtn" type="button">Deliberate</button>
+      <div class="hint">Convenes adversarial personas across your installed models — may take a while.</div>
+      <h2>Verdict</h2>
+      <div class="selfmodel" id="councilVerdict">—</div>
+      <h2>Positions</h2>
+      <div id="councilPositions"></div>
     </div>
 
     <div class="tabpane hidden" id="tab-docs">
@@ -693,6 +722,25 @@ $("sleepBtn").addEventListener("click", async () => {
 $("memKind").addEventListener("change", loadMemories);
 $("memQuery").addEventListener("input", () => { clearTimeout(window._mt); window._mt = setTimeout(loadMemories, 250); });
 $("graphQuery").addEventListener("input", () => { clearTimeout(window._gt); window._gt = setTimeout(loadGraph, 250); });
+
+$("councilBtn").addEventListener("click", async () => {
+  const question = $("councilQ").value.trim(); if (!question) return;
+  $("councilBtn").disabled = true; $("councilVerdict").textContent = "Deliberating…"; $("councilPositions").innerHTML = "";
+  try {
+    const r = await api("POST", "/api/council", { question });
+    $("councilVerdict").textContent = r.verdict;
+    r.positions.forEach(p => {
+      const d = document.createElement("div"); d.className = "mem";
+      const tx = document.createElement("div"); tx.className = "text"; tx.textContent = p.text; d.appendChild(tx);
+      const tags = document.createElement("div"); tags.className = "tags";
+      const add = (cls, x) => { const sp = document.createElement("span"); sp.className = "tag " + cls; sp.textContent = x; tags.appendChild(sp); };
+      add("tier", p.persona); add("", p.model);
+      d.appendChild(tags); $("councilPositions").appendChild(d);
+    });
+    refreshState();
+  } catch (e) { $("councilVerdict").textContent = "Error: " + e.message; }
+  $("councilBtn").disabled = false;
+});
 
 refreshState(); loadIdentity();
 </script>

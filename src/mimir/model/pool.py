@@ -151,6 +151,27 @@ class ProviderPool:
             "all provider endpoint(s) failed for chat stream; deferring", transient=True
         ) from last_exc
 
+    def available_models(self) -> list[str]:
+        """Distinct models installed across the endpoints (for council auto-discovery, DESIGN §4).
+
+        Endpoints that can't list (no ``list_models`` or it errors) contribute nothing — discovery
+        is best-effort and never fatal.
+        """
+        seen: list[str] = []
+        for endpoint in self._endpoints:
+            lister = getattr(endpoint.provider, "list_models", None)
+            if lister is None:
+                continue
+            try:
+                models = lister()
+            except Exception as exc:  # discovery is best-effort
+                log.warning("model: could not list models on %s: %s", endpoint.name, exc)
+                continue
+            for model in models:
+                if model not in seen:
+                    seen.append(model)
+        return seen
+
     def get_stats(self) -> dict[str, object]:
         with self._lock:
             now = self._clock()

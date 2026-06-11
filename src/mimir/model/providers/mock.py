@@ -17,6 +17,8 @@ from collections.abc import Iterator
 from ...embed.locality import LocalityHashEmbedder
 from ...prompts import (
     BAKE_MARKER,
+    COUNCIL_PERSONA_MARKER,
+    COUNCIL_SYNTH_MARKER,
     RECALL_CLOSE,
     RECALL_OPEN,
     SELF_MODEL_MARKER,
@@ -44,6 +46,10 @@ class MockProvider:
 
         if BAKE_MARKER in system:
             return self._bake(user)
+        if COUNCIL_SYNTH_MARKER in system:
+            return self._council_synth(user)
+        if COUNCIL_PERSONA_MARKER in system:
+            return self._council_persona(system, user)
         if WORKING_MEMORY_MARKER in system:
             return self._working_memory(user)
         if SELF_MODEL_MARKER in system:
@@ -60,6 +66,10 @@ class MockProvider:
         for i, word in enumerate(reply.split(" ")):
             yield word if i == 0 else " " + word
 
+    def list_models(self) -> list[str]:
+        """A few distinct names so the council's multi-model assignment path is exercised."""
+        return ["mock-a", "mock-b", "mock-c"]
+
     def embed(self, model: str, texts: list[str]) -> list[list[float]]:
         return [self._embedder.embed(t) for t in texts]
 
@@ -72,6 +82,20 @@ class MockProvider:
         if not stripped or stripped.endswith("?"):
             return json.dumps({"facts": [], "triples": []})
         return json.dumps({"facts": [stripped], "triples": _mock_triples(stripped)})
+
+    @staticmethod
+    def _council_persona(system: str, question: str) -> str:
+        """A deterministic, persona-specific position (name parsed from the marker)."""
+        name = "voice"
+        marker = f"[{COUNCIL_PERSONA_MARKER} "
+        if marker in system:
+            name = system.split(marker, 1)[1].split("]", 1)[0].strip()
+        snippet = question.strip()[:48]
+        return f"As the {name}, on '{snippet}': here is my distinct position."
+
+    @staticmethod
+    def _council_synth(question: str) -> str:
+        return "Council verdict: weighing the perspectives, a balanced conclusion emerges."
 
     @staticmethod
     def _working_memory(brief: str) -> str:

@@ -81,3 +81,10 @@ temperature = 0.3
 [roles.embed]
 # Required only when [embeddings] mode = "endpoint".
 model = "nomic-embed-text"
+
+# [roles.council] is OPTIONAL. The inner council auto-discovers the models actually installed and
+# spreads its personas across them; this entry only sets the fallback model + tuned params (e.g. a
+# higher temperature for more persona diversity) used when discovery finds nothing.
+# [roles.council]
+# model = "llama3.1:8b"
+# temperature = 0.8

@@ -81,5 +81,36 @@ class ModelGateway:
             spec.model, texts, priority=self._priority(role, priority)
         )
 
+    # -- inner council support --------------------------------------------------------
+
+    def available_models(self) -> list[str]:
+        """Models installed across the provider pool — the council's auto-discovery (DESIGN §4)."""
+        return self._pool.available_models()
+
+    def default_council_model(self) -> str:
+        """Fallback model when discovery finds nothing: the council, reasoning, or chat role."""
+        for role in ("council", "reasoning", "chat"):
+            spec = self._roles.get(role)
+            if spec is not None:
+                return spec.model
+        raise ModelGatewayError("no model configured for the council")
+
+    def _council_params(self) -> dict[str, object]:
+        for role in ("council", "reasoning"):
+            spec = self._roles.get(role)
+            if spec is not None:
+                return spec.params
+        return {}
+
+    def chat_with_model(
+        self, model: str, messages: list[Message], *, priority: Priority = Priority.BACKGROUND
+    ) -> str:
+        """Chat against a specific discovered model (bypassing role→model resolution).
+
+        Used by the council to spread personas across models. Params come from the council/reasoning
+        role config, so tuning still lives in config (DESIGN §4).
+        """
+        return self._pool.chat(model, messages, self._council_params(), priority=priority)
+
     def get_stats(self) -> dict[str, object]:
         return self._pool.get_stats()

@@ -46,6 +46,18 @@ class OllamaProvider:
                 f"unexpected /api/chat response shape from Ollama: {data!r}"
             ) from exc
 
+    def list_models(self) -> list[str]:
+        """Discover installed models via Ollama's /api/tags (for council auto-discovery)."""
+        req = urllib.request.Request(f"{self._host}/api/tags", method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                data = json.loads(resp.read())
+        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as exc:
+            raise ProviderError(
+                f"could not list Ollama models at {self._host}: {exc}", transient=True
+            ) from exc
+        return [str(m["name"]) for m in data.get("models", []) if "name" in m]
+
     def chat_stream(
         self, model: str, messages: list[Message], params: dict[str, Any]
     ) -> Iterator[str]:
