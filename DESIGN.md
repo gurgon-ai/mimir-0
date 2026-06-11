@@ -250,9 +250,10 @@ needs.
   anchors — name, operator, location, purpose, values, scope, boundaries, voice — interactively
   or from config)_, procedural memory, entity graph, sleep/consolidation, inner council, the
   qualification battery.
-- **Adapters (separate extras/packages):** a reference HTTP server (+ streaming), an optional
-  voice adapter, a demo UI, and example plugins (home-automation, etc.) that show the extension
-  pattern without being core dependencies.
+- **Adapters (separate extras/packages):** ~~a reference HTTP server~~ _(landed: a stdlib,
+  zero-dependency reference web server + single-page UI — chat, the identity interview, document
+  ingest; `python -m mimir.server`)_, streaming, an optional voice adapter, and example plugins
+  (home-automation, etc.) that show the extension pattern without being core dependencies.
 
 ---
 

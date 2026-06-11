@@ -1,0 +1,94 @@
+"""Executable spec for the reference web server (the human interaction surface)."""
+
+from __future__ import annotations
+
+import json
+import threading
+import urllib.error
+import urllib.request
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+
+from mimir.brain import Mimir
+from mimir.config import Config
+from mimir.server import create_server
+
+
+def _json(method: str, url: str, body: dict | None = None) -> tuple[int, dict]:
+    data = json.dumps(body).encode() if body is not None else None
+    headers = {"Content-Type": "application/json"} if data else {}
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read())
+
+
+def _get_html(url: str) -> tuple[int, str]:
+    with urllib.request.urlopen(url, timeout=10) as r:
+        return r.status, r.read().decode("utf-8")
+
+
+@pytest.fixture
+def base_url(mock_config: Config) -> Iterator[str]:
+    brain = Mimir(mock_config)
+    server = create_server(brain, "127.0.0.1", 0)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.shutdown()
+        brain.close()
+
+
+def test_index_serves_ui(base_url: str) -> None:
+    status, html = _get_html(base_url + "/")
+    assert status == 200
+    assert "Mimir 0" in html
+
+
+def test_state_reports_embed_mode(base_url: str) -> None:
+    status, data = _json("GET", base_url + "/api/state")
+    assert status == 200
+    assert data["embed_mode"] == "bootstrap"
+    assert data["memories"] == 0
+
+
+def test_identity_establish_over_http(base_url: str) -> None:
+    status, data = _json("POST", base_url + "/api/identity", {"answers": {"name": "Mimir"}})
+    assert status == 200
+    assert data["anchors"]["name"] == "Mimir"
+    assert "name" not in {k for k, _ in data["pending"]}
+
+
+def test_turn_bakes_and_recalls_over_http(base_url: str) -> None:
+    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "greg"})
+    status, data = _json(
+        "POST", base_url + "/api/turn", {"text": "What is my favorite color?", "user": "greg"}
+    )
+    assert status == 200
+    assert "teal" in data["reply"].lower()
+    assert data["introspect"]["source_count"] >= 1
+
+
+def test_ingest_over_http(base_url: str, tmp_path: Path) -> None:
+    doc = tmp_path / "note.md"
+    doc.write_text("# Topic\nThe answer is 42.\n", encoding="utf-8")
+    status, data = _json("POST", base_url + "/api/ingest", {"path": str(doc)})
+    assert status == 200
+    assert data["chunks_written"] >= 1
+
+
+def test_bad_requests_fail_with_4xx(base_url: str) -> None:
+    status, data = _json("POST", base_url + "/api/turn", {})  # missing text
+    assert status == 400
+    assert "error" in data
+
+    status2, data2 = _json("POST", base_url + "/api/ingest", {"path": "/no/such/file.md"})
+    assert status2 == 400
+    assert "error" in data2
