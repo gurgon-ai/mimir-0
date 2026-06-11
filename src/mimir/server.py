@@ -27,11 +27,13 @@ import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from .brain import Mimir
+from .cognition.self_model import gather_signals
 from .errors import IngestError, MimirError
-from .storage.models import MemoryKind
-from .storage.repo import count_memories
+from .storage.models import Memory, MemoryKind
+from .storage.repo import browse_memories, count_memories, latest_self_model
 
 log = logging.getLogger("mimir.server")
 
@@ -91,17 +93,25 @@ class _Handler(BaseHTTPRequestHandler):
     # -- routing ----------------------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802 (stdlib naming)
+        parsed = urlparse(self.path)
+        route, params = parsed.path, parse_qs(parsed.query)
         try:
-            if self.path == "/" or self.path.startswith("/?"):
+            if route == "/":
                 self._send(200, _HTML.encode("utf-8"), "text/html; charset=utf-8")
-            elif self.path == "/api/state":
+            elif route == "/api/state":
                 self._send_json(self._state())
-            elif self.path == "/api/identity":
+            elif route == "/api/identity":
                 self._send_json(self._identity_payload())
-            elif self.path == "/favicon.ico":
+            elif route == "/api/mind":
+                self._send_json(self._mind())
+            elif route == "/api/memories":
+                self._send_json(self._memories(params))
+            elif route == "/favicon.ico":
                 self._send(204, b"", "image/x-icon")
             else:
                 self._send_json({"error": "not found"}, status=404)
+        except ValueError as exc:  # bad query params
+            self._send_json({"error": str(exc)}, status=400)
         except Exception as exc:  # never leak a stack to the client; log loud (DESIGN §10)
             log.exception("GET %s failed", self.path)
             self._send_json({"error": str(exc)}, status=500)
@@ -172,6 +182,55 @@ class _Handler(BaseHTTPRequestHandler):
             "chunks_replaced": result.chunks_replaced,
         }
 
+    def _mind(self) -> dict[str, Any]:
+        brain = self.server.brain
+        with self.server.brain_lock:
+            signals = gather_signals(brain._storage)
+            self_model = latest_self_model(brain._storage)
+            anchors = brain.identity_anchors()
+        return {
+            "self_model": self_model.text if self_model else None,
+            "anchors": anchors,
+            "stats": {
+                "total": signals.total_memories,
+                "documents": signals.documents,
+                "reflections": signals.reflections,
+                "users": signals.distinct_users,
+                "by_tier": signals.tier_counts,
+            },
+            "recent_reflections": signals.recent_reflections,
+        }
+
+    def _memories(self, params: dict[str, list[str]]) -> dict[str, Any]:
+        kind_str = params.get("kind", ["memory"])[0]
+        try:
+            kind = MemoryKind(kind_str)
+        except ValueError as exc:
+            raise ValueError(f"unknown kind {kind_str!r}") from exc
+        limit = max(1, min(500, int(params.get("limit", ["100"])[0])))
+        query = (params.get("q", [""])[0] or "").strip() or None
+        with self.server.brain_lock:
+            memories = browse_memories(
+                self.server.brain._storage, kind=kind, query=query, limit=limit
+            )
+        return {"memories": [_memory_to_dict(m) for m in memories]}
+
+
+def _memory_to_dict(mem: Memory) -> dict[str, Any]:
+    """Serialize a memory for the browser (provenance and epistemics on display)."""
+    return {
+        "id": mem.id,
+        "text": mem.text,
+        "evidence_tier": mem.evidence_tier.key,
+        "confidence": round(mem.confidence, 3),
+        "salience": round(mem.salience, 3),
+        "provenance": mem.provenance,
+        "source": mem.source,
+        "user": mem.user,
+        "access_count": mem.access_count,
+        "created_at": mem.created_at,
+    }
+
 
 def serve(config_path: str, host: str = "127.0.0.1", port: int = 8765) -> None:
     """Boot a brain from config and serve the web UI until interrupted."""
@@ -239,6 +298,22 @@ _HTML = """<!doctype html>
   .row { display:flex; gap:8px; }
   .hint { font-size:12px; color:#6f7a8a; margin-top:6px; }
   #ingestResult, #identMsg { font-size:12px; color:#7fd17f; margin-top:6px; min-height:14px; }
+  .tabs { display:flex; gap:4px; margin-bottom:14px; border-bottom:1px solid #232a35; }
+  .tabs button { background:none; border:0; border-bottom:2px solid transparent; color:#8a94a3; padding:7px 10px; border-radius:0; font-size:13px; }
+  .tabs button.active { color:#d7dde5; border-bottom-color:#1f6feb; }
+  .tabpane.hidden { display:none; }
+  .selfmodel { background:#11161d; border:1px solid #232a35; border-radius:8px; padding:11px; font-size:13px; white-space:pre-wrap; color:#c3ccd8; }
+  .stats { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
+  .stat { background:#161c24; border:1px solid #232a35; border-radius:6px; padding:5px 9px; font-size:12px; }
+  .stat b { color:#fff; }
+  .mem { border:1px solid #232a35; border-radius:8px; padding:9px 11px; margin-bottom:8px; }
+  .mem .text { font-size:13px; white-space:pre-wrap; }
+  .mem .tags { margin-top:6px; display:flex; flex-wrap:wrap; gap:5px; }
+  .tag { font-size:11px; padding:2px 6px; border-radius:4px; background:#1a2029; color:#9aa4b2; }
+  .tag.tier { background:#16324a; color:#9fd0ff; }
+  .searchrow { display:flex; gap:6px; margin-bottom:10px; }
+  .searchrow input { flex:1; }
+  .searchrow select { background:#11161d; border:1px solid #2b333f; color:#d7dde5; border-radius:8px; padding:0 8px; }
 </style>
 </head>
 <body>
@@ -255,16 +330,43 @@ _HTML = """<!doctype html>
     </form>
   </div>
   <aside>
-    <section>
-      <h2>Identity</h2>
+    <div class="tabs">
+      <button data-tab="identity" class="active">Identity</button>
+      <button data-tab="mind">Mind</button>
+      <button data-tab="memories">Memories</button>
+      <button data-tab="docs">Docs</button>
+    </div>
+
+    <div class="tabpane" id="tab-identity">
       <div id="identFields"></div>
       <div class="row">
         <button class="secondary" id="reviseBtn" type="button">Revise all</button>
         <button id="saveIdent" type="button">Save</button>
       </div>
       <div id="identMsg"></div>
-    </section>
-    <section>
+    </div>
+
+    <div class="tabpane hidden" id="tab-mind">
+      <h2>Self-model</h2>
+      <div class="selfmodel" id="selfModel">—</div>
+      <div class="stats" id="mindStats"></div>
+      <h2>Recent reflections</h2>
+      <div id="reflections"></div>
+    </div>
+
+    <div class="tabpane hidden" id="tab-memories">
+      <div class="searchrow">
+        <select id="memKind">
+          <option value="memory">memories</option>
+          <option value="sentinel_note">reflections</option>
+          <option value="self_model">self-models</option>
+        </select>
+        <input type="text" id="memQuery" placeholder="search text…"/>
+      </div>
+      <div id="memList"></div>
+    </div>
+
+    <div class="tabpane hidden" id="tab-docs">
       <h2>Ingest a document</h2>
       <div class="field">
         <input type="text" id="docPath" placeholder="/path/to/notes.md (.txt .md .pdf)"/>
@@ -272,7 +374,7 @@ _HTML = """<!doctype html>
       <button id="ingestBtn" type="button">Ingest</button>
       <div id="ingestResult"></div>
       <div class="hint">Path is read on the server (this is a local tool).</div>
-    </section>
+    </div>
   </aside>
 </main>
 <script>
@@ -364,6 +466,64 @@ $("ingestBtn").addEventListener("click", async () => {
     refreshState();
   } catch (e) { $("ingestResult").textContent = "Error: " + e.message; }
 });
+
+// --- tabs ---
+const loaders = { mind: loadMind, memories: loadMemories };
+document.querySelectorAll(".tabs button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    document.querySelectorAll(".tabpane").forEach(p => p.classList.add("hidden"));
+    document.getElementById("tab-" + btn.dataset.tab).classList.remove("hidden");
+    if (loaders[btn.dataset.tab]) loaders[btn.dataset.tab]();
+  });
+});
+
+async function loadMind() {
+  try {
+    const m = await api("GET", "/api/mind");
+    $("selfModel").textContent = m.self_model || "(not yet synthesized — keep talking)";
+    const s = m.stats || {};
+    const tiers = Object.entries(s.by_tier || {}).map(([k,v]) => `${k}: ${v}`).join(", ") || "none";
+    $("mindStats").innerHTML =
+      `<div class="stat"><b>${s.total||0}</b> memories</div>` +
+      `<div class="stat"><b>${s.documents||0}</b> docs</div>` +
+      `<div class="stat"><b>${s.reflections||0}</b> reflections</div>` +
+      `<div class="stat"><b>${s.users||0}</b> users</div>` +
+      `<div class="stat">tiers — ${tiers}</div>`;
+    const refl = $("reflections"); refl.innerHTML = "";
+    (m.recent_reflections || []).forEach(t => {
+      const d = document.createElement("div"); d.className = "mem";
+      const tx = document.createElement("div"); tx.className = "text"; tx.textContent = t; d.appendChild(tx);
+      refl.appendChild(d);
+    });
+    if (!(m.recent_reflections||[]).length) refl.innerHTML = '<div class="hint">No reflections yet.</div>';
+  } catch (e) { $("selfModel").textContent = "error: " + e.message; }
+}
+
+async function loadMemories() {
+  const kind = $("memKind").value;
+  const q = $("memQuery").value.trim();
+  try {
+    const data = await api("GET", `/api/memories?kind=${encodeURIComponent(kind)}&q=${encodeURIComponent(q)}&limit=100`);
+    const list = $("memList"); list.innerHTML = "";
+    if (!data.memories.length) { list.innerHTML = '<div class="hint">No matching entries.</div>'; return; }
+    data.memories.forEach(m => {
+      const d = document.createElement("div"); d.className = "mem";
+      const tx = document.createElement("div"); tx.className = "text"; tx.textContent = m.text; d.appendChild(tx);
+      const tags = document.createElement("div"); tags.className = "tags";
+      const add = (cls, t) => { const sp = document.createElement("span"); sp.className = "tag " + cls; sp.textContent = t; tags.appendChild(sp); };
+      add("tier", m.evidence_tier);
+      if (m.provenance) add("", m.provenance);
+      if (m.user) add("", "user: " + m.user);
+      add("", "conf " + m.confidence); add("", "sal " + m.salience);
+      d.appendChild(tags); list.appendChild(d);
+    });
+  } catch (e) { $("memList").innerHTML = "error: " + e.message; }
+}
+
+$("memKind").addEventListener("change", loadMemories);
+$("memQuery").addEventListener("input", () => { clearTimeout(window._mt); window._mt = setTimeout(loadMemories, 250); });
 
 refreshState(); loadIdentity();
 </script>

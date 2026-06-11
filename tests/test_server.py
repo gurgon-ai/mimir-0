@@ -84,6 +84,36 @@ def test_ingest_over_http(base_url: str, tmp_path: Path) -> None:
     assert data["chunks_written"] >= 1
 
 
+def test_mind_endpoint_reports_state(base_url: str) -> None:
+    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "greg"})
+    status, data = _json("GET", base_url + "/api/mind")
+    assert status == 200
+    assert data["stats"]["total"] >= 1
+    assert isinstance(data["anchors"], dict)
+    # turn 1 seeds a self-model (the /api/turn handler waits for background to settle)
+    assert data["self_model"] is not None
+
+
+def test_memories_browser_lists_and_searches(base_url: str) -> None:
+    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "greg"})
+
+    status, data = _json("GET", base_url + "/api/memories?kind=memory")
+    assert status == 200
+    assert any("teal" in m["text"].lower() for m in data["memories"])
+    assert all("evidence_tier" in m and "provenance" in m for m in data["memories"])
+
+    _, hit = _json("GET", base_url + "/api/memories?kind=memory&q=teal")
+    assert len(hit["memories"]) >= 1
+    _, miss = _json("GET", base_url + "/api/memories?kind=memory&q=zzznope")
+    assert miss["memories"] == []
+
+
+def test_memories_bad_kind_is_4xx(base_url: str) -> None:
+    status, data = _json("GET", base_url + "/api/memories?kind=bogus")
+    assert status == 400
+    assert "error" in data
+
+
 def test_bad_requests_fail_with_4xx(base_url: str) -> None:
     status, data = _json("POST", base_url + "/api/turn", {})  # missing text
     assert status == 400

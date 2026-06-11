@@ -195,6 +195,37 @@ def record_access(gateway: StorageGateway, memory_ids: list[int]) -> None:
     gateway.submit_async(_write, priority=Priority.TOUCH)
 
 
+def browse_memories(
+    gateway: StorageGateway,
+    *,
+    kind: MemoryKind = MemoryKind.MEMORY,
+    query: str | None = None,
+    limit: int = 100,
+) -> list[Memory]:
+    """List memories of a kind for inspection, newest first, optionally keyword-filtered.
+
+    A simple ``LIKE`` filter on the text — this is for the human-facing memory browser, not the
+    ranked retrieval path (that is ``retrieval.hybrid``).
+    """
+
+    def _read(conn: sqlite3.Connection) -> list[Memory]:
+        if query:
+            rows = conn.execute(
+                f"SELECT {_COLUMNS} FROM memories WHERE kind = ? AND text LIKE ? "
+                f"ORDER BY created_at DESC, id DESC LIMIT ?",
+                (kind.value, f"%{query}%", limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"SELECT {_COLUMNS} FROM memories WHERE kind = ? "
+                f"ORDER BY created_at DESC, id DESC LIMIT ?",
+                (kind.value, limit),
+            ).fetchall()
+        return [_row_to_memory(r) for r in rows]
+
+    return gateway.read(_read)
+
+
 def delete_by_source(gateway: StorageGateway, source: str) -> int:
     """Delete all chunks that came from a given document source. Returns rows removed.
 
