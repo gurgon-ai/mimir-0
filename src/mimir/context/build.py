@@ -141,6 +141,7 @@ def build_context(
     sentinel_note: Memory | None,
     embed_mode: EmbeddingMode,
     budget_tokens: int,
+    self_knowledge: str | None = None,
     extra_sections: list[Section] | None = None,
 ) -> ContextBundle:
     """Assemble the epistemic prompt for one turn. Pure: no I/O, no model calls.
@@ -151,7 +152,21 @@ def build_context(
     sections: list[Section] = []
     warnings: list[str] = []
 
-    # 1. Identity / self-model — always-on, high tier (DESIGN §3a, §3e).
+    # 1. Self-model — the synthesized identity, first and always-on (DESIGN §3a, §3e). Distinct
+    #    from the seed persona below: this is what the system has come to be through use.
+    self_model_section: Section | None = None
+    if self_knowledge:
+        self_model_section = Section(
+            name="self_model",
+            title="What you've come to understand about yourself (from your own history):",
+            body=self_knowledge,
+            tier=SectionTier.HIGH,
+            requested_tokens=estimate_tokens(self_knowledge),
+            admitted_tokens=estimate_tokens(self_knowledge),
+        )
+        sections.append(self_model_section)
+
+    # 2. Identity / persona — the authored seed, always-on, high tier (DESIGN §3a, §3e).
     identity_section = Section(
         name="identity",
         title="Who you are:",
@@ -163,6 +178,7 @@ def build_context(
     sections.append(identity_section)
 
     # Reserve budget for the always-present pieces, then give the rest to knowledge.
+    self_model_tokens = self_model_section.admitted_tokens if self_model_section else 0
     sentinel_tokens = (
         estimate_tokens(sentinel_note.text) + 8 if sentinel_note is not None else 0
     )
@@ -170,6 +186,7 @@ def build_context(
     knowledge_budget = max(
         0,
         budget_tokens
+        - self_model_tokens
         - identity_section.admitted_tokens
         - sentinel_tokens
         - extra_reserved

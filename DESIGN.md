@@ -243,8 +243,10 @@ needs.
   extra (`pypdf`), so the runtime contract holds. EPUB and *LLM compilation of documents into
   integrated, contradiction-resolved knowledge* remain later, optional layers — not the ingestion
   itself.
-- **v0.1+ — cognition layers:** working memory, self-model, procedural memory, entity graph,
-  sleep/consolidation, inner council, the qualification battery.
+- **v0.1+ — cognition layers:** working memory, ~~self-model~~ _(landed: an evolving, generic
+  self-model — the reasoning model authors a first-person identity grounded only in the store's
+  own operational signals, refreshed off the hot path and injected first, always-on)_, procedural
+  memory, entity graph, sleep/consolidation, inner council, the qualification battery.
 - **Adapters (separate extras/packages):** a reference HTTP server (+ streaming), an optional
   voice adapter, a demo UI, and example plugins (home-automation, etc.) that show the extension
   pattern without being core dependencies.
@@ -313,7 +315,9 @@ a defect.
 Pre-alpha. **The v0 spine is alive and the §6 acceptance loop passes green** (boot → bake → recall
 with provenance & evidence tier → async sentinel note), verified under an automated self-test and
 against a live local model. Both gateways are hardened (priority queue, batching, coalescing,
-retry/backoff, provider pool with health/failover). **v0.1 document ingestion has begun**: `ingest()`
-for plain text + markdown in core, PDF behind the `[documents]` extra. Still pre-alpha and evolving;
-the remaining cognition layers (working memory, self-model, procedural, entity graph,
-sleep/consolidation, inner council, qualification battery) are the road ahead.
+retry/backoff, provider pool with health/failover). **v0.1 has begun**: document
+ingestion (`ingest()` for text + markdown in core, PDF behind the `[documents]` extra) and an
+evolving, generic **self-model** (identity authored from the store's own operational history,
+refreshed off the hot path, injected always-on). Still pre-alpha and evolving; the remaining
+cognition layers (working memory, procedural, entity graph, sleep/consolidation, inner council,
+qualification battery) are the road ahead.

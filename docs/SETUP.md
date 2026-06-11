@@ -175,6 +175,9 @@ dim = 256                       # bootstrap vector size (ignored in endpoint mod
 [context]
 budget_tokens = 4096            # per-turn prompt budget for assembly + accounting
 
+[self_model]
+refresh_every = 5               # turns between self-model re-synthesis; 0 disables (seed only)
+
 [provider]
 type = "ollama"                 # "ollama" | "mock"
 host = "http://localhost:11434" # ollama only

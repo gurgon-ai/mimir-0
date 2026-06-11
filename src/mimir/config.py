@@ -53,6 +53,9 @@ class Config:
     embed_dim: int = 256
     # Per chat-turn token budget for the assembled prompt (context accounting, DESIGN §10).
     context_budget_tokens: int = 4096
+    # How often (in turns) the self-model is re-synthesized off the hot path. 0 disables it
+    # (the seed identity is then the whole self-model). The first turn always seeds one.
+    self_model_refresh_every: int = 5
 
     def validate(self) -> None:
         """Raise ``ConfigError`` loud on any unrunnable configuration."""
@@ -130,6 +133,9 @@ def load_config(path: str | Path) -> Config:
         embed_mode=embed_mode,
         embed_dim=int(embeddings.get("dim", 256)),
         context_budget_tokens=int(raw.get("context", {}).get("budget_tokens", 4096)),
+        self_model_refresh_every=int(
+            raw.get("self_model", {}).get("refresh_every", 5)
+        ),
     )
     config.validate()
     return config

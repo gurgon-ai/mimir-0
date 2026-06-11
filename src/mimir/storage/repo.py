@@ -127,25 +127,47 @@ def list_memories(
     return gateway.read(_read)
 
 
-def latest_sentinel_note(gateway: StorageGateway, user: str | None) -> Memory | None:
-    """The most recent sentinel note for a user — the high-attention end slot's content."""
+def recent_by_kind(
+    gateway: StorageGateway,
+    kind: MemoryKind,
+    *,
+    user: str | None = None,
+    limit: int = 5,
+) -> list[Memory]:
+    """The most recent rows of a kind, newest first. Used for notes and the self-model.
 
-    def _read(conn: sqlite3.Connection) -> Memory | None:
+    With ``user`` set, includes user-agnostic rows (``user IS NULL``) too, so shared content
+    surfaces alongside a specific user's.
+    """
+
+    def _read(conn: sqlite3.Connection) -> list[Memory]:
         if user is None:
-            row = conn.execute(
+            rows = conn.execute(
                 f"SELECT {_COLUMNS} FROM memories WHERE kind = ? "
-                f"ORDER BY created_at DESC, id DESC LIMIT 1",
-                (MemoryKind.SENTINEL_NOTE.value,),
-            ).fetchone()
+                f"ORDER BY created_at DESC, id DESC LIMIT ?",
+                (kind.value, limit),
+            ).fetchall()
         else:
-            row = conn.execute(
-                f"SELECT {_COLUMNS} FROM memories WHERE kind = ? "
-                f"AND (user = ? OR user IS NULL) ORDER BY created_at DESC, id DESC LIMIT 1",
-                (MemoryKind.SENTINEL_NOTE.value, user),
-            ).fetchone()
-        return _row_to_memory(row) if row else None
+            rows = conn.execute(
+                f"SELECT {_COLUMNS} FROM memories WHERE kind = ? AND (user = ? OR user IS NULL) "
+                f"ORDER BY created_at DESC, id DESC LIMIT ?",
+                (kind.value, user, limit),
+            ).fetchall()
+        return [_row_to_memory(r) for r in rows]
 
     return gateway.read(_read)
+
+
+def latest_sentinel_note(gateway: StorageGateway, user: str | None) -> Memory | None:
+    """The most recent sentinel note for a user — the high-attention end slot's content."""
+    rows = recent_by_kind(gateway, MemoryKind.SENTINEL_NOTE, user=user, limit=1)
+    return rows[0] if rows else None
+
+
+def latest_self_model(gateway: StorageGateway) -> Memory | None:
+    """The most recent synthesized self-model (always-on identity; shared, not user-scoped)."""
+    rows = recent_by_kind(gateway, MemoryKind.SELF_MODEL, user=None, limit=1)
+    return rows[0] if rows else None
 
 
 def record_access(gateway: StorageGateway, memory_ids: list[int]) -> None:

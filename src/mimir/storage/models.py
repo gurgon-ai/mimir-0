@@ -56,13 +56,16 @@ class EvidenceTier(Enum):
 class MemoryKind(Enum):
     """What *role* a stored row plays in assembly.
 
-    v0 needs two: ordinary recallable knowledge, and the sentinel's note to the next
-    turn (which gets a distinct high-attention slot in ``build_context()``, DESIGN §3e).
-    Future kinds (understanding, procedural, …) register here without a schema change.
+    Recallable knowledge is ``MEMORY``; the sentinel's note to the next turn is
+    ``SENTINEL_NOTE`` (a distinct high-attention slot in ``build_context()``, DESIGN §3e);
+    the synthesized always-on identity is ``SELF_MODEL`` (DESIGN §3a). Only ``MEMORY`` rows
+    are recalled — notes and the self-model occupy their own dedicated prompt slots and never
+    compete for the knowledge section. Future kinds register here without a schema change.
     """
 
     MEMORY = "memory"
     SENTINEL_NOTE = "sentinel_note"
+    SELF_MODEL = "self_model"
 
 
 @dataclass(slots=True)

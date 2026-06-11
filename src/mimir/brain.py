@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from .cognition.bake import bake
 from .cognition.ingest import IngestResult, ingest_document
+from .cognition.self_model import synthesize_self_model
 from .cognition.sentinel import run_sentinel
 from .config import Config, ProviderSpec, load_config
 from .context.build import ContextBundle, build_context
@@ -35,7 +37,12 @@ from .model.providers.ollama import OllamaProvider
 from .retrieval.hybrid import retrieve
 from .storage.gateway import StorageGateway
 from .storage.models import Memory, MemoryKind
-from .storage.repo import latest_sentinel_note, list_memories, record_access
+from .storage.repo import (
+    latest_self_model,
+    latest_sentinel_note,
+    list_memories,
+    record_access,
+)
 
 log = logging.getLogger("mimir")
 
@@ -86,8 +93,9 @@ class Mimir:
         # cheap bootstrap path for poor memory (DESIGN §10; kickoff decision).
         log.info("Mimir online | embeddings: %s", self._embedder.mode.banner())
 
-        self._pending_sentinel: threading.Thread | None = None
+        self._pending: list[threading.Thread] = []
         self._last_sentinel_error: BaseException | None = None
+        self._turn_count = 0
 
     @classmethod
     def from_config(cls, path: str) -> Mimir:
@@ -97,14 +105,17 @@ class Mimir:
     # -- the turn ---------------------------------------------------------------------
 
     def turn(self, text: str, user: str | None = None) -> TurnResult:
-        # Make sure the previous turn's sentinel note has landed before we assemble.
-        self._join_sentinel()
+        # Make sure the previous turn's background work (sentinel note, self-model) has landed
+        # before we assemble — so the prompt reflects the latest reflection and identity.
+        self._join_background()
+        self._turn_count += 1
 
         # 1. Recall: embed the query, pull candidates, rank them.
         query_vec = self._embedder.embed(text)
         candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY)
         retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
         note = latest_sentinel_note(self._storage, user)
+        self_model = latest_self_model(self._storage)
 
         # 2. Assemble the epistemic prompt.
         bundle = build_context(
@@ -115,6 +126,7 @@ class Mimir:
             sentinel_note=note,
             embed_mode=self._embedder.mode,
             budget_tokens=self.config.context_budget_tokens,
+            self_knowledge=self_model.text if self_model else None,
         )
 
         # 3. Generate the reply through the model gateway.
@@ -137,8 +149,9 @@ class Mimir:
             primary_user=self.config.primary_user,
         )
 
-        # 5. Fire the sentinel off the hot path.
+        # 5. Fire the sentinel off the hot path, and refresh the self-model on cadence.
         self._spawn_sentinel(user=user, turn_text=text, reply=reply)
+        self._maybe_refresh_self_model()
 
         return TurnResult(reply=reply, context=bundle, baked=baked)
 
@@ -165,9 +178,41 @@ class Mimir:
             overlap_tokens=overlap_tokens,
         )
 
-    # -- sentinel plumbing ------------------------------------------------------------
+    # -- self-model -------------------------------------------------------------------
+
+    def refresh_self_model(self) -> Memory:
+        """Synthesize a fresh self-model now (synchronous) and return it.
+
+        The self-model is the system's always-on identity, authored from its own operational
+        history (DESIGN §3a). It is normally refreshed automatically off the hot path; this is
+        the explicit hook.
+        """
+        return synthesize_self_model(self._model, self._storage)
+
+    def _maybe_refresh_self_model(self) -> None:
+        every = self.config.self_model_refresh_every
+        if every <= 0:
+            return
+        # Seed one on the first turn, then refresh on cadence as experience accumulates.
+        if self._turn_count == 1 or self._turn_count % every == 0:
+
+            def _run() -> None:
+                try:
+                    synthesize_self_model(self._model, self._storage)
+                except BaseException as exc:  # logged downgrade — never touches the turn
+                    log.error(
+                        "self-model refresh failed (off the hot path; turn unaffected): %s",
+                        exc,
+                        exc_info=True,
+                    )
+
+            self._start_background("mimir-self-model", _run)
+
+    # -- background plumbing ----------------------------------------------------------
 
     def _spawn_sentinel(self, *, user: str | None, turn_text: str, reply: str) -> None:
+        self._last_sentinel_error = None
+
         def _run() -> None:
             try:
                 run_sentinel(
@@ -181,19 +226,21 @@ class Mimir:
                     exc_info=True,
                 )
 
-        self._last_sentinel_error = None
-        thread = threading.Thread(target=_run, name="mimir-sentinel", daemon=True)
-        thread.start()
-        self._pending_sentinel = thread
+        self._start_background("mimir-sentinel", _run)
 
-    def _join_sentinel(self) -> None:
-        if self._pending_sentinel is not None:
-            self._pending_sentinel.join(timeout=30)
-            self._pending_sentinel = None
+    def _start_background(self, name: str, work: Callable[[], None]) -> None:
+        thread = threading.Thread(target=work, name=name, daemon=True)
+        thread.start()
+        self._pending.append(thread)
+
+    def _join_background(self) -> None:
+        pending, self._pending = self._pending, []
+        for thread in pending:
+            thread.join(timeout=30)
 
     def wait_for_sentinel(self) -> None:
-        """Block until the most recent turn's sentinel note has been written (or failed)."""
-        self._join_sentinel()
+        """Block until the most recent turn's background work (note, self-model) has landed."""
+        self._join_background()
 
     @property
     def last_sentinel_error(self) -> BaseException | None:
@@ -203,7 +250,7 @@ class Mimir:
     # -- lifecycle --------------------------------------------------------------------
 
     def close(self) -> None:
-        self._join_sentinel()
+        self._join_background()
         self._storage.close()
 
     def __enter__(self) -> Mimir:

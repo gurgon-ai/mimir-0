@@ -23,6 +23,11 @@ dim = 256          # bootstrap vector size; ignored in endpoint mode
 [context]
 budget_tokens = 4096
 
+[self_model]
+# How often (in turns) Mimir re-synthesizes its always-on self-model from its own operational
+# history (knowledge-store stats + recent reflections). 0 disables it (seed identity only).
+refresh_every = 5
+
 [provider]
 # "ollama" talks to a local Ollama server with stdlib HTTP (no extra deps).
 # "mock" is a deterministic, offline stand-in for tests/demos (needs no model server).

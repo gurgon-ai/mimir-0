@@ -33,6 +33,16 @@ SENTINEL_SYSTEM = (
     "Respond with the note text only."
 )
 
+SELF_MODEL_MARKER = "Write a brief self-description"
+SELF_MODEL_SYSTEM = (
+    f"{SELF_MODEL_MARKER} for an AI memory system, in the first person, grounded ONLY in the "
+    "operational facts provided below (its own knowledge store and recent reflections). Two to "
+    "four sentences. Describe what the system has come to be through use — what it holds, who it "
+    "serves, what it has been attending to. Do NOT invent capabilities, experiences, persona "
+    "traits, or details not supported by the facts. This is the system describing itself from "
+    "evidence, not a fixed character."
+)
+
 # --- default identity --------------------------------------------------------------------
 DEFAULT_IDENTITY = (
     "You are Mimir, a local-first assistant with an evidence-aware memory. You attribute "

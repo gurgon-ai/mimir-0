@@ -14,7 +14,13 @@ from __future__ import annotations
 import json
 
 from ...embed.locality import LocalityHashEmbedder
-from ...prompts import BAKE_MARKER, RECALL_CLOSE, RECALL_OPEN, SENTINEL_MARKER
+from ...prompts import (
+    BAKE_MARKER,
+    RECALL_CLOSE,
+    RECALL_OPEN,
+    SELF_MODEL_MARKER,
+    SENTINEL_MARKER,
+)
 from ..provider import Message
 
 _EMBED_DIM = 64
@@ -36,6 +42,8 @@ class MockProvider:
 
         if BAKE_MARKER in system:
             return self._bake(user)
+        if SELF_MODEL_MARKER in system:
+            return self._self_model(user)
         if SENTINEL_MARKER in system:
             return self._reflect(user)
         return self._reply(system, user)
@@ -52,6 +60,12 @@ class MockProvider:
         if not stripped or stripped.endswith("?"):
             return json.dumps({"facts": []})
         return json.dumps({"facts": [stripped]})
+
+    @staticmethod
+    def _self_model(brief: str) -> str:
+        """Author a deterministic self-description grounded in the brief's first line."""
+        first = brief.strip().splitlines()[0] if brief.strip() else "I hold no memories yet."
+        return f"I am a memory system shaped by use. {first}"
 
     @staticmethod
     def _reflect(turn_text: str) -> str:
