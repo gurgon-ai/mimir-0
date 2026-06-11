@@ -20,12 +20,13 @@ from ..prompts import BAKE_SYSTEM
 from ..storage.gateway import StorageGateway
 from ..storage.models import EvidenceTier, Memory, MemoryKind
 from ..storage.repo import save_memory
+from .graph import store_triples
 
 log = logging.getLogger("mimir.bake")
 
 
-def _extract_facts(raw: str) -> list[str] | None:
-    """Parse ``{"facts": [...]}`` out of the model's reply. ``None`` means unparseable."""
+def _parse_bake(raw: str) -> tuple[list[str], list[list[str]]] | None:
+    """Parse ``{"facts": [...], "triples": [[s,r,o]]}`` from the reply. ``None`` if unparseable."""
     text = raw.strip()
     # Tolerate a model that wraps JSON in prose: take the outermost brace span.
     start, end = text.find("{"), text.rfind("}")
@@ -35,10 +36,21 @@ def _extract_facts(raw: str) -> list[str] | None:
         data = json.loads(text)
     except json.JSONDecodeError:
         return None
-    facts = data.get("facts") if isinstance(data, dict) else None
-    if not isinstance(facts, list):
+    if not isinstance(data, dict):
         return None
-    return [str(f).strip() for f in facts if str(f).strip()]
+    raw_facts = data.get("facts")
+    facts = (
+        [str(f).strip() for f in raw_facts if str(f).strip()]
+        if isinstance(raw_facts, list)
+        else []
+    )
+    raw_triples = data.get("triples")
+    triples: list[list[str]] = []
+    if isinstance(raw_triples, list):
+        for item in raw_triples:
+            if isinstance(item, (list, tuple)) and len(item) == 3:
+                triples.append([str(p).strip() for p in item])
+    return facts, triples
 
 
 def _tier_and_provenance(user: str | None, primary_user: str | None) -> tuple[EvidenceTier, str]:
@@ -69,16 +81,19 @@ def bake(
         "bake",
         [{"role": "system", "content": BAKE_SYSTEM}, {"role": "user", "content": turn_text}],
     )
-    facts = _extract_facts(raw)
-    if facts is None:
+    parsed = _parse_bake(raw)
+    if parsed is None:
         log.warning(
-            "bake: could not parse facts from model reply; baking nothing this turn. "
+            "bake: could not parse model reply; baking nothing this turn. "
             "Raw reply (truncated): %r",
             raw[:200],
         )
         return []
+    facts, triples = parsed
 
     tier, provenance = _tier_and_provenance(user, primary_user)
+    if triples:
+        store_triples(storage, triples, user=user, provenance=provenance)
     stored: list[Memory] = []
     for fact in facts:
         mem = Memory(

@@ -151,6 +151,16 @@ def test_memories_browser_lists_and_searches(base_url: str) -> None:
     assert miss["memories"] == []
 
 
+def test_graph_endpoint_lists_connections(base_url: str) -> None:
+    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "greg"})
+    status, data = _json("GET", base_url + "/api/graph")
+    assert status == 200
+    assert any(t["object"].lower() == "teal" for t in data["triples"])
+    # mind stats expose the connection count
+    _, mind = _json("GET", base_url + "/api/mind")
+    assert mind["stats"]["triples"] >= 1
+
+
 def test_memories_bad_kind_is_4xx(base_url: str) -> None:
     status, data = _json("GET", base_url + "/api/memories?kind=bogus")
     assert status == 400

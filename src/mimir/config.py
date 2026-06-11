@@ -63,6 +63,10 @@ class Config:
     # How often (in turns) working memory's rolling summary is re-synthesized (folding the
     # accumulated exchanges). 0 disables compression (recency-only working memory).
     working_memory_refresh_every: int = 4
+    # Entity-graph traversal: how many hops from the query's entities, and the max connected
+    # facts to inject. hops=0 disables graph retrieval (triples are still extracted/stored).
+    graph_hops: int = 2
+    graph_max_facts: int = 8
 
     def validate(self) -> None:
         """Raise ``ConfigError`` loud on any unrunnable configuration."""
@@ -152,6 +156,8 @@ def load_config(path: str | Path) -> Config:
         working_memory_refresh_every=int(
             raw.get("working_memory", {}).get("refresh_every", 4)
         ),
+        graph_hops=int(raw.get("entity_graph", {}).get("hops", 2)),
+        graph_max_facts=int(raw.get("entity_graph", {}).get("max_facts", 8)),
     )
     config.validate()
     return config

@@ -97,6 +97,28 @@ class Memory:
     meta: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass(slots=True)
+class Triple:
+    """One subject–relation–object edge in the entity graph (DESIGN §3a).
+
+    ``subject`` and ``object`` are entity nodes; ``relation`` is the labeled edge between them.
+    Stored case-insensitively deduped, indexed both ways for 1–2 hop traversal.
+    """
+
+    subject: str
+    relation: str
+    object: str
+    user: str | None = None
+    provenance: str = "conversation"
+    confidence: float = 0.8
+    created_at: float = 0.0
+    id: int | None = None
+
+    def render(self) -> str:
+        """A compact, readable edge for the prompt: ``subject — relation → object``."""
+        return f"{self.subject} — {self.relation} → {self.object}"
+
+
 def embedding_to_blob(vec: list[float] | None) -> bytes | None:
     """Pack an embedding into a compact little-endian float32 BLOB (stdlib only)."""
     if vec is None:

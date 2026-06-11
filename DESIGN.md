@@ -250,7 +250,9 @@ needs.
   own operational signals, refreshed off the hot path and injected first, always-on; bootstrapped
   from the first boot by a re-runnable **identity interview** that establishes eight universal
   anchors — name, operator, location, purpose, values, scope, boundaries, voice — interactively
-  or from config)_, procedural memory, entity graph, sleep/consolidation, inner council, the
+  or from config)_, procedural memory, ~~entity graph~~ _(landed: subject–relation–object triples
+  extracted at bake time, deduped, retrieved by 1–2 hop traversal seeded on the query's entities
+  and injected as a distinct connected-facts layer)_, sleep/consolidation, inner council, the
   qualification battery.
 - **Adapters (separate extras/packages):** ~~a reference HTTP server~~ _(landed: a stdlib,
   zero-dependency reference web server + single-page UI — chat, the identity interview, document
@@ -324,6 +326,7 @@ against a live local model. Both gateways are hardened (priority queue, batching
 retry/backoff, provider pool with health/failover). **v0.1 has begun**: document
 ingestion (`ingest()` for text + markdown in core, PDF behind the `[documents]` extra) and an
 evolving, generic **self-model** (identity authored from the store's own operational history,
-refreshed off the hot path, injected always-on) and working memory (rolling recent-context recency
-+ compression). Still pre-alpha and evolving; the remaining cognition layers (procedural, entity
-graph, sleep/consolidation, inner council, qualification battery) are the road ahead.
+refreshed off the hot path, injected always-on), working memory (rolling recency + compression),
+and an entity graph (subject–relation–object triples with 1–2 hop traversal). Still pre-alpha and
+evolving; the remaining cognition layers (procedural memory, sleep/consolidation, inner council,
+qualification battery) are the road ahead.
