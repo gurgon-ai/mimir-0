@@ -8,13 +8,11 @@ it's assembled into the prompt with an explicit epistemic structure. You tell it
 later it recalls that fact, cites where it came from, and tells you when it's reasoning from
 thin evidence instead of confabulating.
 
-> **Status: pre-alpha — the v0 spine is alive.** The §6 acceptance loop runs green: boot empty →
-> converse → bake a memory → a later turn recalls it with correct provenance & evidence tier →
-> the sentinel fires async and leaves a note for the next turn. Both gateways are hardened, and
-> **v0.1 document ingestion has begun** (`ingest()` for text/markdown in core, PDF via an extra).
-> Further cognition layers (working memory, self-model, sleep/consolidation, the inner council,
-> the qualification battery) are still to come. The full design lives in `DESIGN.md`; setup lives
-> in `docs/SETUP.md`.
+> **Status: pre-alpha — feature-complete.** The whole architecture in [`DESIGN.md`](DESIGN.md) is
+> implemented and verified end-to-end against a live multi-node LAN: the acceptance loop, every
+> typed knowledge layer, the async cognition, and the distributed model fleet. It is **not yet
+> hardened or tuned** — APIs and schema may change. Setup lives in [`docs/SETUP.md`](docs/SETUP.md);
+> see [`CHANGELOG.md`](CHANGELOG.md) for what's in `0.1.0`.
 
 ## Try it in 10 seconds (zero account, no model server)
 
@@ -49,15 +47,40 @@ Most memory libraries store text in a vector blob and retrieve by similarity. Mi
   asks a clarifying question, instead of guessing confidently.
 - **An async "second mind"** — a reflective pass reviews each turn and leaves a note for the next.
 
+## What's inside
+
+Every turn assembles an epistemic prompt — self-model → identity → persona → attributed knowledge
+(memory + documents + entity graph) → learned procedures → working memory → sentinel note →
+uncertainty gate — and routes it through two disciplined gateways. On top of that:
+
+- **Document ingestion** — `ingest()` for text/markdown (PDF via the `[documents]` extra) into a
+  document-tier layer with file/section provenance.
+- **Entity graph** — subject–relation–object triples with 1–2 hop traversal.
+- **Working memory & self-model** — rolling salient context, and an evolving generic identity
+  seeded by a short **identity interview**.
+- **Sleep / consolidation** — dedup, decay, archival, and contradiction resolution, so memory
+  maintains itself.
+- **Inner council** — adversarial deliberation across whatever models are installed.
+- **Distributed fleet** — point it at your LAN and it discovers every `ollama serve` (zero setup
+  on those machines), routes each request to a node that has the model, benchmarks them for speed
+  and quality, and recommends a model per role. Run the brain on a Raspberry Pi and borrow GPUs
+  over the network.
+- **Reference web UI** — a zero-dependency stdlib server for all of the above.
+
 ## Runtime contract
 
 Runs on **Python + SQLite + one chat endpoint + one embeddings endpoint.** No GPU requirement,
 no cloud, no peripherals. Bring a local model (Ollama, etc.) or an API — it's provider-agnostic,
 and it can pool several local inference nodes across a LAN for distributed local inference.
 
+## Contributing
+
+The bar for core is high and the discipline is specific (zero runtime deps, the two gateways are
+law, fail loud, keep core layers generic). See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## License
 
-Apache-2.0. *(The full `LICENSE` file is added before the first public release.)*
+[Apache-2.0](LICENSE).
 
 ---
 

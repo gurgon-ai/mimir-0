@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mimir-0"
-version = "0.0.1"
+version = "0.1.0"
 description = "A local-first cognition core: typed, evidence-tiered, provenance-tracked memory assembled into prompts with explicit epistemics."
 readme = "README.md"
 requires-python = ">=3.11"
