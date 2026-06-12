@@ -23,6 +23,9 @@ ENV/
 
 # Databases / runtime data (the brain's state is never committed)
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 *.sqlite
 *.sqlite3
 data/

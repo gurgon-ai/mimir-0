@@ -117,6 +117,14 @@ HTTP — no extra Python deps.
    `chat`/`bake`/`reasoning` roles; any embedding model works for `embed`. Bigger/smaller models
    trade quality for speed and VRAM. See `DESIGN.md` §4 on roles.
 
+   > **On model size and identity.** The `chat` and `reasoning` roles carry Mimir's *identity* — its
+   > self-model and how it speaks as itself. Very small models (≈4B) are unreliable here: in testing,
+   > a 4B model hallucinated its own name and mimicked the prompt's internal tag style. Mimir guards
+   > both deterministically (the synthesizer can't invent a name; internal tags are stripped from
+   > output), but for faithful identity prefer **≥12B** for `chat`/`reasoning` (e.g. `gemma3:12b`,
+   > `qwen2.5:14b`). A 4B model is fine for `bake` (extraction). If you run a fleet, let
+   > `brain.benchmark_fleet()` + `apply_recommendations()` pick capable models per role.
+
 ### 5.2 Write your `mimir.toml`
 
 Copy the template and edit it:
@@ -349,3 +357,5 @@ model server.
 | `embeddings.mode = 'endpoint' requires a [roles.embed] table` | Add `[roles.embed]`, or switch to `mode = "bootstrap"`. |
 | Slow first response per model | Ollama is loading the model into VRAM. Keep `num_ctx` consistent across roles sharing a model to avoid reloads. |
 | `found a 'memories' table but no schema_version marker` | You pointed Mimir at a non-Mimir or corrupt DB. Use a fresh `[storage] path`. |
+| Mimir greets with the wrong name, or inverts who serves whom | A too-small `reasoning` model hallucinated its self-model. Use **≥12B** for `chat`/`reasoning` (§5.1) and let the self-model re-synthesize (it refreshes on the `[self_model] refresh_every` cadence). Your `[identity]` anchors are not the problem. |
+| Internal `[tier=…; source=…]` tags appear in replies | A small model echoing the prompt's tag style. They're stripped automatically — if you still see them, you're on **old code**; restart the server. A larger `chat` model stops producing them at the source. |

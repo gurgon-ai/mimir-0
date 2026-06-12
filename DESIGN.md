@@ -84,7 +84,9 @@ Every memory carries an `evidence_tier` assigned at write time by *how it was so
 `stated_by_primary_user` > `stated_by_trusted` > `document` / `multi_source` > `conversation` >
 `inferred`. The tier becomes a gentle retrieval multiplier (at equal relevance, better-sourced
 facts win) and an explicit provenance tag in the prompt, so the model attributes correctly instead
-of flattening everyone's knowledge into "you told me."
+of flattening everyone's knowledge into "you told me." That tag is an *internal* prompt convention:
+it is deterministically stripped from the user-facing reply (see §10), so the scaffolding never
+leaks into output.
 
 ### 3c. Confidence / salience decoupling (the foundational idea)
 Two **separate** axes — conflating them is the bug this design exists to avoid:
@@ -109,6 +111,12 @@ identity/persona → typed knowledge sections (each capped) → goals → workin
 (high-attention end slot) → uncertainty flag. It is the single point where "universal" must be kept
 strictly separate from any deployment-specific context — the core ships the universal sections;
 everything else is a *registered context source*.
+
+The self-model section leads with the operator-established identity anchors **verbatim** — these are
+authoritative. Any synthesized self-narrative is grounded in operational history and must **not**
+restate or override those anchors: a synthesis that invents or changes the system's name is a
+grounding failure, not a stylistic one, so the synthesizer is forbidden from stating the name,
+operator, or location at all (those are the anchors' job).
 
 ---
 
@@ -306,6 +314,10 @@ be the least-fragile, loudest-failing, self-testing part of the system.
   debuggable without reading internals.
 - **Budgeted section registry** — every registered context source declares a budget + priority; the
   core caps or disables a misbehaving source without starving core sections.
+- **Internal scaffolding never leaks** — the provenance tags and epistemic flags that structure the
+  prompt are stripped from the model's reply (streaming-safe), so a human never sees Mimir's internal
+  annotations and the model can't re-learn the tag style by reading its own logged output. A small
+  model that mimics the format is contained deterministically, not asked nicely.
 
 **Principles (applied as each layer lands):**
 - **Governor fail-safe** — if scheduling signals glitch, default to throttling background, never
