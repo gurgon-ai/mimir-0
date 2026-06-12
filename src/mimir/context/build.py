@@ -98,7 +98,11 @@ def _build_knowledge_section(
     if not retrieved:
         return None, []
 
-    title = "What you know that's relevant (each fact is attributed — honor the source):"
+    title = (
+        "What you know that's relevant — each fact is attributed. Use these naturally in your "
+        "reply and attribute in plain words when it matters; do NOT copy the bracketed "
+        "[tier=...; source=...] tags into your response:"
+    )
     all_lines = [_memory_line(s.memory) for s in retrieved]
     # Requested = the section as if everything fit (for honest accounting).
     full_body = f"{RECALL_OPEN}\n" + "\n".join(all_lines) + f"\n{RECALL_CLOSE}"
@@ -161,7 +165,10 @@ def build_context(
     if self_knowledge:
         self_model_section = Section(
             name="self_model",
-            title="What you've come to understand about yourself (from your own history):",
+            title=(
+                "Who you are — your established identity and self-knowledge. Speak and act as "
+                "this; never adopt another name or invert who serves whom:"
+            ),
             body=self_knowledge,
             tier=SectionTier.HIGH,
             requested_tokens=estimate_tokens(self_knowledge),
