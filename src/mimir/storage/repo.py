@@ -389,7 +389,7 @@ def delete_triples(gateway: StorageGateway, ids: list[int]) -> int:
 
 _C_SELECT = (
     "node, model, family, params_b, quantization, context_length, capabilities, "
-    "return_time, quality, scanned_at, talk, tools, code, coherence"
+    "return_time, quality, scanned_at, talk, tools, code, coherence, discipline"
 )
 # Scan only sets discovery fields; benchmark scores (talk/tools/code/coherence/return_time/quality)
 # are filled later by update_catalogue_scores.
@@ -433,14 +433,15 @@ def update_catalogue_scores(
     tools: float | None,
     code: float | None,
     coherence: float | None,
+    discipline: float | None = None,
 ) -> None:
     """Write benchmark scores for every catalogue row of a model (quality is node-independent)."""
 
     def _write(conn: sqlite3.Connection) -> None:
         conn.execute(
             "UPDATE model_catalogue SET return_time=?, quality=?, talk=?, tools=?, code=?, "
-            "coherence=? WHERE model=?",
-            (return_time, quality, talk, tools, code, coherence, model),
+            "coherence=?, discipline=? WHERE model=?",
+            (return_time, quality, talk, tools, code, coherence, discipline, model),
         )
 
     gateway.submit(_write)
@@ -480,6 +481,7 @@ def list_catalogue(gateway: StorageGateway) -> list[CatalogueEntry]:
                 tools=r["tools"],
                 code=r["code"],
                 coherence=r["coherence"],
+                discipline=r["discipline"],
                 scanned_at=r["scanned_at"],
             )
             for r in rows

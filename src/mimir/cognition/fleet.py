@@ -56,10 +56,13 @@ def scan_fleet(
 # Each role's required capability and whether it prefers speed, quality, or a balance.
 # chat/bake/reasoning are the live roles; tools/code are forward-looking (DESIGN §9 extension
 # points) — recommended now so you know which model to use when you enable them.
+# chat and reasoning are identity-bearing — they speak AS the system and synthesize its self-model.
+# So they gate on `discipline` (honoring prohibitions, not leaking the prompt's [tier=...] tags),
+# not just `talk`: a model that mimics the scaffolding can't clear the floor for these roles (§4).
 ROLE_NEEDS: dict[str, tuple[str, str]] = {
-    "chat": ("talk", "balanced"),
+    "chat": ("discipline", "balanced"),
     "bake": ("talk", "quality"),
-    "reasoning": ("talk", "quality"),
+    "reasoning": ("discipline", "quality"),
     "tools": ("tools", "quality"),
     "code": ("code", "quality"),
 }
@@ -83,6 +86,7 @@ def recommend_roles(storage: StorageGateway) -> dict[str, dict[str, Any] | None]
                 "tools": entry.tools,
                 "code": entry.code,
                 "coherence": entry.coherence,
+                "discipline": entry.discipline,
                 "return_time": entry.return_time,
                 "node": entry.node,  # the fastest node for this model (speed is per-node)
                 "nodes": [],
