@@ -318,17 +318,26 @@ class _Handler(BaseHTTPRequestHandler):
             if srv.bench_state.get("running"):
                 return {"started": False, **srv.bench_state}  # already running
             srv.bench_state = {"running": True, "i": 0, "total": 0,
-                               "current": "scanning the fleet…", "done": False}
+                               "current": "scanning the fleet…", "done": False, "results": []}
 
         def _progress(i: int, total: int, model: str) -> None:
             with srv.bench_lock:
                 srv.bench_state.update(i=i, total=total, current=model)
 
+        def _on_result(b: Any) -> None:
+            with srv.bench_lock:
+                srv.bench_state.setdefault("results", []).append({
+                    "model": b.model, "quality": b.quality, "talk": b.talk, "tools": b.tools,
+                    "code": b.code, "discipline": b.discipline, "epistemics": b.epistemics,
+                    "coherence": b.coherence, "return_time": b.return_time,
+                })
+
         def _run() -> None:
             try:
                 with srv.brain_lock:
                     result = srv.brain.benchmark_fleet(
-                        max_params_b=cap, latency_budget_s=latency, progress=_progress
+                        max_params_b=cap, latency_budget_s=latency,
+                        progress=_progress, on_result=_on_result,
                     )
                 with srv.bench_lock:
                     srv.bench_state.update(
@@ -991,6 +1000,19 @@ async function loadFleet() {
   } catch (e) { $("fleetList").innerHTML = "error: " + e.message; }
 }
 
+// Live benchmark scoreboard — each model's scores appear as it finishes (best first), filling the
+// Fleet area that's otherwise idle during the run.
+function renderBenchResults(results) {
+  if (!results || !results.length) return;
+  const sorted = results.slice().sort((a, b) => (b.quality || 0) - (a.quality || 0));
+  const c = v => (v == null ? "·" : (typeof v === "number" ? v.toFixed(2) : v));
+  let h = '<div class="mem" style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:12px;">';
+  h += '<tr style="color:#8a94a3; text-align:left;"><th>model</th><th>qual</th><th>talk</th><th>tool</th><th>code</th><th>disc</th><th>epis</th><th>coh</th><th>s</th></tr>';
+  sorted.forEach(r => { h += `<tr><td>${r.model}</td><td><b>${c(r.quality)}</b></td><td>${c(r.talk)}</td><td>${c(r.tools)}</td><td>${c(r.code)}</td><td>${c(r.discipline)}</td><td>${c(r.epistemics)}</td><td>${c(r.coherence)}</td><td>${c(r.return_time)}</td></tr>`; });
+  h += "</table></div>";
+  $("fleetList").innerHTML = h;
+}
+
 // Workflow buttons light up by state: amber (working) → green (done) → red (failed).
 function btnState(id, state) {
   const b = $(id); if (!b) return;
@@ -1033,6 +1055,7 @@ async function pollBenchmark() {
       }
       // Until the first model starts, total is 0 — show the scan phase rather than "0/0".
       $("fleetMsg").textContent = s.total ? `Benchmarking ${s.i}/${s.total}: ${s.current}…` : `${s.current || "Preparing…"}`;
+      renderBenchResults(s.results);   // live scoreboard — fills the (otherwise idle) Fleet area
       await new Promise(r => setTimeout(r, 1500));
     }
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }

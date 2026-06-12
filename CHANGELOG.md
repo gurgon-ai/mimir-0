@@ -31,6 +31,9 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   **skipped** instead of stalling the whole run — so a slow big model can no longer hang the
   benchmark (or hold the lock so a second run "doesn't work"). The UI now also shows the **scan
   phase** ("scanning the fleet…") instead of a blank "0/0", and reports too-slow skips.
+  **Live scoreboard:** each model's scores stream into the Fleet area *as it finishes* (best-first
+  table: quality + all dimensions + speed) — so the otherwise-idle UI fills with useful results
+  during the run instead of just a counter (`benchmark_fleet` gained an `on_result` callback).
   **Scope fields on the Fleet tab:** "Max model size (B)" and "Max latency (s)" inputs (pre-filled
   from config) override the cap/latency for a run — no `mimir.toml` editing needed to control what
   the benchmark tests.
