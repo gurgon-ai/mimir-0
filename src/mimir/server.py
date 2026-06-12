@@ -611,6 +611,13 @@ _HTML = """<!doctype html>
   .mem .text { font-size:13px; white-space:pre-wrap; }
   .mem .tags { margin-top:6px; display:flex; flex-wrap:wrap; gap:5px; }
   .tag { font-size:11px; padding:2px 6px; border-radius:4px; background:#1a2029; color:#9aa4b2; }
+  #benchBoard h2 { font-size:16px; margin:0 0 4px; display:flex; align-items:center; gap:10px; }
+  #benchBoard table { width:100%; border-collapse:collapse; font-size:13px; margin-top:10px; }
+  #benchBoard th { text-align:left; color:#8a94a3; font-weight:600; padding:7px 10px; border-bottom:1px solid #232a35; position:sticky; top:-18px; background:#0e1116; }
+  #benchBoard td { padding:7px 10px; border-bottom:1px solid #1a2029; white-space:nowrap; }
+  #benchBoard tr.top td { background:#13241a; }
+  #benchBoard td.q { font-weight:700; color:#d7dde5; }
+  #benchBoard .legend { font-size:12px; color:#6f7a8a; }
   .tag.tier { background:#16324a; color:#9fd0ff; }
   .searchrow { display:flex; gap:6px; margin-bottom:10px; }
   .searchrow input { flex:1; }
@@ -624,6 +631,7 @@ _HTML = """<!doctype html>
 </header>
 <main>
   <div id="chat">
+    <div id="benchBoard" style="display:none; flex:1; overflow:auto; padding:18px;"></div>
     <div id="log"></div>
     <form id="composer">
       <input type="text" id="text" placeholder="Say something to Mimir…" autocomplete="off"/>
@@ -1009,17 +1017,34 @@ function fmtDuration(sec) {
   return mm ? `${h}h ${mm}m` : `${h}h`;
 }
 
-// Live benchmark scoreboard — each model's scores appear as it finishes (best first), filling the
-// Fleet area that's otherwise idle during the run.
-function renderBenchResults(results) {
-  if (!results || !results.length) return;
-  const sorted = results.slice().sort((a, b) => (b.quality || 0) - (a.quality || 0));
-  const c = v => (v == null ? "·" : (typeof v === "number" ? v.toFixed(2) : v));
-  let h = '<div class="mem" style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:12px;">';
-  h += '<tr style="color:#8a94a3; text-align:left;"><th>model</th><th>qual</th><th>talk</th><th>tool</th><th>code</th><th>disc</th><th>epis</th><th>coh</th><th>s</th></tr>';
-  sorted.forEach(r => { h += `<tr><td>${r.model}</td><td><b>${c(r.quality)}</b></td><td>${c(r.talk)}</td><td>${c(r.tools)}</td><td>${c(r.code)}</td><td>${c(r.discipline)}</td><td>${c(r.epistemics)}</td><td>${c(r.coherence)}</td><td>${c(r.return_time)}</td></tr>`; });
-  h += "</table></div>";
-  $("fleetList").innerHTML = h;
+// Live benchmark scoreboard — takes over the (idle) chat pane for full width, best model first,
+// with emoji status so you can scan pass/fail at a glance. User can close it to get the chat back.
+let _benchBoardClosed = false;
+function benchShow(on) {
+  $("benchBoard").style.display = on ? "block" : "none";
+  $("log").style.display = on ? "none" : "";
+  $("composer").style.display = on ? "none" : "";
+}
+function closeBench() { _benchBoardClosed = true; benchShow(false); }
+function _emoji(v) { return v == null ? "·" : v >= 0.8 ? "✅" : v >= 0.5 ? "🟡" : "❌"; }
+function _medal(i) { return i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : (i + 1) + "."; }
+function _stars(q) { const n = Math.max(0, Math.min(5, Math.round((q || 0) * 5))); return "★".repeat(n) + "☆".repeat(5 - n); }
+
+function renderBenchResults(results, header) {
+  if (_benchBoardClosed) return;
+  benchShow(true);
+  const sorted = (results || []).slice().sort((a, b) => (b.quality || 0) - (a.quality || 0));
+  let h = `<h2>${header || "🏁 Benchmarking…"} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
+  h += '<div class="legend">✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; ★ = quality</div>';
+  if (!sorted.length) { $("benchBoard").innerHTML = h + '<div class="hint" style="margin-top:12px;">Warming up the first model…</div>'; return; }
+  h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Discipline</th><th>Epistemics</th><th>Coherence</th><th>Speed</th></tr>";
+  sorted.forEach((r, i) => {
+    h += `<tr class="${i === 0 ? "top" : ""}"><td>${_medal(i)}</td><td>${r.model}</td>`
+      + `<td class="q">${_stars(r.quality)} <span style="color:#8a94a3; font-weight:400;">${(r.quality ?? 0).toFixed(2)}</span></td>`
+      + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.discipline)}</td><td>${_emoji(r.epistemics)}</td><td>${_emoji(r.coherence)}</td>`
+      + `<td>${r.return_time != null ? r.return_time.toFixed(2) + "s" : "·"}</td></tr>`;
+  });
+  $("benchBoard").innerHTML = h + "</table>";
 }
 
 // Workflow buttons light up by state: amber (working) → green (done) → red (failed).
@@ -1058,6 +1083,8 @@ async function pollBenchmark() {
           if (s.skipped_too_slow) skips.push(`${s.skipped_too_slow} too slow`);
           const skipped = skips.length ? ` (${skips.join(", ")} skipped)` : "";
           $("fleetMsg").textContent = `Benchmarked ${s.benchmarked || 0} of ${s.eligible || 0} eligible model(s)${skipped}` + (s.judges_ok ? "" : " — coherence judges untrusted") + ".";
+          const best = (s.results || []).slice().sort((a, b) => (b.quality || 0) - (a.quality || 0))[0];
+          renderBenchResults(s.results, `✅ Benchmark complete — ${s.benchmarked || 0} scored${best ? `, top 🏆 ${best.model}` : ""}`);
         }
         loadFleet();
         break;
@@ -1065,7 +1092,8 @@ async function pollBenchmark() {
       // Until the first model starts, total is 0 — show the scan phase rather than "0/0".
       const eta = (s.eta != null) ? `  ·  ~${fmtDuration(s.eta)} left` : "";
       $("fleetMsg").textContent = s.total ? `Benchmarking ${s.i}/${s.total}: ${s.current}…${eta}` : `${s.current || "Preparing…"}`;
-      renderBenchResults(s.results);   // live scoreboard — fills the (otherwise idle) Fleet area
+      const header = s.total ? `🏁 Benchmarking ${s.i}/${s.total}${eta}` : `🔎 ${s.current || "Preparing…"}`;
+      renderBenchResults(s.results, header);   // live scoreboard takes over the chat pane
       await new Promise(r => setTimeout(r, 1500));
     }
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
@@ -1074,6 +1102,7 @@ async function pollBenchmark() {
 
 $("fleetBenchBtn").addEventListener("click", async () => {
   $("fleetMsg").textContent = "Starting benchmark…"; btnState("fleetBenchBtn", "working");
+  _benchBoardClosed = false;   // a fresh run re-opens the scoreboard even if you closed the last one
   try {
     const scope = { max_model_size_b: $("benchMaxSize").value, max_latency_s: $("benchMaxLatency").value };
     await api("POST", "/api/fleet/benchmark", scope);   // returns immediately; runs in the background
