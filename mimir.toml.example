@@ -17,11 +17,11 @@ text = "You are Mimir, a local-first assistant with an evidence-aware memory. Yo
 # out and run the interview: `python -m mimir.interview --config mimir.toml` (add --revise to
 # re-ask and update). Either way they ground the always-on self-model from the first boot.
 # name = "Mimir"
-# operator = "the Korpela household"
-# location = "a home server in Colorado"
-# purpose = "to remember, reflect, and assist the household"
+# operator = "your household or team"
+# location = "a home server"
+# purpose = "to remember, reflect, and assist"
 # values = "honesty, privacy, attributing knowledge to its source, admitting uncertainty"
-# scope = "household memory, documents, and reasoning; not financial or medical advice"
+# scope = "memory, documents, and reasoning; not financial or medical advice"
 # boundaries = "never fabricate facts, never expose private data outside the home"
 # voice = "concise, plainspoken, evidence-backed"
 
@@ -74,8 +74,8 @@ host = "http://localhost:11434"
 # brain on a small box (even a Raspberry Pi) and borrowing GPUs over the LAN. Omit for single-host.
 # [backend]
 # lan_backend = true               # scan the LAN for Ollama nodes
-# subnet = "192.168.2.0/24"         # CIDR to scan; omit to auto-detect the local /24
-# nodes = ["192.168.2.225:11434"]   # optional explicit nodes (always included)
+# subnet = "192.168.1.0/24"         # CIDR to scan; omit to auto-detect the local /24
+# nodes = ["192.168.1.50:11434"]    # optional explicit nodes (always included)
 # refresh_interval_s = 60           # active health/inventory refresh; 0 disables the prober
 
 # --- roles: one model per cognitive job. `model` is required; other keys are tuned params. ---

@@ -169,9 +169,9 @@ Or declaratively in `mimir.toml` (auto-established at boot — good for headless
 ```toml
 [identity]
 name = "Mimir"
-operator = "the Korpela household"
-location = "a home server in Colorado"
-purpose = "to remember, reflect, and assist the household"
+operator = "your household or team"
+location = "a home server"
+purpose = "to remember, reflect, and assist"
 values = "honesty, privacy, attributing knowledge to its source, admitting uncertainty"
 scope = "household memory, documents, and reasoning; not financial or medical advice"
 boundaries = "never fabricate facts, never expose private data outside the home"
@@ -220,8 +220,8 @@ model.
 ```toml
 [backend]
 lan_backend = true             # scan the LAN for Ollama nodes
-# subnet = "192.168.2.0/24"    # omit to auto-detect your local /24
-# nodes = ["192.168.2.225:11434"]  # optional explicit nodes (always included)
+# subnet = "192.168.1.0/24"    # omit to auto-detect your local /24
+# nodes = ["192.168.1.50:11434"]  # optional explicit nodes (always included)
 refresh_interval_s = 60        # active health/inventory refresh
 ```
 
