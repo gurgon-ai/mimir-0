@@ -86,6 +86,109 @@ benchmarking, or scheduling. That separation is what lets everything else "bolt 
 
 ---
 
+## 3a. Data model & config contract (the concrete schemas)
+
+Defining the shapes up front prevents schema creep. Three records, one config DSL, one data file.
+Field names that already exist in the implementation are noted; the **[new]** tag marks what Phase
+A–D add to the current `model_catalogue` / `model_prefs` tables (`DESIGN.md` §4).
+
+**ModelDescriptor** — one per distinct model (the catalogue row, deduped across nodes):
+```
+id              "gemma4:e4b"          # the Ollama tag
+family          "gemma"               # CANONICAL family (see family map below), not the raw tag
+params_b        8.0
+quantization    "Q4_K_M"
+context_length  8192
+nodes           ["http://192.168.2.50:11434", ...]   # every node that has it
+digest          "sha256:1a2b…"        # [new] Ollama model digest — staleness key (§8)
+recommended     true                  # [new] present in the registry (§4)
+enabled         true                  # user veto (model_prefs.enabled)
+scores          { <dimension>: ScoreRecord }          # talk/tools/code/discipline/epistemics/coherence
+quality         0.92                  # aggregate
+return_time     0.86                  # fastest node, seconds
+battery_version 3                     # [new] which battery produced `scores` (§8)
+scored_at       <ts>
+role_bans       [ {role:"chat", reason:"discipline 0.25 < 0.50"} ]   # [new] persisted, explainable (§10.9)
+```
+
+**ScoreRecord** — one per dimension, carries uncertainty (so a noisy point estimate isn't a hard
+pass/fail; §6):
+```
+value     0.67     # mean over samples
+samples   6
+ci_low    0.41     # simple Wilson/normal bound — no heavy stats
+ci_high   0.86
+state     "pass" | "fail" | "needs_more_data"   # by where the CI sits vs the floor
+```
+
+**RouteDecision** — the audit log entry, appended as structured JSONL **and** human-readable (§11):
+```
+{ "ts": …, "role": "chat", "chosen": "gemma4:e4b", "node": "http://…",
+  "reason": "measured-best" | "pin" | "recommended-heuristic" | "reachable-fallback" | "degraded-unqualified",
+  "candidates": ["gemma4:e4b","qwen2.5:3b"], "battery_version": 3,
+  "scores": {"discipline":0.83,"epistemics":1.0} }
+```
+
+**The recommended-models registry** — a *pure data file* (`recommended_models.toml`, versioned,
+documented), never code:
+```toml
+[[model]]
+family        = "gemma"
+tag_patterns  = ["gemma4:e4b", "gemma4:e2b", "gemma3:12b"]
+roles         = ["chat", "reasoning", "judge", "bake"]
+expected      = { discipline = [0.8, 1.0], epistemics = [0.6, 1.0] }   # floors we have measured
+judge_ok      = true        # trusted to vet unknown models (cold-start judges, §4)
+min_params_b  = 5.0
+notes         = "Strongest small-model epistemics in testing."
+```
+
+**The headless config DSL** (`mimir.toml`) — the single source of truth the wizard merely *writes*:
+```toml
+[backend]
+mode             = "local"        # "local" | "lan"
+discovery        = "on"           # "on" | "off"
+refresh_interval_s = 60
+
+[roles.chat]
+model          = "auto"           # "auto" | "<tag>" (a pin)
+allow_families = ["gemma", "qwen"]    # optional narrowing
+deny_models    = ["gemma3:4b"]        # the bias veto, declaratively
+
+[[lan.node]]
+url      = "http://192.168.2.50:11434"
+approved = true                   # NO context is routed to an unapproved node (§5.2)
+```
+
+**Family canonicalization** — a data map (not inline code), because vendors fork and rename:
+```
+"gemma*" → "gemma"   "qwen*" → "qwen"   "llama*"/"codellama" → "llama"   "phi*" → "phi" …
+```
+
+**Conflict resolution (mechanical).** A recommended model present on the machine is qualified
+*first*, but its registry status grants **no grandfathering**: if its measured score on *this*
+hardware falls below the registry's `expected` floor (or the role floor), it is **barred for that
+role with a persisted `role_bans` reason** — measured beats recommended, always.
+
+**Worked example — a Pi (brain) + an RTX box (Ollama), 3 models.** `mimir.toml`:
+```toml
+[backend]
+mode = "lan"            # the Pi has no GPU; borrow the RTX box
+discovery = "on"
+[roles.chat]    model = "auto"
+[roles.bake]    model = "auto"
+[[lan.node]]
+url = "http://192.168.2.50:11434"   # the RTX box
+approved = true
+```
+Discovery finds `gemma4:e4b`, `qwen2.5:3b`, `nomic-embed-text` on the node. Qualification (recommended
+gemma first → trusted judge → vets qwen) yields: `gemma4:e4b` passes chat/reasoning, `qwen2.5:3b`
+passes (epistemics `needs_more_data` → one more sampling round → pass). Resolution: `chat →
+gemma4:e4b` (`reason: measured-best`), `bake → qwen2.5:3b` (faster, talk-gated). One `RouteDecision`
+per role is logged. The Pi holds memory; the RTX box does inference; nothing was hand-configured
+beyond approving one node.
+
+---
+
 ## 4. The recommended-models registry  **[proposed]**
 
 A **shipped, versioned, documented** list of models we have tested, each with: family, the roles it
@@ -151,12 +254,15 @@ Extensions this engine adds:
   (from the registry), and weight by **family diversity** — a true cross-family vote is more robust
   than a single canary, but its confidence **scales with diversity** and must be reported honestly
   (§10.6), not presented as rigorous on a single-family fleet.
-- **Sampling + confidence [proposed].** Dimensions are sampled and the score carries variance. Near
-  the floor, prefer a **"needs more data"** state over a hard pass/fail on a noisy point estimate;
-  add hysteresis so a borderline model does not flap in and out of qualification between runs.
+- **Sampling + confidence [proposed].** Concrete rule (no heavy stats): run *N* samples per
+  dimension, keep the mean and a simple confidence bound. If the whole interval is above the floor →
+  **pass**; entirely below → **fail**; if it straddles the floor → **needs_more_data** (run more
+  samples, up to a cap, before deciding). Add hysteresis (a small margin) so a borderline model does
+  not flap in and out of qualification between runs.
 - **Concurrency + capacity awareness [proposed].** Benchmark backend pools **concurrently** across
-  nodes, but bounded by each node's capacity so qualification never starves real use or overwhelms a
-  small box. Distributed *or* local-only, sized to the hardware the user actually has.
+  nodes, bounded by a per-node concurrency cap (from config or a quick probe): **never exceed
+  `cap − 1` concurrent benchmark jobs on a node**, so qualification never starves real use or
+  overwhelms a small box. Distributed *or* local-only, sized to the hardware the user actually has.
 
 ---
 
@@ -166,14 +272,22 @@ Resolution hierarchy (`auto` roles): **pin > measured-best (role-gated) > recomm
 heuristic > any reachable model** — re-resolved on every rescan, with user disables vetoing at every
 level. **[built]**
 
+**Identity roles** — `chat`, `reasoning`, `judge`, `sentinel` — are the roles that *speak or reason
+as the system*. They have a hard rule: **never route to an unqualified model** (one without a
+passing discipline + epistemics score) without a **noisy, user-acknowledged** exception. Stating
+this in routing terms prevents silent regressions. `bake` and forward-looking `tools`/`code` are not
+identity roles and gate only on their own capability.
+
 Engine additions:
 - **Local-first preference [partial].** When a LAN pool is enabled, a qualified *local* model is
   preferred for latency/privacy; remote nodes serve burst/overflow/edge. (Discovery defaults
   local-only **[built]**; explicit local-vs-remote preference within an enabled pool is **[proposed]**.)
 - **Speed-aware live selection [proposed].** Among equally-qualified options, pick by live
   speed + least-loaded per call (the Phase-2 dynamic routing), not just a static per-role pick.
-- **Loud degradation [proposed].** If no qualified model is available for a role (all disabled/offline),
-  the engine surfaces it prominently and refuses to silently run an unqualified model.
+- **Loud degradation [proposed].** If no qualified model is available for an identity role (all
+  disabled/offline), the engine **refuses to silently run an unqualified model** and surfaces it
+  structurally: the API returns a clear error (e.g. HTTP 503 with a structured body naming the role
+  and why), and the UI shows a banner — never a quiet downgrade.
 
 ---
 
@@ -184,6 +298,9 @@ Evergreening is only *valid* if measurements expire when they should:
   invalidates that model's scores → re-qualify.
 - **Battery version.** Stamp the battery; when *we* change probes or scorers (as has already
   happened), prior scores are not comparable → re-qualify on version bump.
+- **Pending re-qual, not silent reuse.** When a model's scores are invalidated (digest or battery
+  change), any role depending on it is marked **`pending re-qual`** and shown as such in the UI —
+  the engine does **not** silently keep routing on stale scores.
 - **Optional cadence.** A user may schedule periodic background re-qualification; off by default.
 
 ---
@@ -194,7 +311,9 @@ The inner council already spreads personas across whatever models are installed 
 genuinely different model families give genuinely different minds, which strengthens both
 deliberation and judging. The engine's job is to **document and present** this in onboarding: tell
 the user that running a *variety* of families unlocks stronger adversarial reasoning and more
-trustworthy qualification, and show whether their current fleet has it.
+trustworthy qualification, and show whether their current fleet has it. "Family" is resolved through
+the canonical **family map** (§3a) — kept as data, not inline code — so vendor forks and renames
+don't quietly collapse two distinct families into one (which would fake diversity).
 
 ---
 
@@ -224,7 +343,10 @@ trustworthy qualification, and show whether their current fleet has it.
   qualify now?"), rather than only showing badges.
 - Bars are explained inline ("gemma3:4b barred from chat: discipline 0.25 < 0.5").
 - Role changes are announced ("chat: gemma3:12b → gemma4:e4b after re-qualification").
-- A decision log persists the routing rationale for audit.
+- **Decision log** persists the routing rationale as structured **JSONL** (machine-readable, so a
+  user can diff behaviour across versions or hardware) *and* renders human-readably in the UI.
+- **Dry-run mode** — the engine explains what it *would* route for each role, and why, **without
+  calling any model**. Invaluable for debugging a fleet before committing real inference.
 
 ---
 
@@ -241,9 +363,12 @@ Zero core runtime dependencies · stdlib-only web wizard · public-clean (no pri
   Smallest change, immediately closes failure mode §10.1. ("Document recommended models; test local
   first; start with known-good.")
 - **B — First-run setup wizard** (local/LAN, node approval, discovery opt-in), persisted to config,
-  with the **headless declarative equivalent**.
+  with the **headless declarative equivalent**. *Scope guard:* the wizard does **only** mode
+  selection, LAN node approval, discovery toggle, and accept/reject of the auto-generated role map —
+  detailed tuning and score inspection are deferred to a later "advanced" view, so it can't balloon.
 - **C — Progressive/automatic qualification** (recommended-first → vet-the-rest, concurrent,
-  capacity-aware, local-prioritized, trusted-judge multi-family vote, sampling/confidence).
+  capacity-aware, local-prioritized). *Order within the phase:* ship **trusted judges + a minimal
+  multi-family vote first** (most of the benefit), then add the full sampling/confidence machinery.
 - **D — Staleness (digest + battery version), loud degradation, decision audit/explainability,
   speed-aware live routing.**
 
