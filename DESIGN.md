@@ -249,6 +249,59 @@ inverts, the *qualifier* is broken → loud alarm, never a silent pass.
 - **Attention governor** — a generic "foreground beats background" scheduler driven by software
   signals (chat-in-flight / consolidation-running / model-reload-pending / idle).
 
+### 5a. The idle window — burst cognition + bidirectional RAG  **[partial → proposed]**
+
+A finding from months of running this on small, distributed compute (the project's origin): **after
+the model answers, the GPU goes idle while the user reads, thinks, and composes a reply.** In text
+that's a few seconds; **on voice it's 30 seconds or more, routinely**. That window is not dead time
+— it is *the* reclaimable resource that lets a small or distributed rig act like a much bigger brain.
+Reference design (proven in the parent system, to be rebuilt public-clean):
+
+**The burst worker — the idle window as a first-class, scheduled resource pool.** After each
+response the engine fires a *burst window* and drains a queue of background tasks, with these
+mechanics:
+
+- **Two task classes.** *User-driven* tasks (the user asked for something — finishing a tool action,
+  a document, research) run **continuously, no cap**, only checking "is a new query in flight?"
+  between calls so latency stays low if the user interjects. *Autonomous* tasks (nobody asked —
+  memory creation, error correction, prefetch, consolidation) are **slot-capped** per window.
+- **Floating priority / pent-up demand.** An autonomous task's effective priority *accrues urgency
+  the longer it hasn't run* (`effective = base − starved_seconds × rate`), so starved work floats to
+  the top naturally instead of needing a hand-tuned schedule. Some tasks are fixed-priority (run
+  every turn); some accrue slowly (run when they've waited long enough).
+- **Interruptible — foreground always wins.** Between *every* burst call the worker checks for an
+  incoming turn and **yields immediately, re-queuing the rest** (this is the attention governor +
+  the pool's BACKGROUND/IDLE priority tier in action). Tasks are idempotent/resumable; the slot cap
+  is the proactivity budget.
+- **Idle takeover.** After a long quiet (the user is away or deep in thought), the cap lifts and the
+  worker goes continuous — use all the cycles.
+- **Surfaces feed forward.** A burst task may emit a *surface* — a short result injected into the
+  *next* reply ("[background note: …]"), so off-path work re-enters the conversation.
+
+**The multiplier insight:** inference too *slow* for the live path is **free in the idle window.**
+A reply must stream now, so it can't afford deep retrieval, a thinking-mode pass, or multi-step
+verification — but the burst worker can, because the user is already reading. This is how reclaimed
+idle cycles buy big-GPU-quality grounding on small hardware.
+
+**Bidirectional RAG — the model's output triggers its own memory.** Retrieval runs on the model's
+**output**, not only the user's input: *if the system says something, that statement should be able
+to trigger its own memory.* The highest-value jobs — verify the reply's claims against stored truth
+(**error correction**), surface contradictions (feeding the uncertainty gate and sleep's
+contradiction resolution), bake durable facts the model just committed to, bump salience of
+re-touched memories, and **prefetch context for the likely next turn** — all run here.
+
+**Latency doctrine (hard-won):** output-side RAG runs **after the model has spoken, in the burst
+window — never as an inline two-pass.** A draft → retrieve → finalize pipeline *was tried and proved
+too slow for chat.* Answering fast and grounding *after the fact* keeps latency flat. A **fast/slow
+switch** governs depth: a text UI (read time) can afford more post-response work than a voice UI
+(which needs it fastest) — so it is a config policy, not a fixed cost.
+
+**Current state.** Mimir-0 has the bones: the attention governor, the pool's priority tiers + busy
+deferral, and a *fixed* slice of post-response background cognition (sentinel, self-model, working
+memory) **[partial]**. The general burst-window scheduler (two classes, pent-up priority, surfaces,
+idle takeover) and output-side bidirectional RAG are **[proposed]** — and compose directly with the
+inference engine, which is *built* to be distributed-and-idle-aware rather than single-shot.
+
 ---
 
 ## 6. v0 scope + acceptance test
