@@ -299,6 +299,13 @@ def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True)
     def chat_fn(messages: list[Message]) -> str:
         return model.chat_with_model(model_name, messages)
 
+    # Warm the model into VRAM before timing, so return_time reflects warm steady-state generation,
+    # not the one-time cold load (models get evicted between benchmarks). Untimed and tolerant.
+    try:
+        chat_fn([{"role": "user", "content": "ok"}])
+    except Exception as exc:
+        log.warning("benchmark: warmup call failed for %s: %s", model_name, exc)
+
     started = time.monotonic()
     talk = score_capability(chat_fn, "talk")
     tools = score_capability(chat_fn, "tools")
@@ -335,15 +342,30 @@ def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True)
     )
 
 
+# Generous window to let even a large model load into VRAM during warmup before we time it.
+WARMUP_TIMEOUT_S: float = 120.0
+
+
 def _measure_node_speed(
-    node: str, model_name: str, *, timeout_s: float = SPEED_TIMEOUT_S
+    node: str, model_name: str, *, timeout_s: float = SPEED_TIMEOUT_S, warmup: bool = False
 ) -> float | None:
     """Time a trivial call to a *specific* node directly (no pool/retry); None for non-URL nodes.
+
+    With ``warmup`` (used by benchmarking), the model is **loaded into VRAM first via an untimed
+    call**, so the returned time reflects *warm steady-state* latency, not the one-time cold swap —
+    models get evicted between benchmarks, and timing the load would both pollute the score and
+    unfairly trip the latency gate (e.g. skipping a 26B that's fast warm but slow to load). A model
+    that can't even load within ``WARMUP_TIMEOUT_S`` is reported as that-slow (so it's skipped).
 
     Returns elapsed seconds — even on timeout/failure, the elapsed time is the 'too slow' signal.
     """
     if not node.startswith("http"):
         return None  # mock/non-URL node — nothing real to time
+    if warmup:
+        try:
+            OllamaProvider(node, timeout=WARMUP_TIMEOUT_S).chat(model_name, _SPEED_PROMPT, {})
+        except Exception:
+            return round(WARMUP_TIMEOUT_S, 3)  # couldn't load in time → unusably slow → skip
     provider = OllamaProvider(node, timeout=timeout_s)
     started = time.monotonic()
     try:
@@ -413,7 +435,8 @@ def benchmark_fleet(
         # full battery stalls the run. The probe also seeds this node's speed.
         probe_node = next((n for n in nodes_with.get(model_name, []) if n.startswith("http")), None)
         if probe_node is not None:
-            speed = _measure_node_speed(probe_node, model_name, timeout_s=skip_budget)
+            # Warm the model into VRAM, THEN time it — so the gate sees warm latency, not cold load.
+            speed = _measure_node_speed(probe_node, model_name, timeout_s=skip_budget, warmup=True)
             if speed is not None and speed >= skip_budget:
                 log.warning("benchmark: [%d/%d] %s SKIPPED — %.1fs >= %.0fs latency budget",
                             i, total, model_name, speed, skip_budget)
@@ -440,11 +463,12 @@ def benchmark_fleet(
             discipline=bench.discipline,
             epistemics=bench.epistemics,
         )
-        # Per-node speed for the OTHER nodes (the probe node was already measured above).
+        # Per-node speed for the OTHER nodes (the probe node was already measured above). Warm each
+        # before timing — the model isn't loaded on these nodes yet, so a cold time would mislead.
         for node in nodes_with.get(model_name, []):
             if node == probe_node:
                 continue
-            elapsed = _measure_node_speed(node, model_name, timeout_s=skip_budget)
+            elapsed = _measure_node_speed(node, model_name, timeout_s=skip_budget, warmup=True)
             if elapsed is not None:
                 update_catalogue_speed(storage, node, model_name, elapsed)
         results.append(bench)

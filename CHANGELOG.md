@@ -8,6 +8,12 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Fixed
+- **Benchmark timed cold model-loads, not warm performance.** With models swapping in and out of
+  VRAM, every measurement included a one-time load cost — which inflated `return_time` *and* unfairly
+  tripped the latency gate (a 26B that's fast warm but slow to load could be wrongly skipped). Now
+  each model is **loaded with an untimed warmup call first**, then timed *warm* — for the latency
+  probe/gate and the capability battery. A model that can't load within a 120s window is reported as
+  unusably slow and skipped. Measurements now reflect steady-state, the way the model actually runs.
 - **Thinking mode was never controlled (and couldn't be turned off).** All role params went into
   Ollama's `options`, but `think` is a *top-level* field — so thinking models thought by default
   (slow) and a `think` set in config was silently ignored. Now `think` defaults **off** (it slows
