@@ -26,6 +26,7 @@ import json
 import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from logging.handlers import RotatingFileHandler
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -451,13 +452,36 @@ def serve(config_path: str, host: str = "127.0.0.1", port: int = 8765) -> None:
         brain.close()
 
 
+def _setup_logging(log_file: str | None) -> None:
+    """Console logging always; a rotating file too (default ``mimir.log``) so long runs leave a
+    reviewable trail — observability is the doctrine, and a vanished console is not observable.
+
+    ``--log-file ""`` (empty) disables the file and logs to console only.
+    """
+    fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    path = "mimir.log" if log_file is None else log_file
+    if path:
+        # 5 MB × 3 backups: bounded disk, weeks of normal use, never silently truncates a live run.
+        fh = RotatingFileHandler(path, maxBytes=5_000_000, backupCount=3, encoding="utf-8")
+        handlers.append(fh)
+    logging.basicConfig(level=logging.INFO, format=fmt, handlers=handlers)
+    if path:
+        log.info("logging to console and %s (rotating, 5MB x 3)", path)
+
+
 def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description="Serve Mimir's reference web UI.")
     parser.add_argument("--config", required=True, help="path to mimir.toml")
     parser.add_argument("--host", default="127.0.0.1", help="bind host (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8765, help="bind port (default: 8765)")
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="rotating log file path (default: mimir.log; pass '' to log to console only)",
+    )
     args = parser.parse_args(argv)
+    _setup_logging(args.log_file)
     serve(args.config, host=args.host, port=args.port)
     return 0
 
@@ -501,8 +525,8 @@ _HTML = """<!doctype html>
   .row { display:flex; gap:8px; }
   .hint { font-size:12px; color:#6f7a8a; margin-top:6px; }
   #ingestResult, #identMsg { font-size:12px; color:#7fd17f; margin-top:6px; min-height:14px; }
-  .tabs { display:flex; gap:4px; margin-bottom:14px; border-bottom:1px solid #232a35; }
-  .tabs button { background:none; border:0; border-bottom:2px solid transparent; color:#8a94a3; padding:7px 10px; border-radius:0; font-size:13px; }
+  .tabs { display:flex; flex-wrap:wrap; gap:2px 4px; margin-bottom:14px; border-bottom:1px solid #232a35; }
+  .tabs button { background:none; border:0; border-bottom:2px solid transparent; color:#8a94a3; padding:7px 9px; border-radius:0; font-size:13px; white-space:nowrap; }
   .tabs button.active { color:#d7dde5; border-bottom-color:#1f6feb; }
   .tabpane.hidden { display:none; }
   .selfmodel { background:#11161d; border:1px solid #232a35; border-radius:8px; padding:11px; font-size:13px; white-space:pre-wrap; color:#c3ccd8; }

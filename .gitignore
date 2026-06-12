@@ -21,6 +21,10 @@ ENV/
 # Local deployment config (the committed template is mimir.toml.example)
 /mimir.toml
 
+# Logs (rotating server logs are runtime data, never committed)
+*.log
+*.log.*
+
 # Databases / runtime data (the brain's state is never committed)
 *.db
 *.db-shm
