@@ -8,6 +8,12 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Fixed
+- **Thinking mode was never controlled (and couldn't be turned off).** All role params went into
+  Ollama's `options`, but `think` is a *top-level* field — so thinking models thought by default
+  (slow) and a `think` set in config was silently ignored. Now `think` defaults **off** (it slows
+  generation and rarely improves output, per testing across models) and is sent top-level; opt in
+  per role with `think = true` only where it helps (e.g. some models on tool selection). `think=false`
+  is accepted by non-thinking models too, so it's safe everywhere.
 - **Benchmark only ever tested the 8 smallest models — so a 4B "won" every role while the user's
   much better 26B model was never benchmarked at all.** The default capped the run at the 8 smallest
   approved models ≤30B, smallest-first, so mid/large models (gemma3:12b, gemma4:26b, …) were silently

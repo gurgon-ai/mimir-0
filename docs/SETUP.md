@@ -329,7 +329,9 @@ host = "http://localhost:11434" # ollama only
 # pick from the fleet — measured-best if benchmarked, else an approved-family model, re-chosen on
 # each scan. A pin always wins; disable models you distrust from the web UI (or
 # brain.set_model_enabled(...)) and `auto` skips them. Everything else is passed to the provider as
-# tuned params (temperature, num_ctx, max_tokens → Ollama's num_predict, ...).
+# tuned params (temperature, num_ctx, max_tokens → Ollama's num_predict, ...). `think` defaults
+# OFF (thinking mode slows generation and rarely helps); set `think = true` on a role only where
+# it earns its cost.
 [roles.chat]
 model = "llama3.1:8b"   # or: model = "auto"
 temperature = 0.7

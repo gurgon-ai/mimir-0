@@ -32,11 +32,13 @@ class OllamaProvider:
         self._timeout = timeout
 
     def chat(self, model: str, messages: list[Message], params: dict[str, Any]) -> str:
+        think, opts = _split_think(params)
         payload = {
             "model": model,
             "messages": messages,
             "stream": False,
-            "options": _to_options(params),
+            "think": think,
+            "options": _to_options(opts),
         }
         data = self._post("/api/chat", payload)
         try:
@@ -84,11 +86,13 @@ class OllamaProvider:
         self, model: str, messages: list[Message], params: dict[str, Any]
     ) -> Iterator[str]:
         """Stream a chat completion: Ollama's ``stream=true`` newline-delimited JSON deltas."""
+        think, opts = _split_think(params)
         payload = {
             "model": model,
             "messages": messages,
             "stream": True,
-            "options": _to_options(params),
+            "think": think,
+            "options": _to_options(opts),
         }
         body = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -173,6 +177,20 @@ class OllamaProvider:
         except json.JSONDecodeError as exc:
             raise ProviderError(f"Ollama returned non-JSON for {path}: {raw!r}") from exc
         return parsed
+
+
+def _split_think(params: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+    """Pull ``think`` out of the tuned params — it is a TOP-LEVEL Ollama field, not an option, so
+    a ``think`` left in ``options`` is silently ignored.
+
+    Defaults to **off**: thinking-mode noticeably slows generation and rarely improves output in
+    practice; it earns its cost only in specific spots (e.g. some models on tool selection). Set
+    ``think = true`` (or a level string) on a role to opt in where it helps. ``think=false`` is
+    accepted by non-thinking models too, so sending it everywhere is safe.
+    """
+    opts = dict(params)
+    think = opts.pop("think", False)
+    return think, opts
 
 
 def _to_options(params: dict[str, Any]) -> dict[str, Any]:
