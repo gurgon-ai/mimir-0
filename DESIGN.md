@@ -335,6 +335,9 @@ evolving, generic **self-model** (identity authored from the store's own operati
 refreshed off the hot path, injected always-on), working memory (rolling recency + compression),
 an entity graph (subject–relation–object triples with 1–2 hop traversal), sleep/consolidation
 (dedup, decay, archival, contradiction resolution), and an inner council (adversarial deliberation
-across auto-discovered models), and procedural memory (learned trigger→procedure habits). Still
-pre-alpha and evolving; the **qualification battery** (DESIGN §4 — model qualification) is the last
-v0.1+ cognition layer on the road ahead.
+across auto-discovered models), and procedural memory (learned trigger→procedure habits). The
+model backend is now a **distributed fleet** (DESIGN §5): it auto-discovers Ollama nodes on the LAN
+(zero setup on them — just `ollama serve`), catalogues their models, and routes each request to a
+node that has the model, with active health checks and least-loaded selection — so the brain can
+run on a tiny box and borrow GPUs over the network. Still pre-alpha and evolving; the **qualification
+battery** (DESIGN §4 — benchmarking model→role fitness, layered on the fleet) is the road ahead.

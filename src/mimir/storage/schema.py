@@ -116,6 +116,27 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             ")",
         ],
     ),
+    (
+        7,
+        [
+            # The fleet catalogue (DESIGN §5): a persisted snapshot of every (node, model) found,
+            # with its weight/family/quant. return_time + quality are filled by Phase 2 benchmarking
+            # (NULL until then). Rebuilt on each scan.
+            "CREATE TABLE model_catalogue ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " node TEXT NOT NULL,"
+            " model TEXT NOT NULL,"
+            " family TEXT NOT NULL DEFAULT '',"
+            " params_b REAL NOT NULL DEFAULT 0,"
+            " quantization TEXT NOT NULL DEFAULT '',"
+            " context_length INTEGER NOT NULL DEFAULT 0,"
+            " capabilities TEXT NOT NULL DEFAULT '[]',"
+            " return_time REAL,"
+            " quality REAL,"
+            " scanned_at REAL NOT NULL"
+            ")",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -162,5 +183,18 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
         "confidence",
         "uses",
         "created_at",
+    },
+    "model_catalogue": {
+        "id",
+        "node",
+        "model",
+        "family",
+        "params_b",
+        "quantization",
+        "context_length",
+        "capabilities",
+        "return_time",
+        "quality",
+        "scanned_at",
     },
 }

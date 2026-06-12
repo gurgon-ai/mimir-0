@@ -119,6 +119,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._graph(params))
             elif route == "/api/procedures":
                 self._send_json(self._procedures())
+            elif route == "/api/fleet":
+                self._send_json(self._fleet())
             elif route == "/favicon.ico":
                 self._send(204, b"", "image/x-icon")
             else:
@@ -148,6 +150,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._council(body))
             elif route == "/api/procedures":
                 self._send_json(self._learn_procedure(body))
+            elif route == "/api/fleet/scan":
+                self._send_json(self._scan_fleet())
             else:
                 self._send_json({"error": "not found"}, status=404)
         except json.JSONDecodeError:
@@ -252,6 +256,18 @@ class _Handler(BaseHTTPRequestHandler):
                 emit("error", {"error": str(exc)})
             except OSError:
                 pass
+
+    def _fleet(self) -> dict[str, Any]:
+        with self.server.brain_lock:
+            report = self.server.brain.fleet_report()
+            stats = self.server.brain._model.get_stats()
+        report["stats"] = stats
+        return report
+
+    def _scan_fleet(self) -> dict[str, Any]:
+        with self.server.brain_lock:
+            result = self.server.brain.scan_fleet()
+        return {"nodes": result.nodes, "models": result.models}
 
     def _procedures(self) -> dict[str, Any]:
         with self.server.brain_lock:
@@ -481,6 +497,7 @@ _HTML = """<!doctype html>
       <button data-tab="graph">Graph</button>
       <button data-tab="procedures">Habits</button>
       <button data-tab="council">Council</button>
+      <button data-tab="fleet">Fleet</button>
       <button data-tab="docs">Docs</button>
     </div>
 
@@ -542,6 +559,12 @@ _HTML = """<!doctype html>
       <div class="selfmodel" id="councilVerdict">—</div>
       <h2>Positions</h2>
       <div id="councilPositions"></div>
+    </div>
+
+    <div class="tabpane hidden" id="tab-fleet">
+      <button id="fleetScanBtn" type="button">Scan fleet</button>
+      <div id="fleetMsg" class="hint">Discovers Ollama nodes on your LAN and catalogues their models.</div>
+      <div id="fleetList"></div>
     </div>
 
     <div class="tabpane hidden" id="tab-docs">
@@ -676,7 +699,7 @@ $("ingestBtn").addEventListener("click", async () => {
 });
 
 // --- tabs ---
-const loaders = { mind: loadMind, memories: loadMemories, graph: loadGraph, procedures: loadProcedures };
+const loaders = { mind: loadMind, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet };
 document.querySelectorAll(".tabs button").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));
@@ -779,6 +802,33 @@ async function loadProcedures() {
     });
   } catch (e) { $("procList").innerHTML = "error: " + e.message; }
 }
+
+async function loadFleet() {
+  try {
+    const data = await api("GET", "/api/fleet");
+    const up = (data.stats && data.stats.nodes_up) || 0;
+    $("fleetMsg").textContent = `${data.nodes} node(s) catalogued, ${up} up, ${data.models} models. Scan to refresh.`;
+    const list = $("fleetList"); list.innerHTML = "";
+    Object.entries(data.by_node || {}).forEach(([node, models]) => {
+      const d = document.createElement("div"); d.className = "mem";
+      const h = document.createElement("div"); h.className = "text"; h.textContent = `${node}  (${models.length} models)`; d.appendChild(h);
+      const tags = document.createElement("div"); tags.className = "tags";
+      models.slice(0, 12).forEach(mm => { const sp = document.createElement("span"); sp.className = "tag"; sp.textContent = `${mm.model} ${mm.params_b}B`; tags.appendChild(sp); });
+      d.appendChild(tags); list.appendChild(d);
+    });
+    if (!Object.keys(data.by_node || {}).length) list.innerHTML = '<div class="hint">No catalogue yet — click Scan fleet.</div>';
+  } catch (e) { $("fleetList").innerHTML = "error: " + e.message; }
+}
+
+$("fleetScanBtn").addEventListener("click", async () => {
+  $("fleetMsg").textContent = "Scanning the network…"; $("fleetScanBtn").disabled = true;
+  try {
+    const r = await api("POST", "/api/fleet/scan");
+    $("fleetMsg").textContent = `Found ${r.models} models across ${r.nodes} node(s).`;
+    loadFleet(); refreshState();
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
+  $("fleetScanBtn").disabled = false;
+});
 
 $("procBtn").addEventListener("click", async () => {
   const trigger = $("procTrigger").value.trim(); const procedure = $("procBody").value.trim();

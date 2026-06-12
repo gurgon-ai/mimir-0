@@ -31,11 +31,22 @@ from typing import TypeVar
 
 from ..errors import ProviderError
 from .priority import Priority
-from .provider import Message, Provider
+from .provider import Message, ModelInfo, Provider
 
 log = logging.getLogger("mimir.model.pool")
 
 R = TypeVar("R")
+
+
+def _list_model_infos(provider: Provider) -> list[ModelInfo]:
+    """Model metadata for a provider — rich ``model_details`` if it has it, else names only."""
+    details = getattr(provider, "model_details", None)
+    if details is not None:
+        return list(details())
+    lister = getattr(provider, "list_models", None)
+    if lister is not None:
+        return [ModelInfo(name=n) for n in lister()]
+    return []
 
 
 def _provider_stream(
@@ -55,6 +66,9 @@ class _Endpoint:
     provider: Provider
     failures: deque[float] = field(default_factory=lambda: deque(maxlen=64))
     saturated_until: float = 0.0
+    models: set[str] = field(default_factory=set)  # known inventory (empty = unknown, route freely)
+    reachable: bool = True  # active-health signal (set by refresh)
+    inflight: int = 0  # current in-flight calls, for least-loaded selection
 
 
 class ProviderPool:
@@ -84,18 +98,20 @@ class ProviderPool:
         self._sleep = sleep
         self._lock = threading.Lock()
         self._stats = {"calls": 0, "ok": 0, "retries": 0, "failovers": 0, "transient_fails": 0}
+        self._stop_prober = threading.Event()
+        self._prober: threading.Thread | None = None
 
     # -- public API -------------------------------------------------------------------
 
     def chat(
         self, model: str, messages: list[Message], params: dict[str, object], *, priority: Priority
     ) -> str:
-        return self._route(priority, lambda p: p.chat(model, messages, params), "chat")
+        return self._route(priority, lambda p: p.chat(model, messages, params), "chat", model)
 
     def embed(
         self, model: str, texts: list[str], *, priority: Priority
     ) -> list[list[float]]:
-        return self._route(priority, lambda p: p.embed(model, texts), "embed")
+        return self._route(priority, lambda p: p.embed(model, texts), "embed", model)
 
     def chat_stream(
         self, model: str, messages: list[Message], params: dict[str, object], *, priority: Priority
@@ -108,7 +124,7 @@ class ProviderPool:
         """
         with self._lock:
             self._stats["calls"] += 1
-        candidates = self._candidates(priority)
+        candidates = self._candidates(priority, model)
         if not candidates:
             with self._lock:
                 self._stats["transient_fails"] += 1
@@ -178,6 +194,7 @@ class ProviderPool:
             return {
                 **self._stats,
                 "endpoints": [e.name for e in self._endpoints],
+                "nodes_up": sum(1 for e in self._endpoints if e.reachable),
                 "saturated": {
                     e.name: round(e.saturated_until - now, 1)
                     for e in self._endpoints
@@ -185,17 +202,74 @@ class ProviderPool:
                 },
             }
 
+    # -- active health / inventory (the fleet) ----------------------------------------
+
+    def refresh(self) -> None:
+        """Re-inventory every endpoint's models + reachability (active health, DESIGN §5).
+
+        Best-effort: an unreachable node is marked down (and dropped from model-aware routing)
+        rather than raising. Run once at boot and periodically by the prober.
+        """
+        for endpoint in self._endpoints:
+            try:
+                names = {m.name for m in _list_model_infos(endpoint.provider)}
+            except Exception as exc:  # node down / can't list
+                log.warning("model: endpoint %s unreachable on refresh: %s", endpoint.name, exc)
+                with self._lock:
+                    endpoint.reachable = False
+                    endpoint.models = set()
+                continue
+            with self._lock:
+                endpoint.reachable = True
+                endpoint.models = names
+
+    def inventory_details(self) -> list[tuple[str, str, list[ModelInfo]]]:
+        """(endpoint_name, endpoint_label, models) for each endpoint — for the fleet catalogue."""
+        out: list[tuple[str, str, list[ModelInfo]]] = []
+        for endpoint in self._endpoints:
+            try:
+                infos = _list_model_infos(endpoint.provider)
+            except Exception as exc:
+                log.warning("model: could not inventory %s: %s", endpoint.name, exc)
+                infos = []
+            out.append((endpoint.name, endpoint.name, infos))
+        return out
+
+    def start_prober(self, interval_s: float) -> None:
+        """Start a background thread that calls ``refresh`` every ``interval_s`` (0 = no prober)."""
+        if interval_s <= 0 or self._prober is not None:
+            return
+
+        def _loop() -> None:
+            while not self._stop_prober.wait(interval_s):
+                try:
+                    self.refresh()
+                except Exception as exc:  # the prober must never die
+                    log.warning("model: prober refresh failed: %s", exc)
+
+        self._prober = threading.Thread(target=_loop, name="mimir-model-prober", daemon=True)
+        self._prober.start()
+
+    def stop_prober(self) -> None:
+        self._stop_prober.set()
+        if self._prober is not None:
+            self._prober.join(timeout=5)
+            self._prober = None
+
     # -- routing ----------------------------------------------------------------------
 
-    def _route(self, priority: Priority, fn: Callable[[Provider], R], kind: str) -> R:
+    def _route(
+        self, priority: Priority, fn: Callable[[Provider], R], kind: str, model: str | None = None
+    ) -> R:
         with self._lock:
             self._stats["calls"] += 1
-        candidates = self._candidates(priority)
+        candidates = self._candidates(priority, model)
         if not candidates:
             with self._lock:
                 self._stats["transient_fails"] += 1
             raise ProviderError(
-                f"no available provider endpoint for {kind} (all saturated); deferring",
+                f"no available provider endpoint for {kind}"
+                f"{f' (model {model})' if model else ''} (all saturated/missing); deferring",
                 transient=True,
             )
 
@@ -205,6 +279,8 @@ class ProviderPool:
                 with self._lock:
                     self._stats["failovers"] += 1
             max_retries = 0 if clamp else self._max_retries
+            with self._lock:
+                endpoint.inflight += 1
             try:
                 result = self._attempt(endpoint, fn, max_retries)
             except ProviderError as exc:
@@ -218,6 +294,9 @@ class ProviderPool:
                 with self._lock:
                     self._stats["ok"] += 1
                 return result
+            finally:
+                with self._lock:
+                    endpoint.inflight -= 1
 
         with self._lock:
             self._stats["transient_fails"] += 1
@@ -255,8 +334,14 @@ class ProviderPool:
 
     # -- admission / health -----------------------------------------------------------
 
-    def _candidates(self, priority: Priority) -> list[tuple[_Endpoint, bool]]:
+    def _candidates(
+        self, priority: Priority, model: str | None = None
+    ) -> list[tuple[_Endpoint, bool]]:
         """Endpoints to try, in order, each flagged whether to clamp retries to a single try.
+
+        Model-aware (DESIGN §5): only nodes that *have* the model are considered (endpoints with
+        unknown inventory are included optimistically; if none is known to have it, we fall back to
+        all and let the call fail naturally). Within a tier, least-loaded first so bursts spread.
 
         - CHAT_CRITICAL: every endpoint, full retries (chat must run; saturated as last resort).
         - USER_ADJACENT: healthy first (full retries), then saturated with a single try.
@@ -264,8 +349,21 @@ class ProviderPool:
         """
         now = self._clock()
         with self._lock:
-            healthy = [e for e in self._endpoints if e.saturated_until <= now]
-            saturated = [e for e in self._endpoints if e.saturated_until > now]
+            eps = [e for e in self._endpoints if e.reachable]
+            if not eps:  # active health glitch → fail safe, don't hard-block (DESIGN §10)
+                eps = list(self._endpoints)
+            if model is not None:
+                known = [e for e in eps if e.models]
+                if known:
+                    havers = [e for e in eps if not e.models or model in e.models]
+                    if havers:  # else: nobody known to have it → keep all (optimistic)
+                        eps = havers
+            healthy = sorted(
+                (e for e in eps if e.saturated_until <= now), key=lambda e: e.inflight
+            )
+            saturated = sorted(
+                (e for e in eps if e.saturated_until > now), key=lambda e: e.inflight
+            )
 
         if priority == Priority.CHAT_CRITICAL:
             return [(e, False) for e in healthy] + [(e, False) for e in saturated]

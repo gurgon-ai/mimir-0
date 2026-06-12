@@ -13,6 +13,7 @@ import time
 
 from .gateway import Priority, StorageGateway
 from .models import (
+    CatalogueEntry,
     EvidenceTier,
     Memory,
     MemoryKind,
@@ -382,6 +383,65 @@ def delete_triples(gateway: StorageGateway, ids: list[int]) -> int:
         return cur.rowcount
 
     return gateway.submit(_write)
+
+
+# -- fleet catalogue ------------------------------------------------------------------
+
+_C_COLUMNS = (
+    "node, model, family, params_b, quantization, context_length, "
+    "capabilities, return_time, quality, scanned_at"
+)
+
+
+def replace_catalogue(gateway: StorageGateway, entries: list[CatalogueEntry]) -> None:
+    """Rebuild the fleet catalogue from a fresh scan (clear then insert)."""
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute("DELETE FROM model_catalogue")
+        conn.executemany(
+            f"INSERT INTO model_catalogue ({_C_COLUMNS}) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    e.node,
+                    e.model,
+                    e.family,
+                    e.params_b,
+                    e.quantization,
+                    e.context_length,
+                    json.dumps(e.capabilities),
+                    e.return_time,
+                    e.quality,
+                    e.scanned_at,
+                )
+                for e in entries
+            ],
+        )
+
+    gateway.submit(_write)
+
+
+def list_catalogue(gateway: StorageGateway) -> list[CatalogueEntry]:
+    def _read(conn: sqlite3.Connection) -> list[CatalogueEntry]:
+        rows = conn.execute(
+            f"SELECT {_C_COLUMNS} FROM model_catalogue ORDER BY node, params_b DESC"
+        ).fetchall()
+        return [
+            CatalogueEntry(
+                node=r["node"],
+                model=r["model"],
+                family=r["family"],
+                params_b=r["params_b"],
+                quantization=r["quantization"],
+                context_length=r["context_length"],
+                capabilities=json.loads(r["capabilities"]),
+                return_time=r["return_time"],
+                quality=r["quality"],
+                scanned_at=r["scanned_at"],
+            )
+            for r in rows
+        ]
+
+    return gateway.read(_read)
 
 
 # -- procedural memory ----------------------------------------------------------------

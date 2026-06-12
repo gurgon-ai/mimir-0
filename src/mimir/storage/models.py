@@ -140,6 +140,26 @@ class Procedure:
     id: int | None = None
 
 
+@dataclass(slots=True)
+class CatalogueEntry:
+    """One (node, model) row of the fleet catalogue (DESIGN §5).
+
+    ``return_time`` and ``quality`` are filled by Phase 2 benchmarking; ``None`` means not yet
+    benchmarked (the inventory still records weight/family/quant from discovery).
+    """
+
+    node: str
+    model: str
+    family: str = ""
+    params_b: float = 0.0
+    quantization: str = ""
+    context_length: int = 0
+    capabilities: list[str] = field(default_factory=list)
+    return_time: float | None = None
+    quality: float | None = None
+    scanned_at: float = 0.0
+
+
 def embedding_to_blob(vec: list[float] | None) -> bytes | None:
     """Pack an embedding into a compact little-endian float32 BLOB (stdlib only)."""
     if vec is None:

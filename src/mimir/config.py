@@ -41,10 +41,28 @@ class ProviderSpec:
 
 
 @dataclass(slots=True)
+class BackendConfig:
+    """The distributed Ollama fleet (DESIGN §5). Nodes need zero setup — just ``ollama serve``.
+
+    Discovery = localhost + explicit ``nodes`` + (when ``lan_backend``) a subnet scan of :11434.
+    """
+
+    lan_backend: bool = False  # scan the LAN for Ollama nodes
+    subnet: str | None = None  # CIDR to scan; None → auto-detect the local /24
+    nodes: list[str] = field(default_factory=list)  # explicit node hosts/urls
+    scan_timeout_s: float = 0.5
+    scan_concurrency: int = 64
+    refresh_interval_s: float = 60.0  # active health/inventory refresh; 0 disables the prober
+
+
+@dataclass(slots=True)
 class Config:
     storage_path: str
     roles: dict[str, RoleSpec]
     provider: ProviderSpec
+    # When set, the model gateway is built from a discovered/declared Ollama fleet instead of the
+    # single ``provider``. ``provider`` is then just the adapter type (ollama).
+    backend: BackendConfig | None = None
     identity: str = DEFAULT_IDENTITY
     # The owner whose statements earn the top evidence tier. If None, Mimir runs in
     # single-user mode and treats whoever speaks as the primary user (DESIGN §3b).
@@ -130,13 +148,28 @@ def load_config(path: str | Path) -> Config:
             f"unknown embeddings.mode {mode_key!r}; valid values: {valid}"
         ) from exc
 
+    backend_raw = raw.get("backend")
+    backend: BackendConfig | None = None
+    if backend_raw:
+        backend = BackendConfig(
+            lan_backend=bool(backend_raw.get("lan_backend", False)),
+            subnet=str(backend_raw["subnet"]) if "subnet" in backend_raw else None,
+            nodes=[str(n) for n in backend_raw.get("nodes", [])],
+            scan_timeout_s=float(backend_raw.get("scan_timeout_s", 0.5)),
+            scan_concurrency=int(backend_raw.get("scan_concurrency", 64)),
+            refresh_interval_s=float(backend_raw.get("refresh_interval_s", 60.0)),
+        )
+
     provider_raw = raw.get("provider")
-    if not provider_raw or "type" not in provider_raw:
+    if provider_raw and "type" in provider_raw:
+        provider = ProviderSpec(
+            type=str(provider_raw["type"]),
+            options={k: v for k, v in provider_raw.items() if k != "type"},
+        )
+    elif backend is not None:
+        provider = ProviderSpec(type="ollama")  # a fleet is Ollama nodes by definition
+    else:
         raise ConfigError('config is missing [provider] type = "ollama" (or "mock")')
-    provider = ProviderSpec(
-        type=str(provider_raw["type"]),
-        options={k: v for k, v in provider_raw.items() if k != "type"},
-    )
 
     identity_raw = raw.get("identity", {})
     anchor_keys = (
@@ -146,6 +179,7 @@ def load_config(path: str | Path) -> Config:
         storage_path=str(storage["path"]),
         roles=_parse_roles(raw.get("roles", {})),
         provider=provider,
+        backend=backend,
         identity=str(identity_raw.get("text", DEFAULT_IDENTITY)),
         primary_user=(
             str(identity_raw["primary_user"]) if "primary_user" in identity_raw else None
