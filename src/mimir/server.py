@@ -693,18 +693,19 @@ _HTML = """<!doctype html>
 
     <div class="tabpane hidden" id="tab-fleet">
       <div class="row">
-        <button id="fleetScanBtn" type="button">Scan fleet</button>
-        <button class="secondary" id="fleetBenchBtn" type="button">Benchmark</button>
-        <button class="secondary" id="fleetApplyBtn" type="button">Apply recs</button>
+        <button id="fleetScanBtn" type="button" title="List what models are installed on each node. Fast — runs no models.">1 · Find models</button>
+        <button class="secondary" id="fleetBenchBtn" type="button" title="Run each model through the test battery to score it. Slow — this is the expensive step.">2 · Benchmark (score)</button>
+        <button class="secondary" id="fleetApplyBtn" type="button" title="Point each role at its top-scoring model from the benchmark.">3 · Apply best</button>
       </div>
+      <div class="hint" style="margin-top:6px;"><b>Find</b> lists installed models (fast, no scoring) → <b>Benchmark</b> scores them by running tests (slow) → <b>Apply</b> routes each role to the best.</div>
       <div class="row" style="margin-top:8px; align-items:center; gap:14px; flex-wrap:wrap;">
-        <label class="hint" style="display:flex; align-items:center; gap:6px;">Max model size (B)
+        <label class="hint" style="display:flex; align-items:center; gap:6px;">Benchmark — max model size (B)
           <input type="number" id="benchMaxSize" min="0" step="1" style="width:70px;"/></label>
-        <label class="hint" style="display:flex; align-items:center; gap:6px;">Max latency (s)
+        <label class="hint" style="display:flex; align-items:center; gap:6px;">max latency (s)
           <input type="number" id="benchMaxLatency" min="0" step="0.5" style="width:70px;"/></label>
-        <span class="hint">benchmark skips models above the size, or slower than the latency (0 = 30s default)</span>
+        <span class="hint">skips models bigger than the size, or slower than the latency (0 = 30s default)</span>
       </div>
-      <div id="fleetMsg" class="hint">Discovers Ollama nodes on your LAN and catalogues their models.</div>
+      <div id="fleetMsg" class="hint">Press <b>1 · Find models</b> to inventory the fleet, then <b>2 · Benchmark</b> to score them.</div>
       <div id="fleetList"></div>
     </div>
 
@@ -957,7 +958,7 @@ async function loadFleet() {
     // Pre-fill the benchmark scope fields from the current config (only fill if untouched).
     if ($("benchMaxSize") && document.activeElement !== $("benchMaxSize") && !$("benchMaxSize").value) $("benchMaxSize").value = data.max_model_size_b ?? 30;
     if ($("benchMaxLatency") && document.activeElement !== $("benchMaxLatency") && !$("benchMaxLatency").value) $("benchMaxLatency").value = data.max_latency_s ?? 0;
-    $("fleetMsg").textContent = `${data.nodes} node(s) catalogued, ${up} up, ${data.models} models. Scan to refresh.`;
+    $("fleetMsg").textContent = `${data.nodes} node(s), ${up} up, ${data.models} models found. "2 · Benchmark" to score them.`;
     const list = $("fleetList"); list.innerHTML = "";
     const recs = data.recommendations || {};
     const recRoles = Object.entries(recs).filter(([_r, v]) => v);
@@ -980,12 +981,12 @@ async function loadFleet() {
       models.slice(0, 12).forEach(mm => { const sp = document.createElement("span"); sp.className = "tag"; const q = (mm.quality != null) ? ` · q${mm.quality}` : ""; const t = (mm.return_time != null) ? ` · ${mm.return_time}s` : ""; sp.textContent = `${mm.model} ${mm.params_b}B${q}${t}`; tags.appendChild(sp); });
       d.appendChild(tags); list.appendChild(d);
     });
-    if (!Object.keys(data.by_node || {}).length) list.innerHTML = '<div class="hint">No catalogue yet — click Scan fleet.</div>';
+    if (!Object.keys(data.by_node || {}).length) list.innerHTML = '<div class="hint">No models yet — click "1 · Find models".</div>';
   } catch (e) { $("fleetList").innerHTML = "error: " + e.message; }
 }
 
 $("fleetScanBtn").addEventListener("click", async () => {
-  $("fleetMsg").textContent = "Scanning the network…"; $("fleetScanBtn").disabled = true;
+  $("fleetMsg").textContent = "Finding models on the fleet…"; $("fleetScanBtn").disabled = true;
   try {
     const r = await api("POST", "/api/fleet/scan");
     $("fleetMsg").textContent = `Found ${r.models} models across ${r.nodes} node(s).`;
@@ -1037,7 +1038,7 @@ async function loadModels() {
     $("poolBackend").innerHTML = `<b>Backend:</b> ${backend} &middot; <b>Auto roles:</b> ${auto}. Locality is set by [backend] lan_backend in mimir.toml (restart to change).`;
     const list = $("poolList"); list.innerHTML = "";
     const models = data.models || [];
-    if (!models.length) { list.innerHTML = '<div class="hint">No models catalogued yet — open the Fleet tab and Scan.</div>'; return; }
+    if (!models.length) { list.innerHTML = '<div class="hint">No models yet — open the Fleet tab and click "1 · Find models".</div>'; return; }
     models.forEach(m => {
       const row = document.createElement("div"); row.className = "mem"; if (!m.enabled) row.style.opacity = "0.5";
       const label = document.createElement("label"); label.style.display = "flex"; label.style.alignItems = "center"; label.style.gap = "8px"; label.style.cursor = "pointer";
