@@ -414,6 +414,8 @@ def _triple_to_dict(triple: Triple) -> dict[str, Any]:
 
 def serve(config_path: str, host: str = "127.0.0.1", port: int = 8765) -> None:
     """Boot a brain from config and serve the web UI until interrupted."""
+    print(f"Starting Mimir from {config_path} …")
+    print("(scanning the LAN for Ollama nodes can take a couple of seconds)", flush=True)
     brain = Mimir.from_config(config_path)
     server = create_server(brain, host, port)
     bound_port = server.server_address[1]  # the real port (when port=0, the OS-assigned one)

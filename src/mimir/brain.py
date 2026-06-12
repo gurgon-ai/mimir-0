@@ -121,13 +121,18 @@ class Mimir:
         self.config = config
         self._storage = StorageGateway(config.storage_path)
         if config.backend is not None and provider is None:
-            # A discovered/declared Ollama fleet: build a model-aware pool, inventory it now, and
-            # start the active-health prober so routing reflects the live LAN (DESIGN §5).
+            # A discovered/declared Ollama fleet: build a model-aware pool, then inventory it and
+            # start the active-health prober IN THE BACKGROUND — so a slow node can't block boot
+            # (or the web server). Routing is optimistic until the first inventory lands (§5).
             pool = build_fleet_pool(config.backend)
             self._model = ModelGateway(pool, config.roles)
-            self._model.refresh_inventory()
-            self._model.start_prober(config.backend.refresh_interval_s)
-            log.info("Mimir online | fleet: %s", self._model.get_stats())
+            threading.Thread(
+                target=self._init_fleet,
+                args=(config.backend.refresh_interval_s,),
+                name="mimir-fleet-init",
+                daemon=True,
+            ).start()
+            log.info("Mimir online | fleet: discovered nodes; inventorying in background")
         else:
             self._model = ModelGateway(provider or build_provider(config.provider), config.roles)
         self._embedder: Embedder = make_embedder(config, self._model)
@@ -143,6 +148,14 @@ class Mimir:
         # non-interactive deployment is grounded without running the interactive interview.
         if config.identity_anchors:
             establish_identity(self._storage, config.identity_anchors)
+
+    def _init_fleet(self, refresh_interval_s: float) -> None:
+        """Inventory the fleet once, then start the active-health prober (off the boot path)."""
+        try:
+            self._model.refresh_inventory()
+        except Exception as exc:  # never let fleet init crash the brain
+            log.warning("fleet: initial inventory failed: %s", exc)
+        self._model.start_prober(refresh_interval_s)
 
     @classmethod
     def from_config(cls, path: str) -> Mimir:
