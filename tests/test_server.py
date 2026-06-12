@@ -170,6 +170,15 @@ def test_sleep_endpoint_runs_consolidation(base_url: str) -> None:
     )
 
 
+def test_fleet_scan_and_report(base_url: str) -> None:
+    status, scanned = _json("POST", base_url + "/api/fleet/scan", {})
+    assert status == 200
+    assert scanned["models"] >= 1  # the mock provider advertises a few models
+    _, report = _json("GET", base_url + "/api/fleet")
+    assert report["models"] >= 1
+    assert "by_node" in report
+
+
 def test_procedures_teach_and_list(base_url: str) -> None:
     status, taught = _json(
         "POST",

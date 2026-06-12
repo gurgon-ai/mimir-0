@@ -25,7 +25,7 @@ from ...prompts import (
     SENTINEL_MARKER,
     WORKING_MEMORY_MARKER,
 )
-from ..provider import Message
+from ..provider import Message, ModelInfo
 
 _EMBED_DIM = 64
 
@@ -69,6 +69,14 @@ class MockProvider:
     def list_models(self) -> list[str]:
         """A few distinct names so the council's multi-model assignment path is exercised."""
         return ["mock-a", "mock-b", "mock-c"]
+
+    def model_details(self) -> list[ModelInfo]:
+        """Deterministic catalogue metadata: distinct families and weights for fleet tests."""
+        return [
+            ModelInfo(name="mock-a", family="alpha", params_b=3.0, quantization="Q4"),
+            ModelInfo(name="mock-b", family="beta", params_b=8.0, quantization="Q4"),
+            ModelInfo(name="mock-c", family="gamma", params_b=27.0, quantization="Q5"),
+        ]
 
     def embed(self, model: str, texts: list[str]) -> list[list[float]]:
         return [self._embedder.embed(t) for t in texts]

@@ -12,10 +12,33 @@ config, where the law says it belongs (DESIGN §4).
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 # A chat message: {"role": "system"|"user"|"assistant", "content": "..."}.
 Message = dict[str, str]
+
+_PARAMS_RE = re.compile(r"([\d.]+)\s*[bB]")
+
+
+@dataclass(slots=True)
+class ModelInfo:
+    """Catalogue metadata for one installed model (from a provider's model listing)."""
+
+    name: str
+    family: str = ""
+    params_b: float = 0.0  # parameter count in billions (the 'weight'), 0 if unknown
+    quantization: str = ""
+    context_length: int = 0
+    size_bytes: int = 0
+    capabilities: list[str] = field(default_factory=list)
+
+
+def parse_params_b(parameter_size: str) -> float:
+    """Parse Ollama's ``parameter_size`` (e.g. '11.9B', '7B') into billions of params."""
+    match = _PARAMS_RE.search(parameter_size or "")
+    return float(match.group(1)) if match else 0.0
 
 
 @runtime_checkable

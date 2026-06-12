@@ -23,6 +23,7 @@ from typing import Any
 
 from .cognition.bake import bake
 from .cognition.council import CouncilResult, deliberate
+from .cognition.fleet import FleetScanResult, fleet_report, scan_fleet
 from .cognition.graph import render_triples, retrieve_connected
 from .cognition.identity import (
     current_anchors,
@@ -40,13 +41,15 @@ from .cognition.working_memory import (
     record_exchange,
     synthesize_working_memory,
 )
-from .config import Config, ProviderSpec, load_config
+from .config import BackendConfig, Config, ProviderSpec, load_config
 from .context.build import ContextBundle, build_context
 from .embed.base import Embedder, EmbeddingMode
 from .embed.endpoint import EndpointEmbedder, NullEmbedder
 from .embed.locality import LocalityHashEmbedder
 from .errors import ConfigError
+from .model.discovery import discover_node_urls
 from .model.gateway import ModelGateway
+from .model.pool import ProviderPool
 from .model.provider import Provider
 from .model.providers.mock import MockProvider
 from .model.providers.ollama import OllamaProvider
@@ -88,6 +91,17 @@ def build_provider(spec: ProviderSpec) -> Provider:
     )
 
 
+def build_fleet_pool(backend: BackendConfig) -> ProviderPool:
+    """Discover Ollama nodes and build a model-aware pool over them (DESIGN §5).
+
+    Nodes need zero setup — just ``ollama serve``. Discovery = localhost + declared nodes +
+    (when ``lan_backend``) a subnet scan.
+    """
+    urls = discover_node_urls(backend)
+    endpoints: list[tuple[str, Provider]] = [(url, OllamaProvider(url)) for url in urls]
+    return ProviderPool(endpoints)
+
+
 def make_embedder(config: Config, model: ModelGateway) -> Embedder:
     """Pick the embedder for the configured mode (DESIGN kickoff decision; see docs/SETUP.md)."""
     if config.embed_mode is EmbeddingMode.BOOTSTRAP:
@@ -104,7 +118,16 @@ class Mimir:
         config.validate()
         self.config = config
         self._storage = StorageGateway(config.storage_path)
-        self._model = ModelGateway(provider or build_provider(config.provider), config.roles)
+        if config.backend is not None and provider is None:
+            # A discovered/declared Ollama fleet: build a model-aware pool, inventory it now, and
+            # start the active-health prober so routing reflects the live LAN (DESIGN §5).
+            pool = build_fleet_pool(config.backend)
+            self._model = ModelGateway(pool, config.roles)
+            self._model.refresh_inventory()
+            self._model.start_prober(config.backend.refresh_interval_s)
+            log.info("Mimir online | fleet: %s", self._model.get_stats())
+        else:
+            self._model = ModelGateway(provider or build_provider(config.provider), config.roles)
         self._embedder: Embedder = make_embedder(config, self._model)
         # Fail-loud visibility: announce the active embedding mode so no one mistakes the
         # cheap bootstrap path for poor memory (DESIGN §10; kickoff decision).
@@ -399,6 +422,15 @@ class Mimir:
         """Run a consolidation pass now (dedup, decay, archive, contradiction resolution)."""
         return consolidate(self._storage)
 
+    def scan_fleet(self) -> FleetScanResult:
+        """Inventory the model fleet (nodes + models) and rebuild the catalogue (DESIGN §5)."""
+        self._model.refresh_inventory()
+        return scan_fleet(self._model, self._storage)
+
+    def fleet_report(self) -> dict[str, Any]:
+        """The fleet catalogue as a per-node summary."""
+        return fleet_report(self._storage)
+
     def deliberate(self, question: str, user: str | None = None) -> CouncilResult:
         """Convene the inner council on an open question — adversarial deliberation → a verdict.
 
@@ -467,6 +499,7 @@ class Mimir:
 
     def close(self) -> None:
         self._join_background()
+        self._model.stop_prober()
         self._storage.close()
 
     def __enter__(self) -> Mimir:

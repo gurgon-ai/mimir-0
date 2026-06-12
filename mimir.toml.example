@@ -69,6 +69,15 @@ min_match = 0.3      # minimum trigger relevance (cosine or keyword) before a ha
 type = "ollama"
 host = "http://localhost:11434"
 
+# [backend] turns on the DISTRIBUTED fleet: pool several machines that each just run `ollama serve`
+# (zero setup on them). Requests route only to a node that has the model. Great for running the
+# brain on a small box (even a Raspberry Pi) and borrowing GPUs over the LAN. Omit for single-host.
+# [backend]
+# lan_backend = true               # scan the LAN for Ollama nodes
+# subnet = "192.168.2.0/24"         # CIDR to scan; omit to auto-detect the local /24
+# nodes = ["192.168.2.225:11434"]   # optional explicit nodes (always included)
+# refresh_interval_s = 60           # active health/inventory refresh; 0 disables the prober
+
 # --- roles: one model per cognitive job. `model` is required; other keys are tuned params. ---
 
 [roles.chat]

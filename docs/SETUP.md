@@ -210,6 +210,33 @@ path **replaces** its previous chunks rather than duplicating them.
 - Recall quality on documents depends on the embedding mode (§4). Bootstrap matches words; for
   semantic recall over documents, use **endpoint** mode.
 
+## 5d. Distributed inference — pool several machines (the fleet)
+
+Don't have one powerful machine? Pool several modest ones. Every computer that runs `ollama serve`
+becomes a worker — **with zero setup on it** (no Mimir code, no agent, just Ollama). Mimir
+discovers them, catalogues their models, and routes each request to a node that actually has the
+model.
+
+```toml
+[backend]
+lan_backend = true             # scan the LAN for Ollama nodes
+# subnet = "192.168.2.0/24"    # omit to auto-detect your local /24
+# nodes = ["192.168.2.225:11434"]  # optional explicit nodes (always included)
+refresh_interval_s = 60        # active health/inventory refresh
+```
+
+On boot Mimir scans the subnet for `:11434`, inventories each node's models (family, weight,
+quantization), and from then on a call for `qwen2.5:14b` goes to whichever node has it. Health is
+checked actively; a node that drops off is routed around. Run **a variety of model families** across
+your machines — it makes the inner council genuinely diverse and gives the fleet more to route to.
+
+**Edge / Raspberry Pi recipe:** the brain is just Python + SQLite, so run it on a tiny box. Set
+`lan_backend = true`, use bootstrap or an endpoint embedder, and point nothing at localhost — the
+Pi holds the *memory* while your gaming PC / Mac / server does the *inference* over the LAN.
+
+Inspect or refresh the catalogue from `brain.scan_fleet()` / `brain.fleet_report()`, or the web
+UI's **Fleet** tab.
+
 ## 6. Configuration reference
 
 ```toml

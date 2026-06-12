@@ -18,7 +18,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from ...errors import ProviderError
-from ..provider import Message
+from ..provider import Message, ModelInfo, parse_params_b
 
 log = logging.getLogger("mimir.model.ollama")
 
@@ -46,17 +46,39 @@ class OllamaProvider:
                 f"unexpected /api/chat response shape from Ollama: {data!r}"
             ) from exc
 
-    def list_models(self) -> list[str]:
-        """Discover installed models via Ollama's /api/tags (for council auto-discovery)."""
+    def _tags(self) -> list[dict[str, Any]]:
         req = urllib.request.Request(f"{self._host}/api/tags", method="GET")
         try:
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 data = json.loads(resp.read())
         except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as exc:
             raise ProviderError(
-                f"could not list Ollama models at {self._host}: {exc}", transient=True
+                f"could not reach Ollama at {self._host}: {exc}", transient=True
             ) from exc
-        return [str(m["name"]) for m in data.get("models", []) if "name" in m]
+        models = data.get("models", [])
+        return [m for m in models if isinstance(m, dict) and "name" in m]
+
+    def list_models(self) -> list[str]:
+        """Discover installed model names via Ollama's /api/tags (council auto-discovery)."""
+        return [str(m["name"]) for m in self._tags()]
+
+    def model_details(self) -> list[ModelInfo]:
+        """Rich model metadata for the fleet catalogue (family, weight, quant, capabilities)."""
+        out: list[ModelInfo] = []
+        for m in self._tags():
+            details = m.get("details") or {}
+            out.append(
+                ModelInfo(
+                    name=str(m["name"]),
+                    family=str(details.get("family", "")),
+                    params_b=parse_params_b(str(details.get("parameter_size", ""))),
+                    quantization=str(details.get("quantization_level", "")),
+                    context_length=int(details.get("context_length", 0) or 0),
+                    size_bytes=int(m.get("size", 0) or 0),
+                    capabilities=[str(c) for c in (m.get("capabilities") or [])],
+                )
+            )
+        return out
 
     def chat_stream(
         self, model: str, messages: list[Message], params: dict[str, Any]

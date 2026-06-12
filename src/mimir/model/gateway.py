@@ -19,7 +19,7 @@ from ..config import RoleSpec
 from ..errors import ModelGatewayError
 from .pool import ProviderPool
 from .priority import DEFAULT_ROLE_PRIORITY, Priority
-from .provider import Message, Provider
+from .provider import Message, ModelInfo, Provider
 
 log = logging.getLogger("mimir.model")
 
@@ -114,3 +114,17 @@ class ModelGateway:
 
     def get_stats(self) -> dict[str, object]:
         return self._pool.get_stats()
+
+    # -- fleet lifecycle (delegates to the pool) --------------------------------------
+
+    def refresh_inventory(self) -> None:
+        self._pool.refresh()
+
+    def start_prober(self, interval_s: float) -> None:
+        self._pool.start_prober(interval_s)
+
+    def stop_prober(self) -> None:
+        self._pool.stop_prober()
+
+    def inventory_details(self) -> list[tuple[str, str, list[ModelInfo]]]:
+        return self._pool.inventory_details()
