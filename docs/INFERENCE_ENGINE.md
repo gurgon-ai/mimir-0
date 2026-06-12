@@ -272,7 +272,12 @@ Extensions this engine adds:
     (VRAM), so within a node it's warm → test → swap; but every node works at once. Each *distinct*
     model is dealt to one **home node** for scoring (quality is node-independent), spreading the
     work so nodes hit *different* models; the other nodes that have it are probed only for per-node
-    *speed*.
+    *speed*. The orchestrator (on the head) dispatches async to the LAN nodes **and** runs its own
+    models in the gaps — the head never blocks the edge, and results are collected as they land.
+  - **Capability-aware assignment.** Among the nodes that have a model, deal **small models to the
+    weaker edge nodes and big models to the strong head** — a Pi races through 3B models while the
+    big GPU grinds the 26–30B ones, each busy with work it's suited to (and the weak node never
+    chokes on a model it can barely hold). Dovetails with the outside-in (small/big) ordering.
   - **Triage, then score.** A fast first sweep checks each model is viable (responds within budget)
     and *warms* it; only survivors get the full battery — so a slow/broken model can't burn a slot.
   - **Honest live ETA.** Time the *test* separately from the *warmup* (warmup is overhead, not the
