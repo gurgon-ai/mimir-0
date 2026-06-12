@@ -84,10 +84,17 @@ def recommend_roles(storage: StorageGateway) -> dict[str, dict[str, Any] | None]
                 "code": entry.code,
                 "coherence": entry.coherence,
                 "return_time": entry.return_time,
+                "node": entry.node,  # the fastest node for this model (speed is per-node)
                 "nodes": [],
             },
         )
         slot["nodes"].append(entry.node)
+        # Track the fastest node: return_time is now measured per (node, model).
+        if entry.return_time is not None and (
+            slot["return_time"] is None or entry.return_time < slot["return_time"]
+        ):
+            slot["return_time"] = entry.return_time
+            slot["node"] = entry.node
 
     recommendations: dict[str, dict[str, Any] | None] = {}
     for role, (capability, prefer) in ROLE_NEEDS.items():
@@ -114,6 +121,7 @@ def recommend_roles(storage: StorageGateway) -> dict[str, dict[str, Any] | None]
             "family": data["family"],
             "quality": data["quality"],
             "return_time": data["return_time"],
+            "node": data["node"],  # the fastest node holding this model
             "nodes": data["nodes"],
             "prefer": prefer,
         }

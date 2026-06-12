@@ -234,6 +234,20 @@ your machines — it makes the inner council genuinely diverse and gives the fle
 `lan_backend = true`, use bootstrap or an endpoint embedder, and point nothing at localhost — the
 Pi holds the *memory* while your gaming PC / Mac / server does the *inference* over the LAN.
 
+```bash
+# on the Pi (Python 3.11+; the Pi runs NO Ollama itself)
+git clone <repo> mimir-0 && cd mimir-0
+python -m venv .venv && source .venv/bin/activate
+pip install -e .                       # core only — zero deps
+cp mimir.toml.example mimir.toml        # set [backend] lan_backend = true, roles, embeddings=bootstrap
+python -m mimir.selftest                # sanity (mock, offline)
+python -m mimir.server --config mimir.toml --host 0.0.0.0   # browse from another machine
+```
+
+The Pi discovers your LAN's Ollama nodes and routes every model call to them. After a
+`brain.benchmark_fleet()`, `apply_recommendations()` re-points each role at the best model the
+fleet can serve.
+
 Inspect or refresh the catalogue from `brain.scan_fleet()` / `brain.fleet_report()`, or the web
 UI's **Fleet** tab.
 

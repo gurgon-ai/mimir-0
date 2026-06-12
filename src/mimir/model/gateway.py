@@ -41,6 +41,12 @@ class ModelGateway:
         else:
             self._pool = ProviderPool([(getattr(provider, "name", "endpoint-0"), provider)])
 
+    def set_role_model(self, role: str, model: str) -> None:
+        """Re-point a role at a different model, keeping its tuned params (for auto-apply)."""
+        existing = self._roles.get(role)
+        params = existing.params if existing is not None else {}
+        self._roles[role] = RoleSpec(model=model, params=params)
+
     def _role(self, role: str) -> RoleSpec:
         spec = self._roles.get(role)
         if spec is None:

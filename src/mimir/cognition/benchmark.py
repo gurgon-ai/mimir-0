@@ -26,12 +26,18 @@ from dataclasses import dataclass
 
 from ..model.gateway import ModelGateway
 from ..model.provider import Message
+from ..model.providers.ollama import OllamaProvider
 from ..storage.gateway import StorageGateway
-from ..storage.repo import list_catalogue, update_catalogue_scores
+from ..storage.repo import list_catalogue, update_catalogue_scores, update_catalogue_speed
 
 log = logging.getLogger("mimir.benchmark")
 
 ChatFn = Callable[[list[Message]], str]
+
+# Per-node speed probes are direct, single-attempt, short-timeout calls — a model that doesn't
+# answer a trivial prompt within this is recorded as that-slow (the timeout IS the signal).
+SPEED_TIMEOUT_S = 20.0
+_SPEED_PROMPT: list[Message] = [{"role": "user", "content": "Reply with the single word: ok"}]
 
 # Families known to follow instructions well — the recommended floor (README curates this).
 APPROVED_FAMILIES = ("llama", "qwen", "gemma", "mistral", "phi", "command-r", "deepseek")
@@ -260,6 +266,22 @@ def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True)
     )
 
 
+def _measure_node_speed(node: str, model_name: str) -> float | None:
+    """Time a trivial call to a *specific* node directly (no pool/retry); None for non-URL nodes.
+
+    Returns elapsed seconds — even on timeout/failure, the elapsed time is the 'too slow' signal.
+    """
+    if not node.startswith("http"):
+        return None  # mock/non-URL node — nothing real to time
+    provider = OllamaProvider(node, timeout=SPEED_TIMEOUT_S)
+    started = time.monotonic()
+    try:
+        provider.chat(model_name, _SPEED_PROMPT, {})
+    except Exception:
+        return round(time.monotonic() - started, 3)  # the (timed-out) duration ranks it slow
+    return round(time.monotonic() - started, 3)
+
+
 def benchmark_fleet(
     model: ModelGateway,
     storage: StorageGateway,
@@ -277,7 +299,9 @@ def benchmark_fleet(
     to benchmark the big ones explicitly). Embedding models are skipped (they aren't chat models).
     """
     sizes: dict[str, float] = {}
+    nodes_with: dict[str, list[str]] = {}
     for entry in list_catalogue(storage):
+        nodes_with.setdefault(entry.model, []).append(entry.node)
         if "embed" in entry.model.lower():
             continue
         if only_approved and not is_approved(entry.family):
@@ -305,6 +329,11 @@ def benchmark_fleet(
             code=bench.code,
             coherence=bench.coherence,
         )
+        # Per-node speed: time the model directly on each node that has it (no pool, no retry).
+        for node in nodes_with.get(model_name, []):
+            elapsed = _measure_node_speed(node, model_name)
+            if elapsed is not None:
+                update_catalogue_speed(storage, node, model_name, elapsed)
         results.append(bench)
     log.info("benchmark: scored %d model(s); judges_ok=%s", len(results), judges_ok)
     return FleetBenchmarkResult(benchmarked=len(results), judges_ok=judges_ok, results=results)

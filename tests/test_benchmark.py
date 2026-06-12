@@ -55,11 +55,10 @@ def test_smallest_first_and_size_cap(brain: Mimir) -> None:
     assert result.results[0].model == "mock-a"
 
 
-def test_recommendations_pick_per_role(brain: Mimir) -> None:
+def _craft_scores(brain: Mimir) -> None:
     from mimir.storage.repo import update_catalogue_scores
 
     brain.scan_fleet()  # catalogue has mock-a/b/c
-    # craft scores: mock-b is high-quality but slow; mock-a is decent and fast.
     update_catalogue_scores(
         brain._storage, "mock-a", return_time=0.5, quality=0.7,
         talk=0.9, tools=0.6, code=0.6, coherence=None,
@@ -68,9 +67,28 @@ def test_recommendations_pick_per_role(brain: Mimir) -> None:
         brain._storage, "mock-b", return_time=5.0, quality=0.95,
         talk=1.0, tools=0.9, code=0.9, coherence=None,
     )
+
+
+def test_recommendations_pick_per_role(brain: Mimir) -> None:
+    _craft_scores(brain)
     recs = brain.fleet_recommendations()
     assert recs["bake"]["model"] == "mock-b"  # bake prefers quality → the high-quality model
     assert recs["chat"] is not None  # chat is balanced; either could win, just must resolve
+    assert recs["bake"]["node"]  # the fastest node holding the model is named
+
+
+def test_apply_recommendations_repoints_roles(brain: Mimir) -> None:
+    _craft_scores(brain)
+    applied = brain.apply_recommendations()
+    assert applied["bake"] == "mock-b"  # bake re-pointed to the recommended model
+    assert brain.config.roles["bake"].model == "mock-b"  # live routing updated
+
+
+def test_per_node_speed_skips_non_url_nodes(brain: Mimir) -> None:
+    # mock catalogue nodes are not URLs, so per-node speed probing is skipped (no crash).
+    from mimir.cognition.benchmark import _measure_node_speed
+
+    assert _measure_node_speed("endpoint-0", "mock-a") is None
 
 
 def test_benchmark_fleet_writes_scores(brain: Mimir) -> None:
