@@ -555,25 +555,29 @@ class Mimir:
         self,
         *,
         only_approved: bool = True,
-        limit: int = 8,
-        max_params_b: float = 30.0,
+        limit: int = 64,
+        max_params_b: float | None = None,
         judge: bool = True,
         progress: Callable[[int, int, str], None] | None = None,
     ) -> FleetBenchmarkResult:
         """Scan + benchmark the fleet's models (speed + capability + coherence) (DESIGN §4).
 
-        Re-scans first so the catalogue is current, then scores each distinct model (smallest-first,
-        skipping models over ``max_params_b``) and writes the results back. Expensive — many model
-        calls — so it is on-demand (this, the web UI, or cron). ``progress(i, total, model)`` is
-        invoked before each model so a caller can show live progress on this multi-minute run.
+        Re-scans first so the catalogue is current, then scores each distinct approved model
+        **up to the user's size cap** (``[backend] max_model_size_b``, since only the user knows
+        their hardware), smallest-first, and writes the results back. Expensive — many model calls —
+        so it is on-demand; ``progress(i, total, model)`` lets a caller show live progress and the
+        user stop it. Pass ``max_params_b`` to override the configured cap.
         """
+        cap = max_params_b if max_params_b is not None else (
+            self.config.backend.max_model_size_b if self.config.backend else 30.0
+        )
         self.scan_fleet()
         return _benchmark_fleet(
             self._model,
             self._storage,
             only_approved=only_approved,
             limit=limit,
-            max_params_b=max_params_b,
+            max_params_b=cap,
             judge=judge,
             progress=progress,
         )

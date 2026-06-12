@@ -323,6 +323,7 @@ class _Handler(BaseHTTPRequestHandler):
                     srv.bench_state.update(
                         running=False, done=True, current="",
                         benchmarked=result.benchmarked, judges_ok=result.judges_ok,
+                        eligible=result.eligible, skipped_too_big=result.skipped_too_big,
                     )
             except Exception as exc:  # surfaced via status, never a silent death (DESIGN §10)
                 log.exception("benchmark run failed")
@@ -978,7 +979,8 @@ $("fleetBenchBtn").addEventListener("click", async () => {
       const s = await api("GET", "/api/fleet/benchmark/status");
       if (s.error) { $("fleetMsg").textContent = "Benchmark error: " + s.error; break; }
       if (s.done || !s.running) {
-        $("fleetMsg").textContent = `Benchmarked ${s.benchmarked || 0} model(s)` + (s.judges_ok ? "" : " (coherence judges untrusted — skipped)") + ".";
+        const skipped = s.skipped_too_big ? `, ${s.skipped_too_big} skipped as too large` : "";
+        $("fleetMsg").textContent = `Benchmarked ${s.benchmarked || 0} of ${s.eligible || 0} eligible model(s)${skipped}` + (s.judges_ok ? "" : " (coherence judges untrusted — skipped)") + ".";
         loadFleet();
         break;
       }
