@@ -25,6 +25,7 @@ from .cognition.bake import bake
 from .cognition.benchmark import FleetBenchmarkResult
 from .cognition.benchmark import benchmark_fleet as _benchmark_fleet
 from .cognition.council import CouncilResult, deliberate
+from .cognition.epistemics import EpistemicResult, run_epistemics
 from .cognition.fleet import (
     FleetScanResult,
     fleet_model_pool,
@@ -573,6 +574,18 @@ class Mimir:
             max_params_b=max_params_b,
             judge=judge,
         )
+
+    def evaluate_epistemics(
+        self, models: list[str] | None = None, *, samples: int = 3
+    ) -> list[EpistemicResult]:
+        """Measure how well models exploit the epistemic context framework (DESIGN §3).
+
+        Runs the structured-vs-flat probes (tier deference, attribution, uncertainty) across the
+        given models — or every reachable non-embedding model — and returns each model's scores
+        and the framework ``lift``. Call-heavy; intended on-demand.
+        """
+        names = models or [m for m in self._model.available_models() if "embed" not in m.lower()]
+        return run_epistemics(self._model, names, samples=samples)
 
     def deliberate(self, question: str, user: str | None = None) -> CouncilResult:
         """Convene the inner council on an open question — adversarial deliberation → a verdict.
