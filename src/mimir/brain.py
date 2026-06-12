@@ -558,12 +558,14 @@ class Mimir:
         limit: int = 8,
         max_params_b: float = 30.0,
         judge: bool = True,
+        progress: Callable[[int, int, str], None] | None = None,
     ) -> FleetBenchmarkResult:
         """Scan + benchmark the fleet's models (speed + capability + coherence) (DESIGN §4).
 
         Re-scans first so the catalogue is current, then scores each distinct model (smallest-first,
         skipping models over ``max_params_b``) and writes the results back. Expensive — many model
-        calls — so it is on-demand (this, the web UI, or cron).
+        calls — so it is on-demand (this, the web UI, or cron). ``progress(i, total, model)`` is
+        invoked before each model so a caller can show live progress on this multi-minute run.
         """
         self.scan_fleet()
         return _benchmark_fleet(
@@ -573,6 +575,7 @@ class Mimir:
             limit=limit,
             max_params_b=max_params_b,
             judge=judge,
+            progress=progress,
         )
 
     def evaluate_epistemics(

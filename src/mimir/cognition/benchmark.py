@@ -356,6 +356,7 @@ def benchmark_fleet(
     limit: int = 8,
     max_params_b: float = 30.0,
     judge: bool = True,
+    progress: Callable[[int, int, str], None] | None = None,
 ) -> FleetBenchmarkResult:
     """Benchmark the distinct models in the catalogue and write their scores back.
 
@@ -363,6 +364,10 @@ def benchmark_fleet(
     its catalogue rows. Models are tried **smallest-first** and anything over ``max_params_b`` is
     skipped, so a giant model can't hang the run before the practical ones are scored (raise the cap
     to benchmark the big ones explicitly). Embedding models are skipped (they aren't chat models).
+
+    ``progress(index, total, model_name)`` is called before each model — the benchmark is
+    multi-minute and otherwise silent, so this (and the per-model log line) is how a UI or a log
+    reader can tell it's alive (DESIGN §10 — stay observable).
     """
     sizes: dict[str, float] = {}
     nodes_with: dict[str, list[str]] = {}
@@ -377,14 +382,21 @@ def benchmark_fleet(
         sizes.setdefault(entry.model, entry.params_b)
     models = sorted(sizes, key=lambda m: sizes[m])[:limit]  # smallest (fastest) first
 
+    total = len(models)
+    log.info("benchmark: starting — %d model(s) to score (judge=%s)", total, judge)
     judges_ok = judges_trustworthy(model) if judge else False
     results: list[ModelBenchmark] = []
-    for model_name in models:
+    for i, model_name in enumerate(models, start=1):
+        log.info("benchmark: [%d/%d] %s …", i, total, model_name)
+        if progress is not None:
+            progress(i, total, model_name)
         try:
             bench = benchmark_model(model, model_name, judge=judges_ok)
         except Exception as exc:
-            log.warning("benchmark: %s failed: %s", model_name, exc)
+            log.warning("benchmark: [%d/%d] %s FAILED: %s", i, total, model_name, exc)
             continue
+        log.info("benchmark: [%d/%d] %s done — quality=%.2f in %.1fs",
+                 i, total, model_name, bench.quality, bench.return_time)
         update_catalogue_scores(
             storage,
             model_name,
