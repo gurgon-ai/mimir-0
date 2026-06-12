@@ -175,7 +175,7 @@ class _Handler(BaseHTTPRequestHandler):
             elif route == "/api/fleet/scan":
                 self._send_json(self._scan_fleet())
             elif route == "/api/fleet/benchmark":
-                self._send_json(self._benchmark_fleet())
+                self._send_json(self._benchmark_fleet(body))
             elif route == "/api/fleet/apply":
                 self._send_json({"applied": self._apply_recommendations()})
             elif route == "/api/fleet/model":
@@ -292,7 +292,10 @@ class _Handler(BaseHTTPRequestHandler):
         with self.server.brain_lock:
             report = self.server.brain.fleet_report()
             stats = self.server.brain._model.get_stats()
+            be = self.server.brain.config.backend
         report["stats"] = stats
+        report["max_model_size_b"] = be.max_model_size_b if be else 30.0
+        report["max_latency_s"] = be.max_latency_s if be else 0.0
         return report
 
     def _scan_fleet(self) -> dict[str, Any]:
@@ -300,12 +303,17 @@ class _Handler(BaseHTTPRequestHandler):
             result = self.server.brain.scan_fleet()
         return {"nodes": result.nodes, "models": result.models}
 
-    def _benchmark_fleet(self) -> dict[str, Any]:
+    def _benchmark_fleet(self, body: dict[str, Any]) -> dict[str, Any]:
         """Kick off a benchmark in the background and return immediately. The run is multi-minute;
         the UI polls /api/fleet/benchmark/status. Holding the brain lock for the whole run (in the
         worker thread) preserves serialization against turns, but the status + state reads are
-        lock-free, so the page never freezes (the bug this fixes)."""
+        lock-free, so the page never freezes (the bug this fixes).
+
+        Optional body fields ``max_model_size_b`` / ``max_latency_s`` (the UI scope fields) override
+        the configured cap/latency for this run."""
         srv = self.server
+        cap = float(body["max_model_size_b"]) if body.get("max_model_size_b") not in (None, "") else None
+        latency = float(body["max_latency_s"]) if body.get("max_latency_s") not in (None, "") else None
         with srv.bench_lock:
             if srv.bench_state.get("running"):
                 return {"started": False, **srv.bench_state}  # already running
@@ -319,7 +327,9 @@ class _Handler(BaseHTTPRequestHandler):
         def _run() -> None:
             try:
                 with srv.brain_lock:
-                    result = srv.brain.benchmark_fleet(progress=_progress)
+                    result = srv.brain.benchmark_fleet(
+                        max_params_b=cap, latency_budget_s=latency, progress=_progress
+                    )
                 with srv.bench_lock:
                     srv.bench_state.update(
                         running=False, done=True, current="",
@@ -349,6 +359,9 @@ class _Handler(BaseHTTPRequestHandler):
             pool = brain.model_pool()
             pool["lan_backend"] = brain.config.backend is not None
             pool["nodes_up"] = brain._model.get_stats().get("nodes_up", 0)
+            be = brain.config.backend
+            pool["max_model_size_b"] = be.max_model_size_b if be else 30.0
+            pool["max_latency_s"] = be.max_latency_s if be else 0.0
         return pool
 
     def _set_model_enabled(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -684,6 +697,13 @@ _HTML = """<!doctype html>
         <button class="secondary" id="fleetBenchBtn" type="button">Benchmark</button>
         <button class="secondary" id="fleetApplyBtn" type="button">Apply recs</button>
       </div>
+      <div class="row" style="margin-top:8px; align-items:center; gap:14px; flex-wrap:wrap;">
+        <label class="hint" style="display:flex; align-items:center; gap:6px;">Max model size (B)
+          <input type="number" id="benchMaxSize" min="0" step="1" style="width:70px;"/></label>
+        <label class="hint" style="display:flex; align-items:center; gap:6px;">Max latency (s)
+          <input type="number" id="benchMaxLatency" min="0" step="0.5" style="width:70px;"/></label>
+        <span class="hint">benchmark skips models above the size, or slower than the latency (0 = 30s default)</span>
+      </div>
       <div id="fleetMsg" class="hint">Discovers Ollama nodes on your LAN and catalogues their models.</div>
       <div id="fleetList"></div>
     </div>
@@ -934,6 +954,9 @@ async function loadFleet() {
   try {
     const data = await api("GET", "/api/fleet");
     const up = (data.stats && data.stats.nodes_up) || 0;
+    // Pre-fill the benchmark scope fields from the current config (only fill if untouched).
+    if ($("benchMaxSize") && document.activeElement !== $("benchMaxSize") && !$("benchMaxSize").value) $("benchMaxSize").value = data.max_model_size_b ?? 30;
+    if ($("benchMaxLatency") && document.activeElement !== $("benchMaxLatency") && !$("benchMaxLatency").value) $("benchMaxLatency").value = data.max_latency_s ?? 0;
     $("fleetMsg").textContent = `${data.nodes} node(s) catalogued, ${up} up, ${data.models} models. Scan to refresh.`;
     const list = $("fleetList"); list.innerHTML = "";
     const recs = data.recommendations || {};
@@ -974,7 +997,8 @@ $("fleetScanBtn").addEventListener("click", async () => {
 $("fleetBenchBtn").addEventListener("click", async () => {
   $("fleetMsg").textContent = "Starting benchmark…"; $("fleetBenchBtn").disabled = true;
   try {
-    await api("POST", "/api/fleet/benchmark");   // returns immediately; runs in the background
+    const scope = { max_model_size_b: $("benchMaxSize").value, max_latency_s: $("benchMaxLatency").value };
+    await api("POST", "/api/fleet/benchmark", scope);   // returns immediately; runs in the background
     // Poll live progress so the page never looks frozen during the multi-minute run.
     while (true) {
       await new Promise(r => setTimeout(r, 1500));

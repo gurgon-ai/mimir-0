@@ -557,6 +557,7 @@ class Mimir:
         only_approved: bool = True,
         limit: int = 64,
         max_params_b: float | None = None,
+        latency_budget_s: float | None = None,
         judge: bool = True,
         progress: Callable[[int, int, str], None] | None = None,
     ) -> FleetBenchmarkResult:
@@ -566,12 +567,15 @@ class Mimir:
         **up to the user's size cap** (``[backend] max_model_size_b``, since only the user knows
         their hardware), smallest-first, and writes the results back. Expensive — many model calls —
         so it is on-demand; ``progress(i, total, model)`` lets a caller show live progress and the
-        user stop it. Pass ``max_params_b`` to override the configured cap.
+        user stop it. ``max_params_b`` / ``latency_budget_s`` override the configured cap/latency
+        (e.g. from the UI fields) for a single run.
         """
         cap = max_params_b if max_params_b is not None else (
             self.config.backend.max_model_size_b if self.config.backend else 30.0
         )
-        budget = self.config.backend.max_latency_s if self.config.backend else 0.0
+        budget = latency_budget_s if latency_budget_s is not None else (
+            self.config.backend.max_latency_s if self.config.backend else 0.0
+        )
         self.scan_fleet()
         return _benchmark_fleet(
             self._model,
