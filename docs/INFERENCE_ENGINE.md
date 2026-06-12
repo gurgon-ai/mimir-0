@@ -189,10 +189,14 @@ beyond approving one node.
 
 ---
 
-## 4. The recommended-models registry  **[proposed]**
+## 4. The recommended-models registry  **[built — Phase A]**
 
-A **shipped, versioned, documented** list of models we have tested, each with: family, the roles it
-is fit for, expected score ranges (per dimension), and a minimum viable size. Purpose:
+A **shipped, versioned, documented** list of models we have tested
+(`src/mimir/cognition/recommended_models.toml`, loaded by `cognition/registry.py`), each with:
+family, the roles it is fit for, expected score ranges (per dimension), a `judge_ok` flag, and a
+minimum viable size. **[built]** Auto-routing now prefers a present recommended-for-the-role model
+before any benchmark **[built]**; using `judge_ok` models as cold-start judges is wired in Phase C
+**[proposed]**. Purpose:
 
 - **Safe default before any benchmark.** On first run the engine prefers a recommended model that is
   actually present, so the *out-of-box* path can't silently land on a known-bad model (this closes

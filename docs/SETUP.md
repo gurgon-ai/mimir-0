@@ -121,6 +121,15 @@ HTTP — no extra Python deps.
    `chat`/`bake`/`reasoning` roles; any embedding model works for `embed`. Bigger/smaller models
    trade quality for speed and VRAM. See `DESIGN.md` §4 on roles.
 
+   **Recommended models (a starting point, not a whitelist).** Mimir ships a curated, versioned
+   registry (`src/mimir/cognition/recommended_models.toml`) of families it has tested — currently
+   **gemma** (gemma4 e2b/e4b, gemma3:12b — *not* gemma3:4b), **qwen** (2.5/3/3.5), **llama** (3.x),
+   **phi**, **mistral**, **command-r**, **deepseek**, **granite**, **internlm**. If you set a role to
+   `model = "auto"`, Mimir prefers a present recommended model out of the box (so it won't land on a
+   known-weak one), and after you benchmark, measured scores take over. Running a **variety of
+   families** also unlocks stronger multi-family adversarial reasoning (the inner council). The full
+   rationale is in [`INFERENCE_ENGINE.md`](INFERENCE_ENGINE.md).
+
    > **On model size and identity.** The `chat` and `reasoning` roles carry Mimir's *identity* — its
    > self-model and how it speaks as itself. Very small models (≈4B) are unreliable here: in testing,
    > a 4B model hallucinated its own name and mimicked the prompt's internal tag style. Mimir guards

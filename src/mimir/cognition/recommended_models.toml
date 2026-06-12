@@ -1,0 +1,91 @@
+# Mimir recommended-models registry — a curated, VERSIONED starting point (NOT a whitelist).
+# See docs/INFERENCE_ENGINE.md §4 and §3a. Any model you install can still be measured and used;
+# this list only (1) seeds SAFE defaults before benchmarking, so `auto` routing won't land on a
+# known-weak model out of the box, and (2) names the models trusted to JUDGE unknown ones.
+#
+# `tag_patterns` are fnmatch globs over the Ollama tag. `roles` are the roles a family is fit for.
+# `expected` floors come from Mimir's own battery WHERE MEASURED; entries without `expected` are
+# trusted by family/reputation pending local measurement. `judge_ok` = trusted as a cold-start judge.
+#
+# Bump `version` whenever this file changes — it participates in staleness (§8).
+
+version = 1
+
+[[model]]
+family       = "gemma"
+# NOTE: excludes gemma3:4b / gemma3:1b — measured to leak tags and ignore evidence tiers.
+tag_patterns = ["gemma4:*", "gemma3:12b", "gemma3:27b"]
+roles        = ["chat", "reasoning", "judge", "bake"]
+expected     = { discipline = [0.7, 1.0], epistemics = [0.6, 1.0] }
+judge_ok     = true
+min_params_b = 5.0
+notes        = "Strongest small-model epistemics measured; gemma4:e4b (8B) ties gemma3:12b."
+
+[[model]]
+family       = "qwen"
+tag_patterns = ["qwen2.5:*", "qwen3.5:*", "qwen3:*"]
+roles        = ["chat", "reasoning", "judge", "bake"]
+expected     = { discipline = [0.7, 1.0], epistemics = [0.6, 1.0] }
+judge_ok     = true
+min_params_b = 3.0
+notes        = "Strong; qwen2.5:3b punches above its size. Some qwen ignore evidence tiers (epistemics ~0.67)."
+
+[[model]]
+family       = "llama"
+# NOT recommended for the `tools` role: emits tool-call args as a string, not a dict.
+tag_patterns = ["llama3.1:*", "llama3.2:*", "llama3.3:*"]
+roles        = ["chat", "reasoning", "bake"]
+expected     = { discipline = [0.7, 1.0], epistemics = [0.6, 1.0] }
+judge_ok     = true
+min_params_b = 3.0
+notes        = "Solid chat/reasoning; weak tool-call JSON, so excluded from the tools role."
+
+[[model]]
+family       = "phi"
+tag_patterns = ["phi4:*", "phi3.5*", "phi4-mini*"]
+roles        = ["chat", "reasoning", "judge", "bake"]
+judge_ok     = true
+min_params_b = 3.0
+notes        = "Microsoft Phi — strong instruction-following. Local floors pending measurement."
+
+[[model]]
+family       = "mistral"
+tag_patterns = ["mistral-nemo:*", "mistral-small*", "mistral:*"]
+roles        = ["chat", "reasoning", "judge", "bake"]
+judge_ok     = true
+min_params_b = 7.0
+notes        = "Mistral family. Local floors pending measurement."
+
+[[model]]
+family       = "command-r"
+tag_patterns = ["command-r*"]
+roles        = ["reasoning", "judge", "chat"]
+judge_ok     = true
+min_params_b = 30.0
+notes        = "Large, strong reasoning/judging — for capable nodes."
+
+[[model]]
+family       = "deepseek"
+tag_patterns = ["deepseek-r1:*", "deepseek-v*"]
+roles        = ["reasoning", "judge"]
+judge_ok     = true
+min_params_b = 7.0
+notes        = "Reasoning-focused; strong judge, verbose for chat."
+
+[[model]]
+family       = "granite"
+tag_patterns = ["granite3.1*", "granite3*"]
+roles        = ["chat", "bake"]
+expected     = { discipline = [0.5, 1.0], epistemics = [0.6, 1.0] }
+judge_ok     = false
+min_params_b = 2.0
+notes        = "IBM Granite; borderline discipline, weak on code. Fine for chat/bake on small boxes."
+
+[[model]]
+family       = "internlm"
+tag_patterns = ["internlm2*", "internlm*"]
+roles        = ["chat", "bake"]
+expected     = { discipline = [0.6, 1.0], epistemics = [0.6, 1.0] }
+judge_ok     = false
+min_params_b = 1.5
+notes        = "InternLM; competent small chat/bake."

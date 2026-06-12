@@ -67,6 +67,31 @@ def test_approved_family_wins_the_first_round(db_path: str) -> None:
         sg.close()
 
 
+def test_recommended_model_wins_heuristic_over_approved(db_path: str) -> None:
+    sg = StorageGateway(db_path)
+    try:
+        # No benchmark yet → heuristic. Both are the approved `gemma`/`qwen` families, but only
+        # qwen2.5:3b is registry-recommended for chat (gemma3:4b is deliberately excluded). The
+        # recommended one wins even though gemma3:4b is closer to the ideal chat size — this is the
+        # out-of-box guard that stops `auto` landing on the known-weak model.
+        replace_catalogue(sg, [_cat("gemma3:4b", "gemma", 4.0), _cat("qwen2.5:3b", "qwen", 3.0)])
+        got = resolve_auto_model(sg, "chat", available={"gemma3:4b", "qwen2.5:3b"})
+        assert got == "qwen2.5:3b"
+    finally:
+        sg.close()
+
+
+def test_only_weak_model_present_still_resolves(db_path: str) -> None:
+    sg = StorageGateway(db_path)
+    try:
+        # If the ONLY reachable model isn't recommended, auto still yields something runnable
+        # (pre-benchmark we can't know it's bad; the wizard/docs steer users to pull a good one).
+        replace_catalogue(sg, [_cat("gemma3:4b", "gemma", 4.0)])
+        assert resolve_auto_model(sg, "chat", available={"gemma3:4b"}) == "gemma3:4b"
+    finally:
+        sg.close()
+
+
 def test_measured_best_overrides_the_heuristic(db_path: str) -> None:
     sg = StorageGateway(db_path)
     try:
