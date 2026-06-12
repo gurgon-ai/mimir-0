@@ -23,6 +23,16 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
 - **Boot no longer blocks on fleet inventory.** Initial LAN node discovery/inventory now runs in a
   background thread, so the web server starts listening immediately (~2s) instead of waiting on a
   full multi-node scan; a "Starting Mimir…" line prints at once.
+- **Uncertainty flag no longer recited.** The §3d honesty flag was phrased as a statement
+  ("grounded in only N sources") that models parroted verbatim into the reply — the same
+  scaffolding-leak class as the tags. It is now a directive the model acts on (answer from what
+  you know, name the gap, ask one question) and is told not to narrate its source count.
+
+### Validation
+- End-to-end live run against a real LAN Ollama node (`gemma3:12b` for chat/reasoning,
+  `gemma3:4b` for bake, `nomic-embed-text:v1.5` for embed): clean self-model synthesis (no
+  hallucinated name), correct non-inverted identity ("I am Mimir, and I serve Greg"), no leaked
+  tags or flag text, and a working bake → recall with attribution.
 
 ## [0.1.0] — pre-alpha, feature-complete
 
