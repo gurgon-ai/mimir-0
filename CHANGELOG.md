@@ -29,6 +29,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   you know, name the gap, ask one question) and is told not to narrate its source count.
 
 ### Added
+- **Recommended-models registry (inference engine, Phase A).** A curated, versioned data file
+  (`cognition/recommended_models.toml`, loaded by `cognition/registry.py`) of families Mimir has
+  tested — gemma/qwen/llama/phi/mistral/command-r/deepseek/granite/internlm, with per-role fitness,
+  measured score floors, and `judge_ok` flags. `auto` routing now prefers a present
+  recommended-for-the-role model **before any benchmark** (then approved-family, then any reachable),
+  so a fresh user with both `gemma3:4b` and `gemma4:e4b` installed gets `gemma4:e4b` for chat, not the
+  known-weak one — closing the worst out-of-box failure mode. Measured scores still override the
+  registry once benchmarking runs. Not a whitelist: any installed model can still be measured and
+  used. Spec: `docs/INFERENCE_ENGINE.md` §4.
 - **Epistemic-competence experiment (`cognition/epistemics.py`).** Makes the core §3 thesis —
   typed/tiered/provenance context improves cognition over flat RAG — *measurable* per model. Each of
   three probes (tier deference, attribution, uncertainty) runs through the real `build_context()`

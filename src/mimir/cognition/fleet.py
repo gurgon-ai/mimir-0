@@ -18,6 +18,7 @@ from ..storage.gateway import StorageGateway
 from ..storage.models import CatalogueEntry
 from ..storage.repo import list_catalogue, replace_catalogue
 from .benchmark import is_approved
+from .registry import is_recommended
 
 log = logging.getLogger("mimir.fleet")
 
@@ -187,8 +188,12 @@ def resolve_auto_model(
     pool = list(by_model.values())
     if pool:
         ideal = _ROLE_IDEAL_SIZE_B.get(role, 12.0)
+        # Registry-recommended-for-this-role wins the first round (INFERENCE_ENGINE §4): a fresh
+        # user with both gemma3:4b and gemma4:e4b installed gets gemma4:e4b for chat, not the
+        # known-weak gemma3:4b — BEFORE any benchmark. Then approved-family, then any reachable.
+        recommended = [e for e in pool if is_recommended(e.model, role)]
         approved = [e for e in pool if is_approved(e.family)]
-        ranked = approved or pool  # approved win the first round; any model if none are approved
+        ranked = recommended or approved or pool
         # closest to the role's ideal size; tie-break toward the larger (more capable) model.
         best = min(ranked, key=lambda e: (abs((e.params_b or ideal) - ideal), -(e.params_b or 0.0)))
         return best.model
