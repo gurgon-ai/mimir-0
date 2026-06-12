@@ -33,6 +33,10 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   `gemma3:4b` for bake, `nomic-embed-text:v1.5` for embed): clean self-model synthesis (no
   hallucinated name), correct non-inverted identity ("I am Mimir, and I serve Greg"), no leaked
   tags or flag text, and a working bake → recall with attribution.
+- Broader subsystem validation against the live 4-node fleet (43 models): document ingest →
+  recall with provenance; the inner council deliberating across 5 distinct models with a coherent
+  verdict; sleep/consolidation (salience decay) running clean; and a fleet benchmark with the
+  coherence-judge canary passing and per-model quality/return-time scored.
 
 ## [0.1.0] — pre-alpha, feature-complete
 
