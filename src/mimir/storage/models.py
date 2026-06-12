@@ -122,6 +122,24 @@ class Triple:
         return f"{self.subject} — {self.relation} → {self.object}"
 
 
+@dataclass(slots=True)
+class Procedure:
+    """A learned reasoning habit: when ``trigger`` applies, follow ``procedure`` (DESIGN §3a).
+
+    The ``trigger`` is embedded for cosine matching against a turn; ``uses`` records how often the
+    habit has fired — a structural relevance signal (a proven habit surfaces more readily).
+    """
+
+    trigger: str
+    procedure: str
+    trigger_embedding: list[float] | None = None
+    user: str | None = None
+    confidence: float = 0.7
+    uses: int = 0
+    created_at: float = 0.0
+    id: int | None = None
+
+
 def embedding_to_blob(vec: list[float] | None) -> bytes | None:
     """Pack an embedding into a compact little-endian float32 BLOB (stdlib only)."""
     if vec is None:

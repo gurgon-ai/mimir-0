@@ -31,6 +31,7 @@ from .cognition.identity import (
     render_anchors,
 )
 from .cognition.ingest import IngestResult, ingest_document
+from .cognition.procedural import learn_procedure, render_procedures, retrieve_procedures
 from .cognition.self_model import synthesize_self_model
 from .cognition.sentinel import run_sentinel
 from .cognition.sleep import SleepReport, consolidate
@@ -51,8 +52,9 @@ from .model.providers.mock import MockProvider
 from .model.providers.ollama import OllamaProvider
 from .retrieval.hybrid import retrieve
 from .storage.gateway import StorageGateway
-from .storage.models import Memory, MemoryKind
+from .storage.models import Memory, MemoryKind, Procedure
 from .storage.repo import (
+    bump_procedure_uses,
     latest_self_model,
     latest_sentinel_note,
     list_memories,
@@ -138,6 +140,7 @@ class Mimir:
         self_knowledge = self._compose_self_knowledge()
         working_memory = current_working_memory(self._storage)
         graph_facts = self._connected_facts(text, user)
+        procedures = self._matching_procedures(text, user)
 
         # 2. Assemble the epistemic prompt.
         bundle = build_context(
@@ -151,6 +154,7 @@ class Mimir:
             self_knowledge=self_knowledge,
             working_memory=working_memory,
             graph_facts=graph_facts,
+            procedures=procedures,
         )
 
         # 3. Generate the reply through the model gateway.
@@ -202,6 +206,7 @@ class Mimir:
         self_knowledge = self._compose_self_knowledge()
         working_memory = current_working_memory(self._storage)
         graph_facts = self._connected_facts(text, user)
+        procedures = self._matching_procedures(text, user)
         bundle = build_context(
             query=text,
             user=user,
@@ -213,6 +218,7 @@ class Mimir:
             self_knowledge=self_knowledge,
             working_memory=working_memory,
             graph_facts=graph_facts,
+            procedures=procedures,
         )
         messages = [
             {"role": "system", "content": bundle.prompt},
@@ -253,6 +259,32 @@ class Mimir:
             user=user,
         )
         return render_triples(triples)
+
+    def learn_procedure(
+        self, trigger: str, procedure: str, *, user: str | None = None, confidence: float = 0.7
+    ) -> Procedure:
+        """Teach a reasoning habit: when ``trigger`` applies, follow ``procedure`` (DESIGN §3a)."""
+        return learn_procedure(
+            self._storage,
+            self._embedder,
+            trigger=trigger,
+            procedure=procedure,
+            user=user,
+            confidence=confidence,
+        )
+
+    def _matching_procedures(self, query: str, user: str | None) -> list[str]:
+        """Procedures whose trigger matches this turn; bumps their use count (relevance signal)."""
+        procedures = retrieve_procedures(
+            self._storage,
+            self._embedder,
+            query,
+            top_k=self.config.procedural_top_k,
+            min_match=self.config.procedural_min_match,
+            user=user,
+        )
+        bump_procedure_uses(self._storage, [p.id for p in procedures if p.id is not None])
+        return render_procedures(procedures)
 
     # -- document ingestion (v0.1) ----------------------------------------------------
 

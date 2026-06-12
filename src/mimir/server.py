@@ -33,13 +33,15 @@ from .brain import Mimir
 from .cognition.self_model import gather_signals
 from .cognition.working_memory import current_working_memory
 from .errors import IngestError, MimirError
-from .storage.models import Memory, MemoryKind, Triple
+from .storage.models import Memory, MemoryKind, Procedure, Triple
 from .storage.repo import (
     browse_memories,
     browse_triples,
     count_memories,
+    count_procedures,
     count_triples,
     latest_self_model,
+    list_procedures,
 )
 
 log = logging.getLogger("mimir.server")
@@ -115,6 +117,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._memories(params))
             elif route == "/api/graph":
                 self._send_json(self._graph(params))
+            elif route == "/api/procedures":
+                self._send_json(self._procedures())
             elif route == "/favicon.ico":
                 self._send(204, b"", "image/x-icon")
             else:
@@ -142,6 +146,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._sleep())
             elif route == "/api/council":
                 self._send_json(self._council(body))
+            elif route == "/api/procedures":
+                self._send_json(self._learn_procedure(body))
             else:
                 self._send_json({"error": "not found"}, status=404)
         except json.JSONDecodeError:
@@ -247,6 +253,20 @@ class _Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
 
+    def _procedures(self) -> dict[str, Any]:
+        with self.server.brain_lock:
+            procs = list_procedures(self.server.brain._storage, limit=200)
+        return {"procedures": [_procedure_to_dict(p) for p in procs]}
+
+    def _learn_procedure(self, body: dict[str, Any]) -> dict[str, Any]:
+        trigger = str(body.get("trigger", "")).strip()
+        procedure = str(body.get("procedure", "")).strip()
+        if not trigger or not procedure:
+            raise ValueError("'trigger' and 'procedure' are both required")
+        with self.server.brain_lock:
+            proc = self.server.brain.learn_procedure(trigger, procedure)
+        return _procedure_to_dict(proc)
+
     def _council(self, body: dict[str, Any]) -> dict[str, Any]:
         question = str(body.get("question", "")).strip()
         if not question:
@@ -289,6 +309,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "reflections": signals.reflections,
                 "users": signals.distinct_users,
                 "triples": count_triples(brain._storage),
+                "procedures": count_procedures(brain._storage),
                 "by_tier": signals.tier_counts,
             },
             "recent_reflections": signals.recent_reflections,
@@ -330,6 +351,17 @@ def _memory_to_dict(mem: Memory) -> dict[str, Any]:
         "access_count": mem.access_count,
         "archived": mem.archived,
         "created_at": mem.created_at,
+    }
+
+
+def _procedure_to_dict(proc: Procedure) -> dict[str, Any]:
+    return {
+        "id": proc.id,
+        "trigger": proc.trigger,
+        "procedure": proc.procedure,
+        "uses": proc.uses,
+        "confidence": round(proc.confidence, 3),
+        "user": proc.user,
     }
 
 
@@ -447,6 +479,7 @@ _HTML = """<!doctype html>
       <button data-tab="mind">Mind</button>
       <button data-tab="memories">Memories</button>
       <button data-tab="graph">Graph</button>
+      <button data-tab="procedures">Habits</button>
       <button data-tab="council">Council</button>
       <button data-tab="docs">Docs</button>
     </div>
@@ -489,6 +522,14 @@ _HTML = """<!doctype html>
         <input type="text" id="graphQuery" placeholder="search entities / relations…"/>
       </div>
       <div id="graphList"></div>
+    </div>
+
+    <div class="tabpane hidden" id="tab-procedures">
+      <div class="field"><label>When… (trigger)</label><input type="text" id="procTrigger" placeholder="the user asks for a summary"/></div>
+      <div class="field"><label>…do this (procedure)</label><input type="text" id="procBody" placeholder="give 3 bullet points, then a one-line takeaway"/></div>
+      <button id="procBtn" type="button">Teach habit</button>
+      <div id="procMsg" class="hint"></div>
+      <div id="procList"></div>
     </div>
 
     <div class="tabpane hidden" id="tab-council">
@@ -635,7 +676,7 @@ $("ingestBtn").addEventListener("click", async () => {
 });
 
 // --- tabs ---
-const loaders = { mind: loadMind, memories: loadMemories, graph: loadGraph };
+const loaders = { mind: loadMind, memories: loadMemories, graph: loadGraph, procedures: loadProcedures };
 document.querySelectorAll(".tabs button").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));
@@ -659,6 +700,7 @@ async function loadMind() {
       `<div class="stat"><b>${s.reflections||0}</b> reflections</div>` +
       `<div class="stat"><b>${s.users||0}</b> users</div>` +
       `<div class="stat"><b>${s.triples||0}</b> connections</div>` +
+      `<div class="stat"><b>${s.procedures||0}</b> habits</div>` +
       `<div class="stat">tiers — ${tiers}</div>`;
     const refl = $("reflections"); refl.innerHTML = "";
     (m.recent_reflections || []).forEach(t => {
@@ -722,6 +764,32 @@ $("sleepBtn").addEventListener("click", async () => {
 $("memKind").addEventListener("change", loadMemories);
 $("memQuery").addEventListener("input", () => { clearTimeout(window._mt); window._mt = setTimeout(loadMemories, 250); });
 $("graphQuery").addEventListener("input", () => { clearTimeout(window._gt); window._gt = setTimeout(loadGraph, 250); });
+
+async function loadProcedures() {
+  try {
+    const data = await api("GET", "/api/procedures");
+    const list = $("procList"); list.innerHTML = "";
+    if (!data.procedures.length) { list.innerHTML = '<div class="hint">No habits taught yet.</div>'; return; }
+    data.procedures.forEach(p => {
+      const d = document.createElement("div"); d.className = "mem";
+      const tx = document.createElement("div"); tx.className = "text"; tx.textContent = `When ${p.trigger}: ${p.procedure}`; d.appendChild(tx);
+      const tags = document.createElement("div"); tags.className = "tags";
+      const sp = document.createElement("span"); sp.className = "tag"; sp.textContent = "used " + p.uses + "×"; tags.appendChild(sp);
+      d.appendChild(tags); list.appendChild(d);
+    });
+  } catch (e) { $("procList").innerHTML = "error: " + e.message; }
+}
+
+$("procBtn").addEventListener("click", async () => {
+  const trigger = $("procTrigger").value.trim(); const procedure = $("procBody").value.trim();
+  if (!trigger || !procedure) { $("procMsg").textContent = "Both fields are required."; return; }
+  try {
+    await api("POST", "/api/procedures", { trigger, procedure });
+    $("procTrigger").value = ""; $("procBody").value = "";
+    $("procMsg").textContent = "Learned."; loadProcedures(); refreshState();
+    setTimeout(() => $("procMsg").textContent = "", 2000);
+  } catch (e) { $("procMsg").textContent = "Error: " + e.message; }
+});
 
 $("councilBtn").addEventListener("click", async () => {
   const question = $("councilQ").value.trim(); if (!question) return;

@@ -70,6 +70,9 @@ class Config:
     # How often (in turns) consolidation (sleep) runs off the hot path. 0 = manual only
     # (call brain.sleep() or the web UI button / scheduler).
     sleep_every: int = 0
+    # Procedural memory: how many matching procedures to inject, and the minimum trigger match.
+    procedural_top_k: int = 3
+    procedural_min_match: float = 0.3
 
     def validate(self) -> None:
         """Raise ``ConfigError`` loud on any unrunnable configuration."""
@@ -162,6 +165,8 @@ def load_config(path: str | Path) -> Config:
         graph_hops=int(raw.get("entity_graph", {}).get("hops", 2)),
         graph_max_facts=int(raw.get("entity_graph", {}).get("max_facts", 8)),
         sleep_every=int(raw.get("sleep", {}).get("every", 0)),
+        procedural_top_k=int(raw.get("procedural", {}).get("top_k", 3)),
+        procedural_min_match=float(raw.get("procedural", {}).get("min_match", 0.3)),
     )
     config.validate()
     return config

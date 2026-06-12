@@ -250,7 +250,9 @@ needs.
   own operational signals, refreshed off the hot path and injected first, always-on; bootstrapped
   from the first boot by a re-runnable **identity interview** that establishes eight universal
   anchors — name, operator, location, purpose, values, scope, boundaries, voice — interactively
-  or from config)_, procedural memory, ~~entity graph~~ _(landed: subject–relation–object triples
+  or from config)_, ~~procedural memory~~ _(landed: learned reasoning habits as trigger→procedure
+  pairs, matched to a turn by cosine + structural overlap and injected as how-to guidance)_,
+  ~~entity graph~~ _(landed: subject–relation–object triples
   extracted at bake time, deduped, retrieved by 1–2 hop traversal seeded on the query's entities
   and injected as a distinct connected-facts layer)_, ~~sleep/consolidation~~ _(landed: a
   deterministic maintenance pass — dedup, salience/confidence decay with the death-spiral
@@ -333,5 +335,6 @@ evolving, generic **self-model** (identity authored from the store's own operati
 refreshed off the hot path, injected always-on), working memory (rolling recency + compression),
 an entity graph (subject–relation–object triples with 1–2 hop traversal), sleep/consolidation
 (dedup, decay, archival, contradiction resolution), and an inner council (adversarial deliberation
-across auto-discovered models). Still pre-alpha and evolving; the remaining cognition layers
-(procedural memory, the qualification battery) are the road ahead.
+across auto-discovered models), and procedural memory (learned trigger→procedure habits). Still
+pre-alpha and evolving; the **qualification battery** (DESIGN §4 — model qualification) is the last
+v0.1+ cognition layer on the road ahead.
