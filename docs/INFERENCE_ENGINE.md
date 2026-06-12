@@ -267,6 +267,21 @@ Extensions this engine adds:
   nodes, bounded by a per-node concurrency cap (from config or a quick probe): **never exceed
   `cap − 1` concurrent benchmark jobs on a node**, so qualification never starves real use or
   overwhelms a small box. Distributed *or* local-only, sized to the hardware the user actually has.
+  Orchestration:
+  - **Parallel across nodes, sequential within a node.** A node holds one model warm at a time
+    (VRAM), so within a node it's warm → test → swap; but every node works at once. Each *distinct*
+    model is dealt to one **home node** for scoring (quality is node-independent), spreading the
+    work so nodes hit *different* models; the other nodes that have it are probed only for per-node
+    *speed*.
+  - **Triage, then score.** A fast first sweep checks each model is viable (responds within budget)
+    and *warms* it; only survivors get the full battery — so a slow/broken model can't burn a slot.
+  - **Honest live ETA.** Time the *test* separately from the *warmup* (warmup is overhead, not the
+    score). After the first model, `remaining × running-average` gives an estimate, refined per node
+    as models complete (overall ETA = the slowest node's). Order each node's list **outside-in
+    (biggest, smallest, biggest, smallest…)** so the running average samples both extremes
+    immediately and the ETA is stable and honest from the second model on — not the ballooning
+    underestimate that smallest-first produces. Surface elapsed + estimated-remaining + per-node
+    progress.
 
 ---
 
