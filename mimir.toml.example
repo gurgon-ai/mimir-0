@@ -57,6 +57,12 @@ max_facts = 8
 # web UI "Consolidate now" button, or an external scheduler / nightly cron).
 every = 0
 
+[procedural]
+# Learned reasoning habits (trigger → procedure). When a turn matches a habit's trigger, the
+# procedure is injected as guidance. Teach habits via brain.learn_procedure() or the web UI.
+top_k = 3            # max matching habits injected per turn
+min_match = 0.3      # minimum trigger relevance (cosine or keyword) before a habit fires
+
 [provider]
 # "ollama" talks to a local Ollama server with stdlib HTTP (no extra deps).
 # "mock" is a deterministic, offline stand-in for tests/demos (needs no model server).

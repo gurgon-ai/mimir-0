@@ -99,6 +99,23 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "CREATE INDEX idx_memories_archived ON memories(archived)",
         ],
     ),
+    (
+        6,
+        [
+            # Procedural memory: learned reasoning habits as trigger→procedure pairs (DESIGN §3a).
+            # The trigger is embedded for cosine matching; `uses` tracks how proven a habit is.
+            "CREATE TABLE procedures ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " trigger TEXT NOT NULL,"
+            " procedure TEXT NOT NULL,"
+            " trigger_embedding BLOB,"
+            " user TEXT,"
+            " confidence REAL NOT NULL DEFAULT 0.7,"
+            " uses INTEGER NOT NULL DEFAULT 0,"
+            " created_at REAL NOT NULL"
+            ")",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -134,6 +151,16 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
         "user",
         "provenance",
         "confidence",
+        "created_at",
+    },
+    "procedures": {
+        "id",
+        "trigger",
+        "procedure",
+        "trigger_embedding",
+        "user",
+        "confidence",
+        "uses",
         "created_at",
     },
 }

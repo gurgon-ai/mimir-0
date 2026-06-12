@@ -243,6 +243,10 @@ max_facts = 8                   # max connected facts injected per turn
 every = 0                       # turns between consolidation passes (dedup/decay/archive/
                                 # contradictions); 0 = manual (brain.sleep() / web UI / cron)
 
+[procedural]
+top_k = 3                       # max matching learned habits injected per turn
+min_match = 0.3                 # minimum trigger relevance before a habit fires
+
 [provider]
 type = "ollama"                 # "ollama" | "mock"
 host = "http://localhost:11434" # ollama only

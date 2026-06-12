@@ -170,6 +170,18 @@ def test_sleep_endpoint_runs_consolidation(base_url: str) -> None:
     )
 
 
+def test_procedures_teach_and_list(base_url: str) -> None:
+    status, taught = _json(
+        "POST",
+        base_url + "/api/procedures",
+        {"trigger": "user asks for a recap", "procedure": "summarize in 3 bullets"},
+    )
+    assert status == 200
+    assert taught["trigger"] == "user asks for a recap"
+    _, listing = _json("GET", base_url + "/api/procedures")
+    assert any(p["procedure"] == "summarize in 3 bullets" for p in listing["procedures"])
+
+
 def test_council_endpoint_returns_positions_and_verdict(base_url: str) -> None:
     status, data = _json(
         "POST", base_url + "/api/council", {"question": "Breadth or depth first?"}

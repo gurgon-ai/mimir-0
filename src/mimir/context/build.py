@@ -144,6 +144,7 @@ def build_context(
     self_knowledge: str | None = None,
     working_memory: str | None = None,
     graph_facts: list[str] | None = None,
+    procedures: list[str] | None = None,
     extra_sections: list[Section] | None = None,
 ) -> ContextBundle:
     """Assemble the epistemic prompt for one turn. Pure: no I/O, no model calls.
@@ -183,6 +184,8 @@ def build_context(
     self_model_tokens = self_model_section.admitted_tokens if self_model_section else 0
     graph_body = "\n".join(f"- {f}" for f in (graph_facts or []))
     graph_tokens = estimate_tokens(graph_body) + 8 if graph_facts else 0
+    procedures_body = "\n".join(f"- {p}" for p in (procedures or []))
+    procedures_tokens = estimate_tokens(procedures_body) + 8 if procedures else 0
     working_memory_tokens = estimate_tokens(working_memory) + 8 if working_memory else 0
     sentinel_tokens = (
         estimate_tokens(sentinel_note.text) + 8 if sentinel_note is not None else 0
@@ -194,6 +197,7 @@ def build_context(
         - self_model_tokens
         - identity_section.admitted_tokens
         - graph_tokens
+        - procedures_tokens
         - working_memory_tokens
         - sentinel_tokens
         - extra_reserved
@@ -220,6 +224,20 @@ def build_context(
                 substantive=True,
                 requested_tokens=estimate_tokens(graph_body),
                 admitted_tokens=estimate_tokens(graph_body),
+            )
+        )
+
+    # 3b. Procedural memory — learned how-to guidance (methods, not facts; not a grounding
+    #     source, so it does not count toward source_count) (DESIGN §3a).
+    if procedures:
+        sections.append(
+            Section(
+                name="procedures",
+                title="How you've learned to handle this kind of situation:",
+                body=procedures_body,
+                tier=SectionTier.MEDIUM,
+                requested_tokens=estimate_tokens(procedures_body),
+                admitted_tokens=estimate_tokens(procedures_body),
             )
         )
 

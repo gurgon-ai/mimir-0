@@ -16,6 +16,7 @@ from .models import (
     EvidenceTier,
     Memory,
     MemoryKind,
+    Procedure,
     Triple,
     blob_to_embedding,
     embedding_to_blob,
@@ -381,6 +382,89 @@ def delete_triples(gateway: StorageGateway, ids: list[int]) -> int:
         return cur.rowcount
 
     return gateway.submit(_write)
+
+
+# -- procedural memory ----------------------------------------------------------------
+
+_P_COLUMNS = "id, trigger, procedure, trigger_embedding, user, confidence, uses, created_at"
+
+
+def _row_to_procedure(row: sqlite3.Row) -> Procedure:
+    return Procedure(
+        id=row["id"],
+        trigger=row["trigger"],
+        procedure=row["procedure"],
+        trigger_embedding=blob_to_embedding(row["trigger_embedding"]),
+        user=row["user"],
+        confidence=row["confidence"],
+        uses=row["uses"],
+        created_at=row["created_at"],
+    )
+
+
+def save_procedure(gateway: StorageGateway, proc: Procedure) -> int:
+    if proc.created_at == 0.0:
+        proc.created_at = time.time()
+
+    def _write(conn: sqlite3.Connection) -> int:
+        cur = conn.execute(
+            "INSERT INTO procedures "
+            "(trigger, procedure, trigger_embedding, user, confidence, uses, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                proc.trigger,
+                proc.procedure,
+                embedding_to_blob(proc.trigger_embedding),
+                proc.user,
+                proc.confidence,
+                proc.uses,
+                proc.created_at,
+            ),
+        )
+        return int(cur.lastrowid or 0)
+
+    proc.id = gateway.submit(_write)
+    return proc.id
+
+
+def list_procedures(
+    gateway: StorageGateway, *, user: str | None = None, limit: int = 500
+) -> list[Procedure]:
+    """All procedures (optionally scoped to a user plus shared ones), newest first."""
+
+    def _read(conn: sqlite3.Connection) -> list[Procedure]:
+        if user is None:
+            rows = conn.execute(
+                f"SELECT {_P_COLUMNS} FROM procedures ORDER BY created_at DESC, id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"SELECT {_P_COLUMNS} FROM procedures WHERE user = ? OR user IS NULL "
+                f"ORDER BY created_at DESC, id DESC LIMIT ?",
+                (user, limit),
+            ).fetchall()
+        return [_row_to_procedure(r) for r in rows]
+
+    return gateway.read(_read)
+
+
+def bump_procedure_uses(gateway: StorageGateway, ids: list[int]) -> None:
+    """Increment the use counter for procedures that fired this turn (fire-and-forget)."""
+    if not ids:
+        return
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.executemany("UPDATE procedures SET uses = uses + 1 WHERE id = ?", [(i,) for i in ids])
+
+    gateway.submit_async(_write, priority=Priority.TOUCH)
+
+
+def count_procedures(gateway: StorageGateway) -> int:
+    def _read(conn: sqlite3.Connection) -> int:
+        return int(conn.execute("SELECT COUNT(*) FROM procedures").fetchone()[0])
+
+    return gateway.read(_read)
 
 
 # -- entity graph (triples) -----------------------------------------------------------
