@@ -446,6 +446,20 @@ def update_catalogue_scores(
     gateway.submit(_write)
 
 
+def update_catalogue_speed(
+    gateway: StorageGateway, node: str, model: str, return_time: float
+) -> None:
+    """Set the measured response time for one specific (node, model) — speed is per-node."""
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "UPDATE model_catalogue SET return_time=? WHERE node=? AND model=?",
+            (return_time, node, model),
+        )
+
+    gateway.submit(_write)
+
+
 def list_catalogue(gateway: StorageGateway) -> list[CatalogueEntry]:
     def _read(conn: sqlite3.Connection) -> list[CatalogueEntry]:
         rows = conn.execute(

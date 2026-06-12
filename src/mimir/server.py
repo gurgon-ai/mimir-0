@@ -154,6 +154,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._scan_fleet())
             elif route == "/api/fleet/benchmark":
                 self._send_json(self._benchmark_fleet())
+            elif route == "/api/fleet/apply":
+                self._send_json({"applied": self._apply_recommendations()})
             else:
                 self._send_json({"error": "not found"}, status=404)
         except json.JSONDecodeError:
@@ -282,6 +284,10 @@ class _Handler(BaseHTTPRequestHandler):
                 for b in result.results
             ],
         }
+
+    def _apply_recommendations(self) -> dict[str, str]:
+        with self.server.brain_lock:
+            return self.server.brain.apply_recommendations()
 
     def _procedures(self) -> dict[str, Any]:
         with self.server.brain_lock:
@@ -579,6 +585,7 @@ _HTML = """<!doctype html>
       <div class="row">
         <button id="fleetScanBtn" type="button">Scan fleet</button>
         <button class="secondary" id="fleetBenchBtn" type="button">Benchmark</button>
+        <button class="secondary" id="fleetApplyBtn" type="button">Apply recs</button>
       </div>
       <div id="fleetMsg" class="hint">Discovers Ollama nodes on your LAN and catalogues their models.</div>
       <div id="fleetList"></div>
@@ -835,7 +842,7 @@ async function loadFleet() {
         const line = document.createElement("div"); line.style.marginTop = "5px";
         const q = (r.quality != null) ? `q${r.quality}` : "";
         const t = (r.return_time != null) ? ` · ${r.return_time}s` : "";
-        line.textContent = `${role} → ${r.model} (${q}${t}, prefers ${r.prefer}) on ${r.nodes[0]}`;
+        line.textContent = `${role} → ${r.model} (${q}${t}, prefers ${r.prefer}) on ${r.node}`;
         box.appendChild(line);
       });
       list.appendChild(box);
@@ -869,6 +876,15 @@ $("fleetBenchBtn").addEventListener("click", async () => {
     loadFleet();
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
   $("fleetBenchBtn").disabled = false;
+});
+
+$("fleetApplyBtn").addEventListener("click", async () => {
+  try {
+    const r = await api("POST", "/api/fleet/apply");
+    const n = Object.keys(r.applied || {}).length;
+    $("fleetMsg").textContent = n ? `Applied recommendations to ${n} role(s): ` + Object.entries(r.applied).map(([k,v]) => `${k}=${v}`).join(", ") : "Nothing to apply (benchmark first).";
+    refreshState();
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
 });
 
 $("procBtn").addEventListener("click", async () => {

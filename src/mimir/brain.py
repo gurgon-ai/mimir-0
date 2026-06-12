@@ -437,6 +437,25 @@ class Mimir:
         """Best model per role from the benchmarked catalogue (recommend-only; DESIGN §4)."""
         return recommend_roles(self._storage)
 
+    def apply_recommendations(self) -> dict[str, str]:
+        """Re-point the live roles at their recommended models. Returns what changed.
+
+        Only the real roles (chat/bake/reasoning) are applied; tools/code are advisory until those
+        features exist. Recommendations come only from benchmarked models, so this never routes to
+        an untested model. Updates routing in memory — persist by editing your ``mimir.toml``.
+        """
+        recs = recommend_roles(self._storage)
+        applied: dict[str, str] = {}
+        for role in ("chat", "bake", "reasoning"):
+            rec = recs.get(role)
+            if rec and role in self.config.roles:
+                self._model.set_role_model(role, rec["model"])
+                self.config.roles[role].model = rec["model"]
+                applied[role] = rec["model"]
+        if applied:
+            log.info("fleet: applied role recommendations %s", applied)
+        return applied
+
     def benchmark_fleet(
         self,
         *,
