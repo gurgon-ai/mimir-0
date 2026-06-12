@@ -266,23 +266,26 @@ def benchmark_fleet(
     *,
     only_approved: bool = True,
     limit: int = 8,
+    max_params_b: float = 30.0,
     judge: bool = True,
 ) -> FleetBenchmarkResult:
     """Benchmark the distinct models in the catalogue and write their scores back.
 
     Quality is node-independent, so each model is benchmarked once and the scores written to all of
-    its catalogue rows. Embedding models are skipped (they aren't chat models).
+    its catalogue rows. Models are tried **smallest-first** and anything over ``max_params_b`` is
+    skipped, so a giant model can't hang the run before the practical ones are scored (raise the cap
+    to benchmark the big ones explicitly). Embedding models are skipped (they aren't chat models).
     """
-    seen: set[str] = set()
-    models: list[str] = []
+    sizes: dict[str, float] = {}
     for entry in list_catalogue(storage):
-        if entry.model in seen or "embed" in entry.model.lower():
+        if "embed" in entry.model.lower():
             continue
         if only_approved and not is_approved(entry.family):
             continue
-        seen.add(entry.model)
-        models.append(entry.model)
-    models = models[:limit]
+        if max_params_b and entry.params_b and entry.params_b > max_params_b:
+            continue
+        sizes.setdefault(entry.model, entry.params_b)
+    models = sorted(sizes, key=lambda m: sizes[m])[:limit]  # smallest (fastest) first
 
     judges_ok = judges_trustworthy(model) if judge else False
     results: list[ModelBenchmark] = []

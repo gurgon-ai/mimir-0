@@ -342,5 +342,8 @@ node that has the model, with active health checks and least-loaded selection �
 run on a tiny box and borrow GPUs over the network. The **qualification battery** (DESIGN §4) is
 layered on top: a benchmark scores each model's speed and a capability "IQ test" (talk / tools /
 code, deterministic) plus a coherence pass voted by a panel of other models, guarded by a canary
-pair — filling the catalogue so model→role fitness is *tested, not asserted*. Still pre-alpha; the
-remaining step is turning those scores into automatic per-role recommendations.
+pair — filling the catalogue so model→role fitness is *tested, not asserted* — and the catalogue
+drives **per-role recommendations** ("for chat, use X on node Y"). The whole DESIGN architecture
+is now implemented end-to-end; it remains pre-alpha and unhardened, but the spine, every typed
+knowledge layer, the async cognition, and the distributed/qualified model fleet are all live and
+verified against a real multi-node LAN.
