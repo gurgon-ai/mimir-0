@@ -37,7 +37,12 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   unresolved `auto` role to any reachable model so a turn never fails while the fleet is still
   inventorying. Default stays **local-only** (the LAN fleet is opt-in). New `model_prefs` table
   (schema v10) and a `brain.model_pool()` view (qualified ✓, speed, size, nodes, enabled, roles
-  served) for the forthcoming Model Pool UI.
+  served) behind the Model Pool UI.
+- **Model Pool tab in the web UI.** Lists every routable model with a ✓ if it passed the
+  qualification gate, its size/quality/discipline/speed/nodes, and which roles it serves. A
+  checkbox per model toggles it in or out of the automatic pool (the bias veto) — disabling a model
+  serving an auto role re-routes that role live. Shows the backend mode (local vs LAN fleet) and the
+  auto roles. New endpoints: `GET /api/fleet/pool`, `POST /api/fleet/model`.
 - **`discipline` capability in the fleet IQ test.** The benchmark battery now scores a fourth
   dimension: does the model honor prohibitions, above all **not reproducing the internal
   `[tier=...; source=...]` scaffolding it is shown**. The probe replicates the *production* condition

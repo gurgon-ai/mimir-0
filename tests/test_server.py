@@ -179,6 +179,25 @@ def test_fleet_scan_and_report(base_url: str) -> None:
     assert "by_node" in report
 
 
+def test_model_pool_lists_and_toggles(base_url: str) -> None:
+    _json("POST", base_url + "/api/fleet/scan", {})  # catalogue the mock models
+    status, pool = _json("GET", base_url + "/api/fleet/pool")
+    assert status == 200
+    assert "lan_backend" in pool and "auto_roles" in pool
+    models = {m["model"]: m for m in pool["models"]}
+    assert "mock-a" in models and models["mock-a"]["enabled"] is True
+
+    # Disable a model; the pool reflects the user's veto.
+    s2, r2 = _json("POST", base_url + "/api/fleet/model", {"model": "mock-a", "enabled": False})
+    assert s2 == 200 and r2["enabled"] is False
+    _, pool2 = _json("GET", base_url + "/api/fleet/pool")
+    assert {m["model"]: m for m in pool2["models"]}["mock-a"]["enabled"] is False
+
+    # A model name is required.
+    s3, _ = _json("POST", base_url + "/api/fleet/model", {"enabled": True})
+    assert s3 == 400
+
+
 def test_procedures_teach_and_list(base_url: str) -> None:
     status, taught = _json(
         "POST",
