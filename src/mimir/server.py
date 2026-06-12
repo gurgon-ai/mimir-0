@@ -152,6 +152,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._learn_procedure(body))
             elif route == "/api/fleet/scan":
                 self._send_json(self._scan_fleet())
+            elif route == "/api/fleet/benchmark":
+                self._send_json(self._benchmark_fleet())
             else:
                 self._send_json({"error": "not found"}, status=404)
         except json.JSONDecodeError:
@@ -268,6 +270,18 @@ class _Handler(BaseHTTPRequestHandler):
         with self.server.brain_lock:
             result = self.server.brain.scan_fleet()
         return {"nodes": result.nodes, "models": result.models}
+
+    def _benchmark_fleet(self) -> dict[str, Any]:
+        with self.server.brain_lock:
+            result = self.server.brain.benchmark_fleet()
+        return {
+            "benchmarked": result.benchmarked,
+            "judges_ok": result.judges_ok,
+            "models": [
+                {"model": b.model, "quality": b.quality, "return_time": b.return_time}
+                for b in result.results
+            ],
+        }
 
     def _procedures(self) -> dict[str, Any]:
         with self.server.brain_lock:
@@ -562,7 +576,10 @@ _HTML = """<!doctype html>
     </div>
 
     <div class="tabpane hidden" id="tab-fleet">
-      <button id="fleetScanBtn" type="button">Scan fleet</button>
+      <div class="row">
+        <button id="fleetScanBtn" type="button">Scan fleet</button>
+        <button class="secondary" id="fleetBenchBtn" type="button">Benchmark</button>
+      </div>
       <div id="fleetMsg" class="hint">Discovers Ollama nodes on your LAN and catalogues their models.</div>
       <div id="fleetList"></div>
     </div>
@@ -813,7 +830,7 @@ async function loadFleet() {
       const d = document.createElement("div"); d.className = "mem";
       const h = document.createElement("div"); h.className = "text"; h.textContent = `${node}  (${models.length} models)`; d.appendChild(h);
       const tags = document.createElement("div"); tags.className = "tags";
-      models.slice(0, 12).forEach(mm => { const sp = document.createElement("span"); sp.className = "tag"; sp.textContent = `${mm.model} ${mm.params_b}B`; tags.appendChild(sp); });
+      models.slice(0, 12).forEach(mm => { const sp = document.createElement("span"); sp.className = "tag"; const q = (mm.quality != null) ? ` · q${mm.quality}` : ""; const t = (mm.return_time != null) ? ` · ${mm.return_time}s` : ""; sp.textContent = `${mm.model} ${mm.params_b}B${q}${t}`; tags.appendChild(sp); });
       d.appendChild(tags); list.appendChild(d);
     });
     if (!Object.keys(data.by_node || {}).length) list.innerHTML = '<div class="hint">No catalogue yet — click Scan fleet.</div>';
@@ -828,6 +845,16 @@ $("fleetScanBtn").addEventListener("click", async () => {
     loadFleet(); refreshState();
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
   $("fleetScanBtn").disabled = false;
+});
+
+$("fleetBenchBtn").addEventListener("click", async () => {
+  $("fleetMsg").textContent = "Benchmarking models (this can take a while)…"; $("fleetBenchBtn").disabled = true;
+  try {
+    const r = await api("POST", "/api/fleet/benchmark");
+    $("fleetMsg").textContent = `Benchmarked ${r.benchmarked} model(s)` + (r.judges_ok ? "" : " (coherence judges untrusted — skipped)") + ".";
+    loadFleet();
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
+  $("fleetBenchBtn").disabled = false;
 });
 
 $("procBtn").addEventListener("click", async () => {

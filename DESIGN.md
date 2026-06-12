@@ -339,5 +339,8 @@ across auto-discovered models), and procedural memory (learned trigger→procedu
 model backend is now a **distributed fleet** (DESIGN §5): it auto-discovers Ollama nodes on the LAN
 (zero setup on them — just `ollama serve`), catalogues their models, and routes each request to a
 node that has the model, with active health checks and least-loaded selection — so the brain can
-run on a tiny box and borrow GPUs over the network. Still pre-alpha and evolving; the **qualification
-battery** (DESIGN §4 — benchmarking model→role fitness, layered on the fleet) is the road ahead.
+run on a tiny box and borrow GPUs over the network. The **qualification battery** (DESIGN §4) is
+layered on top: a benchmark scores each model's speed and a capability "IQ test" (talk / tools /
+code, deterministic) plus a coherence pass voted by a panel of other models, guarded by a canary
+pair — filling the catalogue so model→role fitness is *tested, not asserted*. Still pre-alpha; the
+remaining step is turning those scores into automatic per-role recommendations.

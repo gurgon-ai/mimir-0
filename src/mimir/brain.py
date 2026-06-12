@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from .cognition.bake import bake
+from .cognition.benchmark import FleetBenchmarkResult
+from .cognition.benchmark import benchmark_fleet as _benchmark_fleet
 from .cognition.council import CouncilResult, deliberate
 from .cognition.fleet import FleetScanResult, fleet_report, scan_fleet
 from .cognition.graph import render_triples, retrieve_connected
@@ -430,6 +432,19 @@ class Mimir:
     def fleet_report(self) -> dict[str, Any]:
         """The fleet catalogue as a per-node summary."""
         return fleet_report(self._storage)
+
+    def benchmark_fleet(
+        self, *, only_approved: bool = True, limit: int = 8, judge: bool = True
+    ) -> FleetBenchmarkResult:
+        """Scan + benchmark the fleet's models (speed + capability + coherence) (DESIGN §4).
+
+        Re-scans first so the catalogue is current, then scores each distinct model and writes the
+        results back. Expensive — many model calls — so it is on-demand (this, the web UI, or cron).
+        """
+        self.scan_fleet()
+        return _benchmark_fleet(
+            self._model, self._storage, only_approved=only_approved, limit=limit, judge=judge
+        )
 
     def deliberate(self, question: str, user: str | None = None) -> CouncilResult:
         """Convene the inner council on an open question — adversarial deliberation → a verdict.

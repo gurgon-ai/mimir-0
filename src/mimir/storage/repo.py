@@ -387,9 +387,14 @@ def delete_triples(gateway: StorageGateway, ids: list[int]) -> int:
 
 # -- fleet catalogue ------------------------------------------------------------------
 
-_C_COLUMNS = (
-    "node, model, family, params_b, quantization, context_length, "
-    "capabilities, return_time, quality, scanned_at"
+_C_SELECT = (
+    "node, model, family, params_b, quantization, context_length, capabilities, "
+    "return_time, quality, scanned_at, talk, tools, code, coherence"
+)
+# Scan only sets discovery fields; benchmark scores (talk/tools/code/coherence/return_time/quality)
+# are filled later by update_catalogue_scores.
+_C_INSERT = (
+    "node, model, family, params_b, quantization, context_length, capabilities, scanned_at"
 )
 
 
@@ -399,7 +404,7 @@ def replace_catalogue(gateway: StorageGateway, entries: list[CatalogueEntry]) ->
     def _write(conn: sqlite3.Connection) -> None:
         conn.execute("DELETE FROM model_catalogue")
         conn.executemany(
-            f"INSERT INTO model_catalogue ({_C_COLUMNS}) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            f"INSERT INTO model_catalogue ({_C_INSERT}) VALUES (?,?,?,?,?,?,?,?)",
             [
                 (
                     e.node,
@@ -409,8 +414,6 @@ def replace_catalogue(gateway: StorageGateway, entries: list[CatalogueEntry]) ->
                     e.quantization,
                     e.context_length,
                     json.dumps(e.capabilities),
-                    e.return_time,
-                    e.quality,
                     e.scanned_at,
                 )
                 for e in entries
@@ -420,10 +423,33 @@ def replace_catalogue(gateway: StorageGateway, entries: list[CatalogueEntry]) ->
     gateway.submit(_write)
 
 
+def update_catalogue_scores(
+    gateway: StorageGateway,
+    model: str,
+    *,
+    return_time: float | None,
+    quality: float | None,
+    talk: float | None,
+    tools: float | None,
+    code: float | None,
+    coherence: float | None,
+) -> None:
+    """Write benchmark scores for every catalogue row of a model (quality is node-independent)."""
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "UPDATE model_catalogue SET return_time=?, quality=?, talk=?, tools=?, code=?, "
+            "coherence=? WHERE model=?",
+            (return_time, quality, talk, tools, code, coherence, model),
+        )
+
+    gateway.submit(_write)
+
+
 def list_catalogue(gateway: StorageGateway) -> list[CatalogueEntry]:
     def _read(conn: sqlite3.Connection) -> list[CatalogueEntry]:
         rows = conn.execute(
-            f"SELECT {_C_COLUMNS} FROM model_catalogue ORDER BY node, params_b DESC"
+            f"SELECT {_C_SELECT} FROM model_catalogue ORDER BY node, params_b DESC"
         ).fetchall()
         return [
             CatalogueEntry(
@@ -436,6 +462,10 @@ def list_catalogue(gateway: StorageGateway) -> list[CatalogueEntry]:
                 capabilities=json.loads(r["capabilities"]),
                 return_time=r["return_time"],
                 quality=r["quality"],
+                talk=r["talk"],
+                tools=r["tools"],
+                code=r["code"],
+                coherence=r["coherence"],
                 scanned_at=r["scanned_at"],
             )
             for r in rows

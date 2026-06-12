@@ -157,6 +157,10 @@ class CatalogueEntry:
     capabilities: list[str] = field(default_factory=list)
     return_time: float | None = None
     quality: float | None = None
+    talk: float | None = None
+    tools: float | None = None
+    code: float | None = None
+    coherence: float | None = None
     scanned_at: float = 0.0
 
 
