@@ -3,6 +3,27 @@
 All notable changes to Mimir 0. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 Pre-1.0: the API and schema may change between releases.
 
+## [Unreleased]
+
+First fixes from real single-machine + LAN use after the feature-complete cut.
+
+### Fixed
+- **Identity drift in the self-model.** A small model (`gemma3:4b`) synthesizing the self-model could
+  hallucinate a name not in the operator-established anchors (observed: anchor name `Mimir` but the
+  synthesis wrote "I am Arthur"), creating a contradiction the chat model then adopted and inverted
+  ("you serve Greg"). The synthesizer is now forbidden from stating or inventing the name, operator,
+  or location — those are the verbatim anchors' job — and the identity section is framed as
+  authoritative. (DESIGN §3e.)
+- **Internal epistemic tags leaking into replies.** Small models absorbed the `[tier=…; source=…]`
+  provenance style from the prompt and emitted it on their own sentences (even inventing
+  `[tier=question]` / `[tier=focus]`). These are now stripped deterministically by `mimir.sanitize`,
+  with a streaming-safe stripper so a tag split across stream deltas is still removed and no double
+  space is left behind — applied to both the live SSE display and the stored exchange. (DESIGN §3b,
+  §10.)
+- **Boot no longer blocks on fleet inventory.** Initial LAN node discovery/inventory now runs in a
+  background thread, so the web server starts listening immediately (~2s) instead of waiting on a
+  full multi-node scan; a "Starting Mimir…" line prints at once.
+
 ## [0.1.0] — pre-alpha, feature-complete
 
 The first feature-complete pre-alpha: the whole `DESIGN.md` architecture is implemented and
