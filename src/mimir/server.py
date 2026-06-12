@@ -982,6 +982,9 @@ async function loadFleet() {
       d.appendChild(tags); list.appendChild(d);
     });
     if (!Object.keys(data.by_node || {}).length) list.innerHTML = '<div class="hint">No models yet — click "1 · Find models".</div>';
+    // If a benchmark is already running (e.g. started from another tab/session), show its progress.
+    const bs = await api("GET", "/api/fleet/benchmark/status");
+    if (bs.running) pollBenchmark();
   } catch (e) { $("fleetList").innerHTML = "error: " + e.message; }
 }
 
@@ -995,30 +998,43 @@ $("fleetScanBtn").addEventListener("click", async () => {
   $("fleetScanBtn").disabled = false;
 });
 
-$("fleetBenchBtn").addEventListener("click", async () => {
-  $("fleetMsg").textContent = "Starting benchmark…"; $("fleetBenchBtn").disabled = true;
+// Poll the (background) benchmark and show live progress. Reusable: called both when YOU click
+// Benchmark and when loadFleet() finds one already running (started elsewhere or before a tab
+// switch), so the Fleet tab always reflects reality. Self-guards against running twice.
+let _benchPolling = false;
+async function pollBenchmark() {
+  if (_benchPolling) return;
+  _benchPolling = true; $("fleetBenchBtn").disabled = true;
   try {
-    const scope = { max_model_size_b: $("benchMaxSize").value, max_latency_s: $("benchMaxLatency").value };
-    await api("POST", "/api/fleet/benchmark", scope);   // returns immediately; runs in the background
-    // Poll live progress so the page never looks frozen during the multi-minute run.
     while (true) {
-      await new Promise(r => setTimeout(r, 1500));
       const s = await api("GET", "/api/fleet/benchmark/status");
       if (s.error) { $("fleetMsg").textContent = "Benchmark error: " + s.error; break; }
       if (s.done || !s.running) {
-        const skips = [];
-        if (s.skipped_too_big) skips.push(`${s.skipped_too_big} too large`);
-        if (s.skipped_too_slow) skips.push(`${s.skipped_too_slow} too slow`);
-        const skipped = skips.length ? ` (${skips.join(", ")} skipped)` : "";
-        $("fleetMsg").textContent = `Benchmarked ${s.benchmarked || 0} of ${s.eligible || 0} eligible model(s)${skipped}` + (s.judges_ok ? "" : " — coherence judges untrusted") + ".";
+        if (s.benchmarked !== undefined) {   // a finished run (not just the idle initial state)
+          const skips = [];
+          if (s.skipped_too_big) skips.push(`${s.skipped_too_big} too large`);
+          if (s.skipped_too_slow) skips.push(`${s.skipped_too_slow} too slow`);
+          const skipped = skips.length ? ` (${skips.join(", ")} skipped)` : "";
+          $("fleetMsg").textContent = `Benchmarked ${s.benchmarked || 0} of ${s.eligible || 0} eligible model(s)${skipped}` + (s.judges_ok ? "" : " — coherence judges untrusted") + ".";
+        }
         loadFleet();
         break;
       }
       // Until the first model starts, total is 0 — show the scan phase rather than "0/0".
       $("fleetMsg").textContent = s.total ? `Benchmarking ${s.i}/${s.total}: ${s.current}…` : `${s.current || "Preparing…"}`;
+      await new Promise(r => setTimeout(r, 1500));
     }
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
-  $("fleetBenchBtn").disabled = false;
+  _benchPolling = false; $("fleetBenchBtn").disabled = false;
+}
+
+$("fleetBenchBtn").addEventListener("click", async () => {
+  $("fleetMsg").textContent = "Starting benchmark…";
+  try {
+    const scope = { max_model_size_b: $("benchMaxSize").value, max_latency_s: $("benchMaxLatency").value };
+    await api("POST", "/api/fleet/benchmark", scope);   // returns immediately; runs in the background
+    pollBenchmark();
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
 });
 
 $("fleetApplyBtn").addEventListener("click", async () => {
