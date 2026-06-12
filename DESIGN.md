@@ -118,6 +118,17 @@ restate or override those anchors: a synthesis that invents or changes the syste
 grounding failure, not a stylistic one, so the synthesizer is forbidden from stating the name,
 operator, or location at all (those are the anchors' job).
 
+**This is measured, not just asserted.** The epistemic-competence experiment
+(`cognition/epistemics.py`) is the executable spec for §3b/§3d: it runs each model's facts through
+the *real* `build_context()` (the **structured** arm) and as a flat blob of the same facts (the
+**flat** arm), so `lift = structured − flat` is the framework's measured value per model. Three
+probes — *tier deference* (defer to the higher-tier of two contradicting facts), *attribution*
+(name the source, which lives only in provenance), *uncertainty* (hedge when evidence is thin, not
+confabulate). Cross-model runs show a **positive lift for every model**: **attribution is a
+universal win** (impossible without provenance), the **uncertainty gate most helps the weakest
+models**, and **tier-deference is model-dependent** — some models exploit evidence tiers, some
+ignore them, which is itself a qualification signal.
+
 ---
 
 ## 4. Model-agnostic by role

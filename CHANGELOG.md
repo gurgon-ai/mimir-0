@@ -29,6 +29,14 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   you know, name the gap, ask one question) and is told not to narrate its source count.
 
 ### Added
+- **Epistemic-competence experiment (`cognition/epistemics.py`).** Makes the core §3 thesis —
+  typed/tiered/provenance context improves cognition over flat RAG — *measurable* per model. Each of
+  three probes (tier deference, attribution, uncertainty) runs through the real `build_context()`
+  (structured arm) and as a flat blob of the same facts (flat arm); `lift = structured − flat` is the
+  framework's value. `brain.evaluate_epistemics(models, samples)` runs it across the fleet. Live
+  cross-model finding: **positive lift for every model tested** — attribution is a universal win
+  (impossible without provenance), the uncertainty gate most helps the weakest models, and
+  tier-deference is model-dependent (gemma3:12b/gemma4:e4b defer perfectly; qwen3.5:9b ignores tiers).
 - **Automatic model selection (`model = "auto"`).** A role's `model` can be pinned, set to `"auto"`,
   or omitted (→ auto). Auto resolves from the fleet by a strict hierarchy — **pin > measured-best
   (benchmarked + role-gated) > approved-family heuristic > any reachable model** — re-resolving on
