@@ -75,11 +75,11 @@ def _craft_scores(brain: Mimir) -> None:
     brain.scan_fleet()  # catalogue has mock-a/b/c
     update_catalogue_scores(
         brain._storage, "mock-a", return_time=0.5, quality=0.7,
-        talk=0.9, tools=0.6, code=0.6, coherence=None, discipline=0.9,
+        talk=0.9, tools=0.6, code=0.6, coherence=None, discipline=0.9, epistemics=0.9,
     )
     update_catalogue_scores(
         brain._storage, "mock-b", return_time=5.0, quality=0.95,
-        talk=1.0, tools=0.9, code=0.9, coherence=None, discipline=0.9,
+        talk=1.0, tools=0.9, code=0.9, coherence=None, discipline=0.9, epistemics=0.9,
     )
 
 
@@ -98,17 +98,37 @@ def test_leaky_model_is_barred_from_identity_roles(brain: Mimir) -> None:
 
     brain.scan_fleet()
     update_catalogue_scores(
-        brain._storage, "mock-a", return_time=0.5, quality=0.6,
-        talk=1.0, tools=0.6, code=0.6, coherence=None, discipline=0.0,  # fluent but leaks tags
+        brain._storage, "mock-a", return_time=0.5, quality=0.6, talk=1.0, tools=0.6, code=0.6,
+        coherence=None, discipline=0.0, epistemics=1.0,  # fluent + epistemic but LEAKS tags
     )
     update_catalogue_scores(
-        brain._storage, "mock-b", return_time=1.0, quality=0.9,
-        talk=1.0, tools=0.9, code=0.9, coherence=None, discipline=1.0,  # disciplined
+        brain._storage, "mock-b", return_time=1.0, quality=0.9, talk=1.0, tools=0.9, code=0.9,
+        coherence=None, discipline=1.0, epistemics=1.0,  # disciplined + epistemic
     )
     recs = brain.fleet_recommendations()
     assert recs["chat"]["model"] == "mock-b"  # only the disciplined model qualifies for chat
     assert recs["reasoning"]["model"] == "mock-b"  # ...and for reasoning (self-model synthesis)
     assert recs["bake"] is not None  # bake gates on talk, not discipline — still resolvable
+
+
+def test_tier_blind_model_is_barred_from_identity_roles(brain: Mimir) -> None:
+    # A model that's disciplined but epistemically incompetent (ignores evidence tiers) must NOT be
+    # recommended for chat/reasoning — the framework is never handed to a model that won't use it.
+    from mimir.storage.repo import update_catalogue_scores
+
+    brain.scan_fleet()
+    update_catalogue_scores(
+        brain._storage, "mock-a", return_time=0.5, quality=0.7, talk=1.0, tools=0.7, code=0.7,
+        coherence=None, discipline=1.0, epistemics=0.1,  # clean, but ignores tiers/provenance
+    )
+    update_catalogue_scores(
+        brain._storage, "mock-b", return_time=1.0, quality=0.9, talk=1.0, tools=0.9, code=0.9,
+        coherence=None, discipline=1.0, epistemics=1.0,  # uses the framework
+    )
+    recs = brain.fleet_recommendations()
+    assert recs["chat"]["model"] == "mock-b"
+    assert recs["reasoning"]["model"] == "mock-b"
+    assert recs["bake"] is not None  # bake doesn't require epistemics
 
 
 def test_apply_recommendations_repoints_roles(brain: Mimir) -> None:
@@ -135,3 +155,4 @@ def test_benchmark_fleet_writes_scores(brain: Mimir) -> None:
     assert entries and all(e.quality is not None for e in entries)
     assert all(e.talk is not None for e in entries)  # capability scores written
     assert all(e.discipline is not None for e in entries)  # incl. the discipline dimension
+    assert all(e.epistemics is not None for e in entries)  # ...and the epistemics dimension

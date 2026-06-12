@@ -37,6 +37,12 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   cross-model finding: **positive lift for every model tested** — attribution is a universal win
   (impossible without provenance), the uncertainty gate most helps the weakest models, and
   tier-deference is model-dependent (gemma3:12b/gemma4:e4b defer perfectly; qwen3.5:9b ignores tiers).
+- **`epistemics` is now a qualification-battery dimension.** The benchmark scores each model's
+  structured-arm epistemic competence (does it exploit the framework?), and the identity-bearing
+  roles (`chat`, `reasoning`) gate on **both** `discipline` and `epistemics` — so a model that
+  ignores evidence tiers is barred from speaking as the system, just like one that leaks tags. New
+  catalogue column (`epistemics`, schema v11); `ROLE_NEEDS` now lists multiple required capabilities
+  per role. This is what keeps the framework from being handed to a model that won't use it.
 - **Automatic model selection (`model = "auto"`).** A role's `model` can be pinned, set to `"auto"`,
   or omitted (→ auto). Auto resolves from the fleet by a strict hierarchy — **pin > measured-best
   (benchmarked + role-gated) > approved-family heuristic > any reachable model** — re-resolving on

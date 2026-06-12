@@ -171,6 +171,16 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             ")",
         ],
     ),
+    (
+        11,
+        [
+            # The 'epistemics' dimension (DESIGN §3/§4): does the model exploit Mimir's tiered/
+            # provenance/gated context — defer to higher-tier facts, attribute to source, hedge on
+            # thin evidence? The identity-bearing roles gate on it, so the framework is never handed
+            # to a model that ignores it (e.g. one that disregards evidence tiers).
+            "ALTER TABLE model_catalogue ADD COLUMN epistemics REAL",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -235,6 +245,7 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
         "code",
         "coherence",
         "discipline",
+        "epistemics",
     },
     "model_prefs": {"model", "enabled", "updated_at"},
 }

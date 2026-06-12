@@ -58,14 +58,16 @@ def scan_fleet(
 # chat/bake/reasoning are the live roles; tools/code are forward-looking (DESIGN §9 extension
 # points) — recommended now so you know which model to use when you enable them.
 # chat and reasoning are identity-bearing — they speak AS the system and synthesize its self-model.
-# So they gate on `discipline` (honoring prohibitions, not leaking the prompt's [tier=...] tags),
-# not just `talk`: a model that mimics the scaffolding can't clear the floor for these roles (§4).
-ROLE_NEEDS: dict[str, tuple[str, str]] = {
-    "chat": ("discipline", "balanced"),
-    "bake": ("talk", "quality"),
-    "reasoning": ("discipline", "quality"),
-    "tools": ("tools", "quality"),
-    "code": ("code", "quality"),
+# They gate on BOTH `discipline` (don't leak the prompt's [tier=...] tags) AND `epistemics` (do
+# exploit the tiered/provenance/gated context — DESIGN §3). A model that mimics the scaffolding OR
+# ignores evidence tiers can't clear the floor for these roles (§4). Each role lists every
+# capability it requires; a candidate must clear the floor on all of them.
+ROLE_NEEDS: dict[str, tuple[tuple[str, ...], str]] = {
+    "chat": (("discipline", "epistemics"), "balanced"),
+    "bake": (("talk",), "quality"),
+    "reasoning": (("discipline", "epistemics"), "quality"),
+    "tools": (("tools",), "quality"),
+    "code": (("code",), "quality"),
 }
 _CAPABILITY_FLOOR = 0.5
 
@@ -94,6 +96,7 @@ def recommend_roles(
                 "code": entry.code,
                 "coherence": entry.coherence,
                 "discipline": entry.discipline,
+                "epistemics": entry.epistemics,
                 "return_time": entry.return_time,
                 "node": entry.node,  # the fastest node for this model (speed is per-node)
                 "nodes": [],
@@ -108,11 +111,12 @@ def recommend_roles(
             slot["node"] = entry.node
 
     recommendations: dict[str, dict[str, Any] | None] = {}
-    for role, (capability, prefer) in ROLE_NEEDS.items():
+    for role, (capabilities, prefer) in ROLE_NEEDS.items():
         candidates = [
             (name, data)
             for name, data in by_model.items()
-            if data["quality"] is not None and (data.get(capability) or 0.0) >= _CAPABILITY_FLOOR
+            if data["quality"] is not None
+            and all((data.get(cap) or 0.0) >= _CAPABILITY_FLOOR for cap in capabilities)
         ]
         if not candidates:
             recommendations[role] = None
@@ -226,6 +230,7 @@ def fleet_model_pool(
                 "params_b": e.params_b,
                 "quality": e.quality,
                 "discipline": e.discipline,
+                "epistemics": e.epistemics,
                 "return_time": e.return_time,
                 "approved": is_approved(e.family),
                 "benchmarked": e.quality is not None,

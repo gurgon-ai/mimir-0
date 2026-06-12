@@ -29,6 +29,7 @@ from ..model.provider import Message
 from ..model.providers.ollama import OllamaProvider
 from ..storage.gateway import StorageGateway
 from ..storage.repo import list_catalogue, update_catalogue_scores, update_catalogue_speed
+from .epistemics import score_epistemic_competence
 
 log = logging.getLogger("mimir.benchmark")
 
@@ -277,6 +278,7 @@ class ModelBenchmark:
     tools: float
     code: float
     discipline: float
+    epistemics: float
     coherence: float | None
     return_time: float
     quality: float
@@ -299,7 +301,10 @@ def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True)
     tools = score_capability(chat_fn, "tools")
     code = score_capability(chat_fn, "code")
     discipline = score_capability(chat_fn, "discipline")
-    n_calls = sum(len(CAPABILITY_TESTS[c]) for c in ("talk", "tools", "code", "discipline"))
+    # Epistemics: does the model exploit Mimir's tiered/provenance/gated context (DESIGN §3)?
+    # The structured-arm competence — the qualification signal for the identity-bearing roles.
+    epistemics = score_epistemic_competence(chat_fn, samples=2)
+    n_calls = sum(len(CAPABILITY_TESTS[c]) for c in ("talk", "tools", "code", "discipline")) + 6
     return_time = (time.monotonic() - started) / max(1, n_calls)
 
     coherence: float | None = None
@@ -310,7 +315,9 @@ def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True)
         except Exception as exc:
             log.warning("benchmark: coherence pass failed for %s: %s", model_name, exc)
 
-    scores = [talk, tools, code, discipline] + ([coherence] if coherence is not None else [])
+    scores = [talk, tools, code, discipline, epistemics] + (
+        [coherence] if coherence is not None else []
+    )
     quality = sum(scores) / len(scores)
     return ModelBenchmark(
         model=model_name,
@@ -318,6 +325,7 @@ def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True)
         tools=tools,
         code=code,
         discipline=discipline,
+        epistemics=round(epistemics, 3),
         coherence=coherence,
         return_time=round(return_time, 3),
         quality=round(quality, 3),
@@ -387,6 +395,7 @@ def benchmark_fleet(
             code=bench.code,
             coherence=bench.coherence,
             discipline=bench.discipline,
+            epistemics=bench.epistemics,
         )
         # Per-node speed: time the model directly on each node that has it (no pool, no retry).
         for node in nodes_with.get(model_name, []):
