@@ -6,6 +6,8 @@ from mimir.brain import Mimir
 from mimir.cognition.benchmark import (
     _check_add,
     _check_json_ok,
+    _check_no_brackets,
+    _check_no_dog_or_cat,
     _check_pong,
     _check_three_numbered,
     _check_tool_call,
@@ -27,6 +29,18 @@ def test_capability_checkers_are_strict_but_lenient() -> None:
     assert not _check_add("def sub(a, b): return a - b")
     assert _check_three_numbered("1. apple\n2. pear\n3. plum")
     assert not _check_three_numbered("- apple\n- pear")
+
+
+def test_discipline_checkers_catch_the_tag_leak() -> None:
+    # The core failure mode: any square bracket when told not to is a fail.
+    assert _check_no_brackets("Mona's favorite tea is genmaicha.")
+    assert not _check_no_brackets("Genmaicha [tier=stated_by_user; source=Mona].")
+    assert not _check_no_brackets("She likes genmaicha [1].")  # any bracket, even a citation
+    assert not _check_no_brackets("")  # silence is not discipline
+    # Negative lexical constraint.
+    assert _check_no_dog_or_cat("Fish") and _check_no_dog_or_cat("a hamster")
+    assert not _check_no_dog_or_cat("A cat")
+    assert not _check_no_dog_or_cat("I would suggest perhaps a goldfish or a parakeet")  # too long
 
 
 def test_score_capability_perfect_and_zero() -> None:
@@ -61,11 +75,11 @@ def _craft_scores(brain: Mimir) -> None:
     brain.scan_fleet()  # catalogue has mock-a/b/c
     update_catalogue_scores(
         brain._storage, "mock-a", return_time=0.5, quality=0.7,
-        talk=0.9, tools=0.6, code=0.6, coherence=None,
+        talk=0.9, tools=0.6, code=0.6, coherence=None, discipline=0.9,
     )
     update_catalogue_scores(
         brain._storage, "mock-b", return_time=5.0, quality=0.95,
-        talk=1.0, tools=0.9, code=0.9, coherence=None,
+        talk=1.0, tools=0.9, code=0.9, coherence=None, discipline=0.9,
     )
 
 
@@ -75,6 +89,26 @@ def test_recommendations_pick_per_role(brain: Mimir) -> None:
     assert recs["bake"]["model"] == "mock-b"  # bake prefers quality → the high-quality model
     assert recs["chat"] is not None  # chat is balanced; either could win, just must resolve
     assert recs["bake"]["node"]  # the fastest node holding the model is named
+
+
+def test_leaky_model_is_barred_from_identity_roles(brain: Mimir) -> None:
+    # A model that's fluent (high talk) but leaks tags (low discipline) must NOT be recommended for
+    # chat/reasoning, while a disciplined one is. bake (gated on talk) can still take the leaker.
+    from mimir.storage.repo import update_catalogue_scores
+
+    brain.scan_fleet()
+    update_catalogue_scores(
+        brain._storage, "mock-a", return_time=0.5, quality=0.6,
+        talk=1.0, tools=0.6, code=0.6, coherence=None, discipline=0.0,  # fluent but leaks tags
+    )
+    update_catalogue_scores(
+        brain._storage, "mock-b", return_time=1.0, quality=0.9,
+        talk=1.0, tools=0.9, code=0.9, coherence=None, discipline=1.0,  # disciplined
+    )
+    recs = brain.fleet_recommendations()
+    assert recs["chat"]["model"] == "mock-b"  # only the disciplined model qualifies for chat
+    assert recs["reasoning"]["model"] == "mock-b"  # ...and for reasoning (self-model synthesis)
+    assert recs["bake"] is not None  # bake gates on talk, not discipline — still resolvable
 
 
 def test_apply_recommendations_repoints_roles(brain: Mimir) -> None:
@@ -100,3 +134,4 @@ def test_benchmark_fleet_writes_scores(brain: Mimir) -> None:
     entries = list_catalogue(brain._storage)
     assert entries and all(e.quality is not None for e in entries)
     assert all(e.talk is not None for e in entries)  # capability scores written
+    assert all(e.discipline is not None for e in entries)  # incl. the discipline dimension

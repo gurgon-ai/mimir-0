@@ -148,6 +148,16 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "ALTER TABLE model_catalogue ADD COLUMN coherence REAL",
         ],
     ),
+    (
+        9,
+        [
+            # The 'discipline' dimension (DESIGN §4): does the model honor prohibitions — above all,
+            # NOT reproducing the internal [tier=...; source=...] scaffolding it is shown. This is
+            # the signal that separates an identity-safe chat/reasoning model from one that leaks
+            # the prompt's tags (the failure that drove the output sanitizer; DESIGN §10).
+            "ALTER TABLE model_catalogue ADD COLUMN discipline REAL",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -211,5 +221,6 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
         "tools",
         "code",
         "coherence",
+        "discipline",
     },
 }

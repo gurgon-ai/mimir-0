@@ -123,6 +123,22 @@ def _check_add(out: str) -> bool:
     return _defines_function(out, "add")
 
 
+def _check_no_brackets(out: str) -> bool:
+    """A disciplined model emits NO square brackets when told not to — the tag-leak test.
+
+    The prompts that use this checker prime the model with ``[tier=...; source=...]`` scaffolding
+    and forbid reproducing it. A model that mimics the format (the failure that forced the output
+    sanitizer, DESIGN §10) leaks a ``[`` or ``]`` and fails.
+    """
+    return bool(out.strip()) and "[" not in out and "]" not in out
+
+
+def _check_no_dog_or_cat(out: str) -> bool:
+    """Honors a negative lexical constraint ('do not use the words dog or cat') in a short reply."""
+    low = out.lower()
+    return bool(low.strip()) and "dog" not in low and "cat" not in low and len(low.split()) <= 4
+
+
 CAPABILITY_TESTS: dict[str, list[tuple[str, Callable[[str], bool]]]] = {
     "talk": [
         ("Reply with exactly this and nothing else: PONG", _check_pong),
@@ -144,6 +160,30 @@ CAPABILITY_TESTS: dict[str, list[tuple[str, Callable[[str], bool]]]] = {
             "Write a Python function named add that takes a and b and returns their sum. "
             "Respond with only the code.",
             _check_add,
+        ),
+    ],
+    # Discipline = honoring prohibitions, above all NOT reproducing the internal
+    # [tier=...; source=...] scaffolding the model is shown. This is the capability that separates
+    # an identity-safe chat/reasoning model from one that leaks the prompt's tags (DESIGN §4, §10).
+    # Two of the three cases prime-and-forbid brackets, so a compulsive mimic scores <= 0.33 and
+    # falls below the floor.
+    "discipline": [
+        (
+            "Answer using the fact below. Attribute in plain words if you like, but do NOT copy "
+            "the bracketed annotation, and use no square brackets at all in your reply.\n"
+            "Fact: Mona's favorite tea is genmaicha [tier=stated_by_user; source=Mona].\n"
+            "Question: What is Mona's favorite tea? Answer in one short sentence.",
+            _check_no_brackets,
+        ),
+        (
+            "Rewrite the following as one clean sentence with no tags, no markdown, and no square "
+            "brackets:\n'Backups run nightly [tier=document; source=handbook.md].'",
+            _check_no_brackets,
+        ),
+        (
+            "Name one common household pet that is not a dog and not a cat. Reply with a single "
+            "word, and do not use the words 'dog' or 'cat'.",
+            _check_no_dog_or_cat,
         ),
     ],
 }
@@ -221,6 +261,7 @@ class ModelBenchmark:
     talk: float
     tools: float
     code: float
+    discipline: float
     coherence: float | None
     return_time: float
     quality: float
@@ -242,7 +283,8 @@ def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True)
     talk = score_capability(chat_fn, "talk")
     tools = score_capability(chat_fn, "tools")
     code = score_capability(chat_fn, "code")
-    n_calls = sum(len(CAPABILITY_TESTS[c]) for c in ("talk", "tools", "code"))
+    discipline = score_capability(chat_fn, "discipline")
+    n_calls = sum(len(CAPABILITY_TESTS[c]) for c in ("talk", "tools", "code", "discipline"))
     return_time = (time.monotonic() - started) / max(1, n_calls)
 
     coherence: float | None = None
@@ -253,13 +295,14 @@ def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True)
         except Exception as exc:
             log.warning("benchmark: coherence pass failed for %s: %s", model_name, exc)
 
-    scores = [talk, tools, code] + ([coherence] if coherence is not None else [])
+    scores = [talk, tools, code, discipline] + ([coherence] if coherence is not None else [])
     quality = sum(scores) / len(scores)
     return ModelBenchmark(
         model=model_name,
         talk=talk,
         tools=tools,
         code=code,
+        discipline=discipline,
         coherence=coherence,
         return_time=round(return_time, 3),
         quality=round(quality, 3),
@@ -328,6 +371,7 @@ def benchmark_fleet(
             tools=bench.tools,
             code=bench.code,
             coherence=bench.coherence,
+            discipline=bench.discipline,
         )
         # Per-node speed: time the model directly on each node that has it (no pool, no retry).
         for node in nodes_with.get(model_name, []):

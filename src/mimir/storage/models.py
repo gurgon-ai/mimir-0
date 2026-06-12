@@ -161,6 +161,7 @@ class CatalogueEntry:
     tools: float | None = None
     code: float | None = None
     coherence: float | None = None
+    discipline: float | None = None
     scanned_at: float = 0.0
 
 

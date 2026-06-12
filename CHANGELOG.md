@@ -28,6 +28,13 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   scaffolding-leak class as the tags. It is now a directive the model acts on (answer from what
   you know, name the gap, ask one question) and is told not to narrate its source count.
 
+### Added
+- **`discipline` capability in the fleet IQ test.** The benchmark battery now scores a fourth
+  dimension that primes the model with `[tier=...; source=...]` tags and forbids reproducing them —
+  a model that leaks brackets fails. The identity-bearing roles (`chat`, `reasoning`) gate on
+  discipline, so the recommender refuses to route them to a fluent-but-leaky model (the failure mode
+  is caught in qualification, not production). New catalogue column (`discipline`, schema v9).
+
 ### Validation
 - End-to-end live run against a real LAN Ollama node (`gemma3:12b` for chat/reasoning,
   `gemma3:4b` for bake, `nomic-embed-text:v1.5` for embed): clean self-model synthesis (no
