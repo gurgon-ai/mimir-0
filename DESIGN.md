@@ -152,10 +152,12 @@ different minds. Diversity is emergent from the hardware, not a config chore.
    nightly role. A model that fails here never costs a judge call. The gate scores four capability
    dimensions — *talk*, *tools*, *code*, and **discipline** — where discipline tests whether the
    model honors prohibitions, above all **not reproducing the internal `[tier=...; source=...]`
-   scaffolding it is shown** (the failure that forced the §10 output sanitizer). The identity-bearing
-   roles (`chat`, `reasoning`) gate on *discipline*, so a fluent model that leaks the prompt's tags
-   is never recommended to speak as the system — small models that mimic the format are filtered
-   here, not discovered in production.
+   scaffolding it is shown** (the failure that forced the §10 output sanitizer). The discipline probe
+   replicates the production condition that triggers the leak (a tag-saturated recall block under the
+   real soft instruction) and samples it across several runs, since the leak is probabilistic. The
+   identity-bearing roles (`chat`, `reasoning`) gate on *discipline*, so a fluent model that leaks the
+   prompt's tags is never recommended to speak as the system — small models that mimic the format are
+   filtered here, not discovered in production.
 2. **Coherence judgment** (judge + human anchor, only on survivors): the candidate answers a fixed
    **golden case** (prompt + fixed context + reference answer); a trusted model judges it against a
    rubric (faithful to context, cites the right memory, refuses to hallucinate). Sample outputs

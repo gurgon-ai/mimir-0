@@ -30,10 +30,16 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
 - **`discipline` capability in the fleet IQ test.** The benchmark battery now scores a fourth
-  dimension that primes the model with `[tier=...; source=...]` tags and forbids reproducing them —
-  a model that leaks brackets fails. The identity-bearing roles (`chat`, `reasoning`) gate on
-  discipline, so the recommender refuses to route them to a fluent-but-leaky model (the failure mode
-  is caught in qualification, not production). New catalogue column (`discipline`, schema v9).
+  dimension: does the model honor prohibitions, above all **not reproducing the internal
+  `[tier=...; source=...]` scaffolding it is shown**. The probe replicates the *production* condition
+  that actually triggers the leak — a tag-saturated recall block under the real soft "don't copy the
+  tags" instruction — and samples it several times, scoring the fraction of bracket-free replies
+  (leakage is probabilistic; consistency is the signal, per DESIGN §4). A weak single-tag prompt was
+  too easy and missed the failure. The identity-bearing roles (`chat`, `reasoning`) gate on
+  discipline, so the recommender refuses to route them to a fluent-but-leaky model — caught in
+  qualification, not production. New catalogue column (`discipline`, schema v9). Validated live:
+  `gemma3:4b` scores 0.25 (barred) while `gemma4:e2b`/`e4b`/`qwen3.5:9b` score 1.00 and `gemma3:12b`
+  0.75.
 
 ### Validation
 - End-to-end live run against a real LAN Ollama node (`gemma3:12b` for chat/reasoning,
