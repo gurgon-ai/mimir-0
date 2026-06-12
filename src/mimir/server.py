@@ -320,9 +320,9 @@ class _Handler(BaseHTTPRequestHandler):
             srv.bench_state = {"running": True, "i": 0, "total": 0,
                                "current": "scanning the fleet…", "done": False, "results": []}
 
-        def _progress(i: int, total: int, model: str) -> None:
+        def _progress(i: int, total: int, model: str, eta: float | None) -> None:
             with srv.bench_lock:
-                srv.bench_state.update(i=i, total=total, current=model)
+                srv.bench_state.update(i=i, total=total, current=model, eta=eta)
 
         def _on_result(b: Any) -> None:
             with srv.bench_lock:
@@ -1000,6 +1000,15 @@ async function loadFleet() {
   } catch (e) { $("fleetList").innerHTML = "error: " + e.message; }
 }
 
+function fmtDuration(sec) {
+  sec = Math.round(sec);
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60), s = sec % 60;
+  if (m < 60) return s ? `${m}m ${s}s` : `${m}m`;
+  const h = Math.floor(m / 60), mm = m % 60;
+  return mm ? `${h}h ${mm}m` : `${h}h`;
+}
+
 // Live benchmark scoreboard — each model's scores appear as it finishes (best first), filling the
 // Fleet area that's otherwise idle during the run.
 function renderBenchResults(results) {
@@ -1054,7 +1063,8 @@ async function pollBenchmark() {
         break;
       }
       // Until the first model starts, total is 0 — show the scan phase rather than "0/0".
-      $("fleetMsg").textContent = s.total ? `Benchmarking ${s.i}/${s.total}: ${s.current}…` : `${s.current || "Preparing…"}`;
+      const eta = (s.eta != null) ? `  ·  ~${fmtDuration(s.eta)} left` : "";
+      $("fleetMsg").textContent = s.total ? `Benchmarking ${s.i}/${s.total}: ${s.current}…${eta}` : `${s.current || "Preparing…"}`;
       renderBenchResults(s.results);   // live scoreboard — fills the (otherwise idle) Fleet area
       await new Promise(r => setTimeout(r, 1500));
     }

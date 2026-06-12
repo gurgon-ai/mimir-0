@@ -559,7 +559,7 @@ class Mimir:
         max_params_b: float | None = None,
         latency_budget_s: float | None = None,
         judge: bool = True,
-        progress: Callable[[int, int, str], None] | None = None,
+        progress: Callable[[int, int, str, float | None], None] | None = None,
         on_result: Callable[[ModelBenchmark], None] | None = None,
     ) -> FleetBenchmarkResult:
         """Scan + benchmark the fleet's models (speed + capability + coherence) (DESIGN §4).

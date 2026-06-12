@@ -43,6 +43,15 @@ def test_discipline_checkers_catch_the_tag_leak() -> None:
     assert not _check_no_dog_or_cat("I would suggest perhaps a goldfish or a parakeet")  # too long
 
 
+def test_outside_in_ordering() -> None:
+    from mimir.cognition.benchmark import _outside_in
+
+    # smallest→largest in → big, small, big, small, … (so an ETA samples both extremes early)
+    assert _outside_in(["a", "b", "c", "d", "e"]) == ["e", "a", "d", "b", "c"]
+    assert _outside_in(["small", "large"]) == ["large", "small"]
+    assert _outside_in([]) == [] and _outside_in(["x"]) == ["x"]
+
+
 def test_score_capability_perfect_and_zero() -> None:
     def perfect(messages: list[dict]) -> str:
         prompt = messages[0]["content"]
@@ -61,12 +70,12 @@ def test_is_approved_matches_families() -> None:
     assert not is_approved("nomic-bert-moe")
 
 
-def test_smallest_first_and_size_cap(brain: Mimir) -> None:
+def test_size_cap_and_outside_in_order(brain: Mimir) -> None:
     # mock fleet sizes: mock-a 3B, mock-b 8B, mock-c 27B. A 10B cap keeps only a + b.
     result = brain.benchmark_fleet(only_approved=False, judge=False, max_params_b=10.0)
     assert {b.model for b in result.results} == {"mock-a", "mock-b"}  # mock-c (27B) skipped
-    # benchmarked smallest-first
-    assert result.results[0].model == "mock-a"
+    # outside-in order = biggest first, so mock-b (8B) is scored before mock-a (3B).
+    assert result.results[0].model == "mock-b"
 
 
 def _craft_scores(brain: Mimir) -> None:
