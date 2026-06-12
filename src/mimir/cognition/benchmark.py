@@ -380,6 +380,23 @@ def _measure_node_speed(
 _DEFAULT_SKIP_S: float = 30.0
 
 
+def _outside_in(by_size: list[str]) -> list[str]:
+    """Reorder a smallest→largest list into big, small, big, small … so a running-average time
+    estimate samples both extremes from the first two models and converges to the true mean fast."""
+    out: list[str] = []
+    lo, hi = 0, len(by_size) - 1
+    take_big = True
+    while lo <= hi:
+        if take_big:
+            out.append(by_size[hi])
+            hi -= 1
+        else:
+            out.append(by_size[lo])
+            lo += 1
+        take_big = not take_big
+    return out
+
+
 def benchmark_fleet(
     model: ModelGateway,
     storage: StorageGateway,
@@ -389,7 +406,7 @@ def benchmark_fleet(
     max_params_b: float = 30.0,
     judge: bool = True,
     latency_budget_s: float = 0.0,
-    progress: Callable[[int, int, str], None] | None = None,
+    progress: Callable[[int, int, str, float | None], None] | None = None,
     on_result: Callable[[ModelBenchmark], None] | None = None,
 ) -> FleetBenchmarkResult:
     """Benchmark the distinct models in the catalogue and write their scores back.
@@ -418,7 +435,11 @@ def benchmark_fleet(
             too_big.add(entry.model)
             continue
         sizes.setdefault(entry.model, entry.params_b)
-    models = sorted(sizes, key=lambda m: sizes[m])[:limit]  # smallest (fastest) first
+    # Outside-in order (biggest, smallest, biggest, smallest …): the running-average ETA samples
+    # both extremes immediately so it converges fast — unlike smallest-first, which back-loads all
+    # the slow models and makes any early estimate wildly optimistic.
+    by_size = sorted(sizes, key=lambda m: sizes[m])
+    models = _outside_in(by_size)[:limit]
 
     total = len(models)
     skip_budget = latency_budget_s if latency_budget_s > 0 else _DEFAULT_SKIP_S
@@ -427,10 +448,15 @@ def benchmark_fleet(
              total, judge, skip_budget)
     judges_ok = judges_trustworthy(model) if judge else False
     results: list[ModelBenchmark] = []
+    loop_start = time.monotonic()
     for i, model_name in enumerate(models, start=1):
         log.info("benchmark: [%d/%d] %s …", i, total, model_name)
         if progress is not None:
-            progress(i, total, model_name)
+            # ETA from the average wall-clock of the models already finished (outside-in makes this
+            # representative from the 2nd model on); None until we have at least one timing.
+            done = i - 1
+            eta = (time.monotonic() - loop_start) / done * (total - done) if done else None
+            progress(i, total, model_name, eta)
         # Latency pre-gate: a single trivial-prompt probe (timeout = the budget). A model that can't
         # answer "ok" within budget isn't viable for interactive use — skip it before the expensive
         # full battery stalls the run. The probe also seeds this node's speed.
