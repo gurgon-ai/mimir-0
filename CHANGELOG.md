@@ -8,6 +8,13 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Fixed
+- **Benchmark looked frozen / gave no progress.** The fleet benchmark ran synchronously while
+  holding the brain lock, so the entire web UI (including header polling) blocked for the multi-minute
+  run, and nothing logged per model — it was impossible to tell a running benchmark from a broken one.
+  Now: the run happens in a background thread, `/api/state` and a new `/api/fleet/benchmark/status`
+  are lock-free so the page stays responsive, the UI polls and shows **"Benchmarking i/N: model…"**,
+  and `benchmark_fleet` logs every model start/finish (`[i/N] model …`) so the log/console show life.
+  Errors surface in the status instead of dying silently.
 - **Identity drift in the self-model.** A small model (`gemma3:4b`) synthesizing the self-model could
   hallucinate a name not in the operator-established anchors (observed: anchor name `Mimir` but the
   synthesis wrote "I am Arthur"), creating a contradiction the chat model then adopted and inverted

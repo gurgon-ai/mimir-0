@@ -179,6 +179,25 @@ def test_fleet_scan_and_report(base_url: str) -> None:
     assert "by_node" in report
 
 
+def test_benchmark_runs_async_with_progress(base_url: str) -> None:
+    import time
+
+    _json("POST", base_url + "/api/fleet/scan", {})  # catalogue the mock models
+    status, started = _json("POST", base_url + "/api/fleet/benchmark", {})
+    assert status == 200 and started.get("started") is True  # returns immediately, not blocking
+
+    st: dict = {}
+    for _ in range(100):  # poll the lock-free status until done (mock benchmark is fast)
+        _, st = _json("GET", base_url + "/api/fleet/benchmark/status")
+        if st.get("done") or not st.get("running"):
+            break
+        time.sleep(0.1)
+    # The async path completes cleanly and reports done (mock families aren't on the approved
+    # list, so the default benchmark scores 0 of them — real fleets score normally).
+    assert st.get("done") is True
+    assert "error" not in st
+
+
 def test_model_pool_lists_and_toggles(base_url: str) -> None:
     _json("POST", base_url + "/api/fleet/scan", {})  # catalogue the mock models
     status, pool = _json("GET", base_url + "/api/fleet/pool")

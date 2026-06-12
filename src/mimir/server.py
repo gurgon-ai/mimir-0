@@ -57,6 +57,10 @@ class MimirHTTPServer(ThreadingHTTPServer):
         super().__init__(address, _Handler)
         self.brain = brain
         self.brain_lock = threading.Lock()
+        # Live benchmark progress (the run is multi-minute; the UI polls this so it never looks
+        # frozen). Guarded by its own small lock so status reads never block on the benchmark.
+        self.bench_lock = threading.Lock()
+        self.bench_state: dict[str, Any] = {"running": False}
 
 
 def create_server(brain: Mimir, host: str = "127.0.0.1", port: int = 8765) -> MimirHTTPServer:
@@ -124,6 +128,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._fleet())
             elif route == "/api/fleet/pool":
                 self._send_json(self._model_pool())
+            elif route == "/api/fleet/benchmark/status":
+                self._send_json(self._benchmark_status())
             elif route == "/favicon.ico":
                 self._send(204, b"", "image/x-icon")
             else:
@@ -178,14 +184,15 @@ class _Handler(BaseHTTPRequestHandler):
     # -- operations (all under the brain lock) ----------------------------------------
 
     def _state(self) -> dict[str, Any]:
+        # Lock-free: these are concurrent-safe reads (the storage gateway handles read concurrency
+        # via WAL). Not taking the brain lock keeps the header live even while a benchmark holds it.
         brain = self.server.brain
-        with self.server.brain_lock:
-            return {
-                "embed_mode": brain._embedder.mode.value,
-                "embed_banner": brain._embedder.mode.banner(),
-                "memories": count_memories(brain._storage, kind=MemoryKind.MEMORY),
-                "anchors_set": len(brain.identity_anchors()),
-            }
+        return {
+            "embed_mode": brain._embedder.mode.value,
+            "embed_banner": brain._embedder.mode.banner(),
+            "memories": count_memories(brain._storage, kind=MemoryKind.MEMORY),
+            "anchors_set": len(brain.identity_anchors()),
+        }
 
     def _turn(self, body: dict[str, Any]) -> dict[str, Any]:
         text = str(body.get("text", "")).strip()
@@ -279,16 +286,40 @@ class _Handler(BaseHTTPRequestHandler):
         return {"nodes": result.nodes, "models": result.models}
 
     def _benchmark_fleet(self) -> dict[str, Any]:
-        with self.server.brain_lock:
-            result = self.server.brain.benchmark_fleet()
-        return {
-            "benchmarked": result.benchmarked,
-            "judges_ok": result.judges_ok,
-            "models": [
-                {"model": b.model, "quality": b.quality, "return_time": b.return_time}
-                for b in result.results
-            ],
-        }
+        """Kick off a benchmark in the background and return immediately. The run is multi-minute;
+        the UI polls /api/fleet/benchmark/status. Holding the brain lock for the whole run (in the
+        worker thread) preserves serialization against turns, but the status + state reads are
+        lock-free, so the page never freezes (the bug this fixes)."""
+        srv = self.server
+        with srv.bench_lock:
+            if srv.bench_state.get("running"):
+                return {"started": False, **srv.bench_state}  # already running
+            srv.bench_state = {"running": True, "i": 0, "total": 0, "current": "", "done": False}
+
+        def _progress(i: int, total: int, model: str) -> None:
+            with srv.bench_lock:
+                srv.bench_state.update(i=i, total=total, current=model)
+
+        def _run() -> None:
+            try:
+                with srv.brain_lock:
+                    result = srv.brain.benchmark_fleet(progress=_progress)
+                with srv.bench_lock:
+                    srv.bench_state.update(
+                        running=False, done=True, current="",
+                        benchmarked=result.benchmarked, judges_ok=result.judges_ok,
+                    )
+            except Exception as exc:  # surfaced via status, never a silent death (DESIGN §10)
+                log.exception("benchmark run failed")
+                with srv.bench_lock:
+                    srv.bench_state.update(running=False, done=True, error=str(exc))
+
+        threading.Thread(target=_run, name="mimir-benchmark", daemon=True).start()
+        return {"started": True}
+
+    def _benchmark_status(self) -> dict[str, Any]:
+        with self.server.bench_lock:
+            return dict(self.server.bench_state)
 
     def _apply_recommendations(self) -> dict[str, str]:
         with self.server.brain_lock:
@@ -923,11 +954,21 @@ $("fleetScanBtn").addEventListener("click", async () => {
 });
 
 $("fleetBenchBtn").addEventListener("click", async () => {
-  $("fleetMsg").textContent = "Benchmarking models (this can take a while)…"; $("fleetBenchBtn").disabled = true;
+  $("fleetMsg").textContent = "Starting benchmark…"; $("fleetBenchBtn").disabled = true;
   try {
-    const r = await api("POST", "/api/fleet/benchmark");
-    $("fleetMsg").textContent = `Benchmarked ${r.benchmarked} model(s)` + (r.judges_ok ? "" : " (coherence judges untrusted — skipped)") + ".";
-    loadFleet();
+    await api("POST", "/api/fleet/benchmark");   // returns immediately; runs in the background
+    // Poll live progress so the page never looks frozen during the multi-minute run.
+    while (true) {
+      await new Promise(r => setTimeout(r, 1500));
+      const s = await api("GET", "/api/fleet/benchmark/status");
+      if (s.error) { $("fleetMsg").textContent = "Benchmark error: " + s.error; break; }
+      if (s.done || !s.running) {
+        $("fleetMsg").textContent = `Benchmarked ${s.benchmarked || 0} model(s)` + (s.judges_ok ? "" : " (coherence judges untrusted — skipped)") + ".";
+        loadFleet();
+        break;
+      }
+      $("fleetMsg").textContent = `Benchmarking ${s.i}/${s.total}: ${s.current}…`;
+    }
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
   $("fleetBenchBtn").disabled = false;
 });
