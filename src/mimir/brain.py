@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .cognition.bake import bake
-from .cognition.benchmark import FleetBenchmarkResult
+from .cognition.benchmark import FleetBenchmarkResult, ModelBenchmark
 from .cognition.benchmark import benchmark_fleet as _benchmark_fleet
 from .cognition.council import CouncilResult, deliberate
 from .cognition.epistemics import EpistemicResult, run_epistemics
@@ -560,6 +560,7 @@ class Mimir:
         latency_budget_s: float | None = None,
         judge: bool = True,
         progress: Callable[[int, int, str], None] | None = None,
+        on_result: Callable[[ModelBenchmark], None] | None = None,
     ) -> FleetBenchmarkResult:
         """Scan + benchmark the fleet's models (speed + capability + coherence) (DESIGN §4).
 
@@ -586,6 +587,7 @@ class Mimir:
             judge=judge,
             latency_budget_s=budget,
             progress=progress,
+            on_result=on_result,
         )
 
     def evaluate_epistemics(

@@ -390,6 +390,7 @@ def benchmark_fleet(
     judge: bool = True,
     latency_budget_s: float = 0.0,
     progress: Callable[[int, int, str], None] | None = None,
+    on_result: Callable[[ModelBenchmark], None] | None = None,
 ) -> FleetBenchmarkResult:
     """Benchmark the distinct models in the catalogue and write their scores back.
 
@@ -472,6 +473,8 @@ def benchmark_fleet(
             if elapsed is not None:
                 update_catalogue_speed(storage, node, model_name, elapsed)
         results.append(bench)
+        if on_result is not None:
+            on_result(bench)   # stream each score to the caller (live UI scoreboard)
     log.info(
         "benchmark: scored %d of %d eligible; %d too big, %d too slow; judges_ok=%s",
         len(results), len(eligible), len(too_big), len(too_slow), judges_ok,
