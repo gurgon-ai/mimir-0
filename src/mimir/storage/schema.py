@@ -137,6 +137,17 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             ")",
         ],
     ),
+    (
+        8,
+        [
+            # Phase 2 benchmark scores per model (DESIGN §4): the capability 'IQ test' dimensions.
+            # NULL until benchmarked. quality (above) is the aggregate; these are the breakdown.
+            "ALTER TABLE model_catalogue ADD COLUMN talk REAL",
+            "ALTER TABLE model_catalogue ADD COLUMN tools REAL",
+            "ALTER TABLE model_catalogue ADD COLUMN code REAL",
+            "ALTER TABLE model_catalogue ADD COLUMN coherence REAL",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -196,5 +207,9 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
         "return_time",
         "quality",
         "scanned_at",
+        "talk",
+        "tools",
+        "code",
+        "coherence",
     },
 }

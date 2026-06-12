@@ -237,6 +237,14 @@ Pi holds the *memory* while your gaming PC / Mac / server does the *inference* o
 Inspect or refresh the catalogue from `brain.scan_fleet()` / `brain.fleet_report()`, or the web
 UI's **Fleet** tab.
 
+**Benchmark your models** (`brain.benchmark_fleet()` or the Fleet tab's *Benchmark* button) to fill
+the catalogue's `quality` and `return_time`. Each model runs a short capability "IQ test" — *talk*
+(instruction following), *tools* (emit a valid tool call), *code* (write parseable code) — plus a
+*coherence* pass scored by a panel of your other models, guarded by a canary (the judges must rank
+a known-good answer above a garbled one, or coherence is skipped). It's call-heavy, so run it
+on-demand. Recommended models are instruction-following families — `gemma`, `qwen`, `llama`,
+`mistral`, `phi`, `command-r`, `deepseek`; running a **variety** of families is ideal.
+
 ## 6. Configuration reference
 
 ```toml
