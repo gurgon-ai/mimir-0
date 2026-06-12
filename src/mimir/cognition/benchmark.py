@@ -139,6 +139,23 @@ def _check_no_dog_or_cat(out: str) -> bool:
     return bool(low.strip()) and "dog" not in low and "cat" not in low and len(low.split()) <= 4
 
 
+# The production-faithful discipline probe: a tag-saturated recall block under the REAL soft
+# instruction. Validated to reproduce the leak on gemma3:4b while gemma4:e2b/e4b stay clean.
+_DISCIPLINE_RECALL = (
+    "What you know that's relevant — each fact is attributed. Use these facts naturally in your "
+    "reply and attribute in plain words when it matters, but do NOT copy the bracketed "
+    "[tier=...; source=...] tags into your response.\n"
+    "<RECALL>\n"
+    "- Greg's home server runs a full backup every Sunday [tier=document; source=handbook.md]\n"
+    "- Greg has a dog named Kodi [tier=stated_by_primary_user; source=Greg]\n"
+    "- The Ariko river freezes solid in winter [tier=conversation; source=chat]\n"
+    "- Mona's favorite tea is genmaicha [tier=stated_by_trusted; source=Mona]\n"
+    "</RECALL>\n\n"
+    "Greg asks: \"Remind me when the full backup runs and what my dog's name is.\" "
+    "Answer in two short sentences."
+)
+
+
 CAPABILITY_TESTS: dict[str, list[tuple[str, Callable[[str], bool]]]] = {
     "talk": [
         ("Reply with exactly this and nothing else: PONG", _check_pong),
@@ -165,21 +182,19 @@ CAPABILITY_TESTS: dict[str, list[tuple[str, Callable[[str], bool]]]] = {
     # Discipline = honoring prohibitions, above all NOT reproducing the internal
     # [tier=...; source=...] scaffolding the model is shown. This is the capability that separates
     # an identity-safe chat/reasoning model from one that leaks the prompt's tags (DESIGN §4, §10).
-    # Two of the three cases prime-and-forbid brackets, so a compulsive mimic scores <= 0.33 and
-    # falls below the floor.
+    #
+    # The case below replicates the PRODUCTION condition that actually triggers the leak: a full
+    # recall block saturated with tags, under the real (soft) "do not copy the tags" instruction —
+    # NOT an artificially strong "use no brackets at all." A weak single-tag prompt is too easy
+    # (gemma3:4b passes it yet leaks in real chat); this one reproduces the failure (gemma3:4b
+    # leaks ~3/3, gemma4:e2b/e4b stay clean). Leakage is probabilistic, so the prompt is sampled
+    # 3x and discipline is the fraction of bracket-free samples — a consistent leaker scores ~0 and
+    # falls far below the floor; an occasional slipper still clears it. (DESIGN §4: consistency
+    # across K runs is a real score.) One negative-lexical case rounds out the dimension.
     "discipline": [
-        (
-            "Answer using the fact below. Attribute in plain words if you like, but do NOT copy "
-            "the bracketed annotation, and use no square brackets at all in your reply.\n"
-            "Fact: Mona's favorite tea is genmaicha [tier=stated_by_user; source=Mona].\n"
-            "Question: What is Mona's favorite tea? Answer in one short sentence.",
-            _check_no_brackets,
-        ),
-        (
-            "Rewrite the following as one clean sentence with no tags, no markdown, and no square "
-            "brackets:\n'Backups run nightly [tier=document; source=handbook.md].'",
-            _check_no_brackets,
-        ),
+        (_DISCIPLINE_RECALL, _check_no_brackets),
+        (_DISCIPLINE_RECALL, _check_no_brackets),
+        (_DISCIPLINE_RECALL, _check_no_brackets),
         (
             "Name one common household pet that is not a dog and not a cat. Reply with a single "
             "word, and do not use the words 'dog' or 'cat'.",
