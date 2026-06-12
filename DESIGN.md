@@ -202,6 +202,11 @@ rubric+reference judging, and the council's adversarial structure. The qualifier
 pair** (a known-good model that must score high, a garbled one that must score low); if the canary
 inverts, the *qualifier* is broken → loud alarm, never a silent pass.
 
+> **The full inference-engine spec** — discovery, recommended-model registry, first-run onboarding
+> (wizard + headless), progressive/trusted-judge qualification, local-first routing, staleness, and
+> the failure-mode guards — lives in [`docs/INFERENCE_ENGINE.md`](docs/INFERENCE_ENGINE.md). It
+> extends this section and §5 into the model-agnostic engine the rest of Mimir bolts onto.
+
 ---
 
 ## 5. Architecture — the spine + the cognition
