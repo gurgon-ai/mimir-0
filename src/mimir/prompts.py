@@ -95,10 +95,16 @@ DEFAULT_IDENTITY = (
 
 # --- uncertainty gate text ---------------------------------------------------------------
 def uncertainty_flag(source_count: int) -> str:
-    """The honesty flag injected when assembly drew on too few sources (DESIGN §3d)."""
+    """The honesty flag injected when assembly drew on too few sources (DESIGN §3d).
+
+    Phrased as a directive the model *acts on*, not a sentence it can recite: parroting
+    "grounded in only N sources" back to the user is itself internal scaffolding leaking
+    into the reply. The ``[epistemic check]`` marker is stripped from output by ``sanitize``.
+    """
+    extent = "no stored knowledge" if source_count == 0 else "very little stored knowledge"
     return (
-        f"[epistemic check] This answer is grounded in only {source_count} source"
-        f"{'' if source_count == 1 else 's'}. If that is too thin to answer confidently, "
-        "say what you don't know, name the gap, and ask one clarifying question rather "
-        "than guessing."
+        f"[epistemic check] You have {extent} bearing on this. Do not guess or invent "
+        "specifics, and do not narrate your source count. Answer from what you genuinely "
+        "know, say plainly what you're missing, and ask one clarifying question rather than "
+        "padding the gap."
     )
