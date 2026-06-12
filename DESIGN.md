@@ -302,6 +302,10 @@ memory) **[partial]**. The general burst-window scheduler (two classes, pent-up 
 idle takeover) and output-side bidirectional RAG are **[proposed]** — and compose directly with the
 inference engine, which is *built* to be distributed-and-idle-aware rather than single-shot.
 
+> A concrete **build sketch** mapping this onto Mimir-0's parts (the scheduler, the data model, the
+> bidirectional-RAG tasks, the phased plan B1–B4) is parked in
+> [`docs/BURST_WORKER.md`](docs/BURST_WORKER.md) — not scheduled; do the inference-engine phases first.
+
 ---
 
 ## 6. v0 scope + acceptance test
