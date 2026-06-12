@@ -68,8 +68,12 @@ the identity interview, and ingests documents.
 
 ```bash
 python -m mimir.server --config mimir.toml          # then open http://127.0.0.1:8765
-# options: --host 0.0.0.0  --port 8765
+# options: --host 0.0.0.0  --port 8765  --log-file mimir.log
 ```
+
+The server logs to the console **and** to a rotating file (`mimir.log` by default, 5 MB × 3
+backups) so a long run leaves a reviewable trail — point `--log-file` elsewhere, or pass
+`--log-file ""` for console only.
 
 The page has three panels: a **chat** box (each reply shows its source count and embedding mode,
 and flags thin evidence), an **Identity** panel (fill in pending anchors or click *Revise all* to
