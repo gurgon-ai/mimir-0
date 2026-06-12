@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 
-from ..config import RoleSpec
+from ..config import AUTO_MODEL, RoleSpec
 from ..errors import ModelGatewayError
 from .pool import ProviderPool
 from .priority import DEFAULT_ROLE_PRIORITY, Priority
@@ -47,12 +47,28 @@ class ModelGateway:
         params = existing.params if existing is not None else {}
         self._roles[role] = RoleSpec(model=model, params=params)
 
+    def roles_view(self) -> dict[str, RoleSpec]:
+        """A read-only snapshot of the current role→spec mapping (for introspection / the UI)."""
+        return dict(self._roles)
+
     def _role(self, role: str) -> RoleSpec:
         spec = self._roles.get(role)
         if spec is None:
             raise ModelGatewayError(
                 f"no model configured for role {role!r}; known roles: {sorted(self._roles)}"
             )
+        if spec.model == AUTO_MODEL:
+            # The brain resolves `auto` to a concrete model once inventory lands (DESIGN §4); until
+            # then, stop-gap to any reachable model so a turn never fails on an unresolved role.
+            want_embed = role == "embed"
+            picks = [
+                m for m in self._pool.available_models() if ("embed" in m.lower()) == want_embed
+            ]
+            if not picks:
+                raise ModelGatewayError(
+                    f"role {role!r} is set to 'auto' but no suitable model is reachable yet"
+                )
+            return RoleSpec(model=picks[0], params=spec.params)
         return spec
 
     def _priority(self, role: str, override: Priority | None) -> Priority:

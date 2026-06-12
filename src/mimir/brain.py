@@ -25,7 +25,14 @@ from .cognition.bake import bake
 from .cognition.benchmark import FleetBenchmarkResult
 from .cognition.benchmark import benchmark_fleet as _benchmark_fleet
 from .cognition.council import CouncilResult, deliberate
-from .cognition.fleet import FleetScanResult, fleet_report, recommend_roles, scan_fleet
+from .cognition.fleet import (
+    FleetScanResult,
+    fleet_model_pool,
+    fleet_report,
+    recommend_roles,
+    resolve_auto_model,
+    scan_fleet,
+)
 from .cognition.graph import render_triples, retrieve_connected
 from .cognition.identity import (
     current_anchors,
@@ -43,7 +50,7 @@ from .cognition.working_memory import (
     record_exchange,
     synthesize_working_memory,
 )
-from .config import BackendConfig, Config, ProviderSpec, load_config
+from .config import AUTO_MODEL, BackendConfig, Config, ProviderSpec, load_config
 from .context.build import ContextBundle, build_context
 from .embed.base import Embedder, EmbeddingMode
 from .embed.endpoint import EndpointEmbedder, NullEmbedder
@@ -61,10 +68,12 @@ from .storage.gateway import StorageGateway
 from .storage.models import Memory, MemoryKind, Procedure
 from .storage.repo import (
     bump_procedure_uses,
+    disabled_models,
     latest_self_model,
     latest_sentinel_note,
     list_memories,
     record_access,
+    set_model_enabled,
 )
 
 log = logging.getLogger("mimir")
@@ -120,6 +129,9 @@ class Mimir:
     def __init__(self, config: Config, *, provider: Provider | None = None) -> None:
         config.validate()
         self.config = config
+        # Roles the user left to automatic selection (model = "auto" or omitted) — resolved from
+        # the fleet once inventory is available, and re-resolved on rescan (DESIGN §4).
+        self._auto_roles = {r for r, s in config.roles.items() if s.model == AUTO_MODEL}
         self._storage = StorageGateway(config.storage_path)
         if config.backend is not None and provider is None:
             # A discovered/declared Ollama fleet: build a model-aware pool, then inventory it and
@@ -150,13 +162,44 @@ class Mimir:
         if config.identity_anchors:
             establish_identity(self._storage, config.identity_anchors)
 
+        # Resolve `auto` roles now for the local/single-provider path (inventory is ready). The
+        # fleet path resolves in _init_fleet once its background inventory lands; until then the
+        # gateway stop-gaps `auto` to any reachable model so turns never fail (DESIGN §4).
+        self._resolve_auto_roles()
+
     def _init_fleet(self, refresh_interval_s: float) -> None:
         """Inventory the fleet once, then start the active-health prober (off the boot path)."""
         try:
             self._model.refresh_inventory()
         except Exception as exc:  # never let fleet init crash the brain
             log.warning("fleet: initial inventory failed: %s", exc)
+        self._resolve_auto_roles()
         self._model.start_prober(refresh_interval_s)
+
+    def _resolve_auto_roles(self) -> dict[str, str]:
+        """Bind every `auto` role to a concrete model from the current fleet (DESIGN §4).
+
+        No-op (returns ``{}``) until at least one model is reachable; safe to call repeatedly —
+        re-resolution simply re-picks the current best, so a freshly benchmarked or newly
+        disabled model is reflected on the next scan.
+        """
+        if not self._auto_roles:
+            return {}
+        available = set(self._model.available_models())
+        if not available:
+            return {}
+        disabled = disabled_models(self._storage)
+        resolved: dict[str, str] = {}
+        for role in self._auto_roles:
+            model = resolve_auto_model(
+                self._storage, role, available=available, disabled=disabled
+            )
+            if model is not None:
+                self._model.set_role_model(role, model)
+                resolved[role] = model
+        if resolved:
+            log.info("fleet: auto-resolved role(s) %s", resolved)
+        return resolved
 
     @classmethod
     def from_config(cls, path: str) -> Mimir:
@@ -453,7 +496,9 @@ class Mimir:
     def scan_fleet(self) -> FleetScanResult:
         """Inventory the model fleet (nodes + models) and rebuild the catalogue (DESIGN §5)."""
         self._model.refresh_inventory()
-        return scan_fleet(self._model, self._storage)
+        result = scan_fleet(self._model, self._storage)
+        self._resolve_auto_roles()  # a rescan may surface a better model for an auto role
+        return result
 
     def fleet_report(self) -> dict[str, Any]:
         """The fleet catalogue as a per-node summary, with per-role recommendations."""
@@ -461,7 +506,30 @@ class Mimir:
 
     def fleet_recommendations(self) -> dict[str, Any]:
         """Best model per role from the benchmarked catalogue (recommend-only; DESIGN §4)."""
-        return recommend_roles(self._storage)
+        return recommend_roles(self._storage, disabled=disabled_models(self._storage))
+
+    def set_model_enabled(self, model: str, enabled: bool) -> dict[str, str]:
+        """Enable or disable a model for `auto` routing (a user's bias veto; DESIGN §4).
+
+        Disabling a model excludes it from every recommendation and `auto` resolution; if it was
+        serving an auto role, that role is immediately re-resolved to the next-best model. Returns
+        the auto roles that moved as a result.
+        """
+        set_model_enabled(self._storage, model, enabled)
+        return self._resolve_auto_roles()
+
+    def model_pool(self) -> dict[str, Any]:
+        """The fleet's models with qualification, speed, size, nodes, and enable/disable state.
+
+        The data behind the web UI's Model Pool tab: one row per distinct model, a ``passed`` flag
+        (cleared the role-gating quality + discipline floor), and which roles it currently serves.
+        """
+        return fleet_model_pool(
+            self._storage,
+            disabled=disabled_models(self._storage),
+            active_roles={r: s.model for r, s in self._model.roles_view().items()},
+            auto_roles=self._auto_roles,
+        )
 
     def apply_recommendations(self) -> dict[str, str]:
         """Re-point the live roles at their recommended models. Returns what changed.
@@ -470,7 +538,7 @@ class Mimir:
         features exist. Recommendations come only from benchmarked models, so this never routes to
         an untested model. Updates routing in memory — persist by editing your ``mimir.toml``.
         """
-        recs = recommend_roles(self._storage)
+        recs = recommend_roles(self._storage, disabled=disabled_models(self._storage))
         applied: dict[str, str] = {}
         for role in ("chat", "bake", "reasoning"):
             rec = recs.get(role)

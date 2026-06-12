@@ -137,6 +137,23 @@ Each role entry carries its tuned params (context window, temperature, output bu
 constraint worth knowing: the context-window size must stay consistent across callers of the same
 warm model, or you trigger an expensive reload — so it belongs in config, not code.
 
+**Automatic selection (`model = "auto"`).** A role's model may be pinned, or left to the system: a
+`model` of `"auto"` (or omitted) makes the brain choose from the fleet — *as automatic as possible,
+but configurable.* Resolution is a strict hierarchy, each level vetoing models the user has disabled
+and anything the pool can't currently reach:
+
+1. **explicit pin** — a named model always wins; the system never overrides the operator;
+2. **measured-best** — the benchmarked, role-gated recommendation (quality + the discipline floor
+   for identity roles), so it future-proofs itself as new models are benchmarked;
+3. **approved-family heuristic** — before any benchmark, a curated-family model near the role's
+   ideal size (approved models win the first round);
+4. **any reachable model** — last resort, so `auto` always yields something runnable.
+
+A user who distrusts a model **disables** it (a bias veto) and resolution skips it everywhere. The
+default is **local-only** — the LAN fleet is opt-in (`[backend] lan_backend`), never polled unless
+asked. This serves the spread of users — one powerful machine, an edge node borrowing LAN GPUs, or
+no Ollama at all — from a sensible zero-config default, with every level overridable.
+
 ### Council = auto-discovery, scales to the machine
 The council uses **no fixed model list**. On start it asks the provider pool what's actually
 installed, filters to eligible models, and assigns personas across them. **1 eligible model** →

@@ -158,6 +158,19 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "ALTER TABLE model_catalogue ADD COLUMN discipline REAL",
         ],
     ),
+    (
+        10,
+        [
+            # Per-model user preference for automatic routing (DESIGN §4): a model is enabled by
+            # default; a user who distrusts one disables it here and `auto` resolution skips it.
+            # The catalogue is rebuilt every scan, so this preference lives separately and survives.
+            "CREATE TABLE model_prefs ("
+            " model TEXT PRIMARY KEY,"
+            " enabled INTEGER NOT NULL DEFAULT 1,"
+            " updated_at REAL NOT NULL DEFAULT 0"
+            ")",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -223,4 +236,5 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
         "coherence",
         "discipline",
     },
+    "model_prefs": {"model", "enabled", "updated_at"},
 }
