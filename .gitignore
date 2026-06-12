@@ -18,6 +18,9 @@ ENV/
 .env
 *.local
 
+# Local deployment config (the committed template is mimir.toml.example)
+/mimir.toml
+
 # Databases / runtime data (the brain's state is never committed)
 *.db
 *.sqlite
