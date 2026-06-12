@@ -47,6 +47,11 @@ from .storage.repo import (
 
 log = logging.getLogger("mimir.server")
 
+# A client that closes its socket mid-response (reload, navigation, cancelled fetch). On Windows
+# this surfaces as ConnectionAbortedError [WinError 10053]; elsewhere as broken-pipe/reset. Benign —
+# never a server fault, so it must not log a stack trace.
+_CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
+
 
 class MimirHTTPServer(ThreadingHTTPServer):
     """A threading HTTP server that holds the shared brain and serializes access to it."""
@@ -78,11 +83,17 @@ class _Handler(BaseHTTPRequestHandler):
         log.info("%s - %s", self.address_string(), fmt % args)
 
     def _send(self, status: int, body: bytes, content_type: str) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except _CLIENT_GONE:
+            # The browser closed the connection before we finished writing (a reload, a navigation,
+            # or a cancelled fetch). Benign — not a server fault. Don't spew a traceback.
+            log.debug("client disconnected before response sent: %s", self.path)
+            self.close_connection = True
 
     def _send_json(self, obj: Any, status: int = 200) -> None:
         self._send(status, json.dumps(obj).encode("utf-8"), "application/json; charset=utf-8")
@@ -136,6 +147,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": "not found"}, status=404)
         except ValueError as exc:  # bad query params
             self._send_json({"error": str(exc)}, status=400)
+        except _CLIENT_GONE:  # client vanished mid-request — benign, not a fault
+            return
         except Exception as exc:  # never leak a stack to the client; log loud (DESIGN §10)
             log.exception("GET %s failed", self.path)
             self._send_json({"error": str(exc)}, status=500)
@@ -177,6 +190,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"error": str(exc)}, status=400)
         except MimirError as exc:
             self._send_json({"error": str(exc)}, status=400)
+        except _CLIENT_GONE:  # client vanished mid-request — benign, not a fault
+            return
         except Exception as exc:
             log.exception("POST %s failed", self.path)
             self._send_json({"error": str(exc)}, status=500)
@@ -264,7 +279,7 @@ class _Handler(BaseHTTPRequestHandler):
                         emit("done", {"introspect": stop.value or {}})
                         break
                     emit("token", {"text": token})
-        except (BrokenPipeError, ConnectionResetError):
+        except _CLIENT_GONE:
             return  # the client went away mid-stream; the turn is interrupted
         except Exception as exc:
             log.exception("turn stream failed")
