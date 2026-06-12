@@ -8,6 +8,13 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Fixed
+- **Benchmark only ever tested the 8 smallest models — so a 4B "won" every role while the user's
+  much better 26B model was never benchmarked at all.** The default capped the run at the 8 smallest
+  approved models ≤30B, smallest-first, so mid/large models (gemma3:12b, gemma4:26b, …) were silently
+  excluded and the recommendations were dominated by tiny models. Now the benchmark covers **all**
+  approved models up to a **user-set size cap** (`[backend] max_model_size_b`, default 30B — only the
+  user knows their hardware), and reports coverage ("benchmarked N of M; K skipped as too large") in
+  the UI and logs. Added `[backend] max_latency_s` (routing latency target; wired into routing next).
 - **Benchmark looked frozen / gave no progress.** The fleet benchmark ran synchronously while
   holding the brain lock, so the entire web UI (including header polling) blocked for the multi-minute
   run, and nothing logged per model — it was impossible to tell a running benchmark from a broken one.

@@ -289,6 +289,8 @@ class FleetBenchmarkResult:
     benchmarked: int
     judges_ok: bool
     results: list[ModelBenchmark]
+    eligible: int = 0          # approved, non-embedding models in the catalogue (any size)
+    skipped_too_big: int = 0   # eligible models skipped because they exceed max_params_b
 
 
 def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True) -> ModelBenchmark:
@@ -371,13 +373,17 @@ def benchmark_fleet(
     """
     sizes: dict[str, float] = {}
     nodes_with: dict[str, list[str]] = {}
+    eligible: set[str] = set()   # approved, non-embedding (any size) — for coverage reporting
+    too_big: set[str] = set()    # eligible but over the size cap
     for entry in list_catalogue(storage):
         nodes_with.setdefault(entry.model, []).append(entry.node)
         if "embed" in entry.model.lower():
             continue
         if only_approved and not is_approved(entry.family):
             continue
+        eligible.add(entry.model)
         if max_params_b and entry.params_b and entry.params_b > max_params_b:
+            too_big.add(entry.model)
             continue
         sizes.setdefault(entry.model, entry.params_b)
     models = sorted(sizes, key=lambda m: sizes[m])[:limit]  # smallest (fastest) first
@@ -415,5 +421,11 @@ def benchmark_fleet(
             if elapsed is not None:
                 update_catalogue_speed(storage, node, model_name, elapsed)
         results.append(bench)
-    log.info("benchmark: scored %d model(s); judges_ok=%s", len(results), judges_ok)
-    return FleetBenchmarkResult(benchmarked=len(results), judges_ok=judges_ok, results=results)
+    log.info(
+        "benchmark: scored %d of %d eligible model(s); %d skipped as > %.0fB; judges_ok=%s",
+        len(results), len(eligible), len(too_big), max_params_b, judges_ok,
+    )
+    return FleetBenchmarkResult(
+        benchmarked=len(results), judges_ok=judges_ok, results=results,
+        eligible=len(eligible), skipped_too_big=len(too_big),
+    )

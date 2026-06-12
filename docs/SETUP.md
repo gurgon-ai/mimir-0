@@ -240,10 +240,14 @@ model.
 
 ```toml
 [backend]
-lan_backend = true             # scan the LAN for Ollama nodes
+lan_backend = true             # scan the LAN for Ollama nodes (localhost is ALWAYS included)
 # subnet = "192.168.1.0/24"    # omit to auto-detect your local /24
 # nodes = ["192.168.1.50:11434"]  # optional explicit nodes (always included)
 refresh_interval_s = 60        # active health/inventory refresh
+max_model_size_b = 30          # only YOU know your hardware: benchmark/route models up to this many
+                               # billion params (raise on a big GPU, lower on a Pi). Bigger = skipped.
+max_latency_s = 0              # routing latency target in seconds; 0 = off. When set, models measured
+                               # slower than this are excluded from auto-routing (set low for "instant").
 ```
 
 On boot Mimir scans the subnet for `:11434`, inventories each node's models (family, weight,
