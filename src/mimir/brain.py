@@ -56,6 +56,7 @@ from .model.provider import Provider
 from .model.providers.mock import MockProvider
 from .model.providers.ollama import OllamaProvider
 from .retrieval.hybrid import retrieve
+from .sanitize import StreamTagStripper, strip_epistemic_tags
 from .storage.gateway import StorageGateway
 from .storage.models import Memory, MemoryKind, Procedure
 from .storage.repo import (
@@ -195,13 +196,16 @@ class Mimir:
             procedures=procedures,
         )
 
-        # 3. Generate the reply through the model gateway.
-        reply = self._model.chat(
-            "chat",
-            [
-                {"role": "system", "content": bundle.prompt},
-                {"role": "user", "content": text},
-            ],
+        # 3. Generate the reply through the model gateway. Strip any internal epistemic tags the
+        #    model echoed (small models mimic the [tier=...; source=...] style) before it lands.
+        reply = strip_epistemic_tags(
+            self._model.chat(
+                "chat",
+                [
+                    {"role": "system", "content": bundle.prompt},
+                    {"role": "user", "content": text},
+                ],
+            )
         )
 
         # 4. Side effects through the storage gateway: relevance bookkeeping + bake.
@@ -263,10 +267,19 @@ class Mimir:
             {"role": "user", "content": text},
         ]
 
+        # Strip internal epistemic tags as we stream, so neither the live display nor the stored
+        # reply carries them (a tag may straddle two deltas, hence the stateful stripper).
+        stripper = StreamTagStripper()
         chunks: list[str] = []
         for delta in self._model.chat_stream("chat", messages):
-            chunks.append(delta)
-            yield delta
+            clean = stripper.feed(delta)
+            if clean:
+                chunks.append(clean)
+                yield clean
+        tail = stripper.flush()
+        if tail:
+            chunks.append(tail)
+            yield tail
         reply = "".join(chunks)
 
         record_access(self._storage, bundle.retrieved_ids)
