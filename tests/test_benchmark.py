@@ -47,6 +47,32 @@ def test_is_approved_matches_families() -> None:
     assert not is_approved("nomic-bert-moe")
 
 
+def test_smallest_first_and_size_cap(brain: Mimir) -> None:
+    # mock fleet sizes: mock-a 3B, mock-b 8B, mock-c 27B. A 10B cap keeps only a + b.
+    result = brain.benchmark_fleet(only_approved=False, judge=False, max_params_b=10.0)
+    assert {b.model for b in result.results} == {"mock-a", "mock-b"}  # mock-c (27B) skipped
+    # benchmarked smallest-first
+    assert result.results[0].model == "mock-a"
+
+
+def test_recommendations_pick_per_role(brain: Mimir) -> None:
+    from mimir.storage.repo import update_catalogue_scores
+
+    brain.scan_fleet()  # catalogue has mock-a/b/c
+    # craft scores: mock-b is high-quality but slow; mock-a is decent and fast.
+    update_catalogue_scores(
+        brain._storage, "mock-a", return_time=0.5, quality=0.7,
+        talk=0.9, tools=0.6, code=0.6, coherence=None,
+    )
+    update_catalogue_scores(
+        brain._storage, "mock-b", return_time=5.0, quality=0.95,
+        talk=1.0, tools=0.9, code=0.9, coherence=None,
+    )
+    recs = brain.fleet_recommendations()
+    assert recs["bake"]["model"] == "mock-b"  # bake prefers quality → the high-quality model
+    assert recs["chat"] is not None  # chat is balanced; either could win, just must resolve
+
+
 def test_benchmark_fleet_writes_scores(brain: Mimir) -> None:
     # mock fleet families (alpha/beta/gamma) aren't on the allowlist → benchmark all; mock judges
     # can't return a number, so the canary fails and coherence is skipped (judges_ok False).

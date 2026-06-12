@@ -25,7 +25,7 @@ from .cognition.bake import bake
 from .cognition.benchmark import FleetBenchmarkResult
 from .cognition.benchmark import benchmark_fleet as _benchmark_fleet
 from .cognition.council import CouncilResult, deliberate
-from .cognition.fleet import FleetScanResult, fleet_report, scan_fleet
+from .cognition.fleet import FleetScanResult, fleet_report, recommend_roles, scan_fleet
 from .cognition.graph import render_triples, retrieve_connected
 from .cognition.identity import (
     current_anchors,
@@ -430,20 +430,35 @@ class Mimir:
         return scan_fleet(self._model, self._storage)
 
     def fleet_report(self) -> dict[str, Any]:
-        """The fleet catalogue as a per-node summary."""
+        """The fleet catalogue as a per-node summary, with per-role recommendations."""
         return fleet_report(self._storage)
 
+    def fleet_recommendations(self) -> dict[str, Any]:
+        """Best model per role from the benchmarked catalogue (recommend-only; DESIGN §4)."""
+        return recommend_roles(self._storage)
+
     def benchmark_fleet(
-        self, *, only_approved: bool = True, limit: int = 8, judge: bool = True
+        self,
+        *,
+        only_approved: bool = True,
+        limit: int = 8,
+        max_params_b: float = 30.0,
+        judge: bool = True,
     ) -> FleetBenchmarkResult:
         """Scan + benchmark the fleet's models (speed + capability + coherence) (DESIGN §4).
 
-        Re-scans first so the catalogue is current, then scores each distinct model and writes the
-        results back. Expensive — many model calls — so it is on-demand (this, the web UI, or cron).
+        Re-scans first so the catalogue is current, then scores each distinct model (smallest-first,
+        skipping models over ``max_params_b``) and writes the results back. Expensive — many model
+        calls — so it is on-demand (this, the web UI, or cron).
         """
         self.scan_fleet()
         return _benchmark_fleet(
-            self._model, self._storage, only_approved=only_approved, limit=limit, judge=judge
+            self._model,
+            self._storage,
+            only_approved=only_approved,
+            limit=limit,
+            max_params_b=max_params_b,
+            judge=judge,
         )
 
     def deliberate(self, question: str, user: str | None = None) -> CouncilResult:

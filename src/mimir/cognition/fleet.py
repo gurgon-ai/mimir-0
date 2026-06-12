@@ -53,6 +53,73 @@ def scan_fleet(
     return FleetScanResult(nodes=nodes, models=len(entries))
 
 
+# Each role's required capability and whether it prefers speed, quality, or a balance.
+# chat/bake/reasoning are the live roles; tools/code are forward-looking (DESIGN §9 extension
+# points) — recommended now so you know which model to use when you enable them.
+ROLE_NEEDS: dict[str, tuple[str, str]] = {
+    "chat": ("talk", "balanced"),
+    "bake": ("talk", "quality"),
+    "reasoning": ("talk", "quality"),
+    "tools": ("tools", "quality"),
+    "code": ("code", "quality"),
+}
+_CAPABILITY_FLOOR = 0.5
+
+
+def recommend_roles(storage: StorageGateway) -> dict[str, dict[str, Any] | None]:
+    """From the benchmarked catalogue, recommend the best model for each role (DESIGN §4).
+
+    Recommend-only — it does not reassign roles. ``None`` for a role means nothing benchmarked
+    clears the capability floor yet (run a benchmark first).
+    """
+    by_model: dict[str, dict[str, Any]] = {}
+    for entry in list_catalogue(storage):
+        slot = by_model.setdefault(
+            entry.model,
+            {
+                "family": entry.family,
+                "quality": entry.quality,
+                "talk": entry.talk,
+                "tools": entry.tools,
+                "code": entry.code,
+                "coherence": entry.coherence,
+                "return_time": entry.return_time,
+                "nodes": [],
+            },
+        )
+        slot["nodes"].append(entry.node)
+
+    recommendations: dict[str, dict[str, Any] | None] = {}
+    for role, (capability, prefer) in ROLE_NEEDS.items():
+        candidates = [
+            (name, data)
+            for name, data in by_model.items()
+            if data["quality"] is not None and (data.get(capability) or 0.0) >= _CAPABILITY_FLOOR
+        ]
+        if not candidates:
+            recommendations[role] = None
+            continue
+        if prefer == "fast":
+            name, data = min(candidates, key=lambda c: c[1]["return_time"] or 1e9)
+        elif prefer == "quality":
+            name, data = max(
+                candidates, key=lambda c: (c[1]["quality"], -(c[1]["return_time"] or 1e9))
+            )
+        else:  # balanced: favour quality, lightly penalise slowness
+            name, data = max(
+                candidates, key=lambda c: c[1]["quality"] - 0.1 * (c[1]["return_time"] or 0.0)
+            )
+        recommendations[role] = {
+            "model": name,
+            "family": data["family"],
+            "quality": data["quality"],
+            "return_time": data["return_time"],
+            "nodes": data["nodes"],
+            "prefer": prefer,
+        }
+    return recommendations
+
+
 def fleet_report(storage: StorageGateway) -> dict[str, Any]:
     """The catalogue as a per-node summary (the 'report' the operator sees)."""
     entries = list_catalogue(storage)
@@ -68,4 +135,9 @@ def fleet_report(storage: StorageGateway) -> dict[str, Any]:
                 "quality": entry.quality,
             }
         )
-    return {"nodes": len(by_node), "models": len(entries), "by_node": by_node}
+    return {
+        "nodes": len(by_node),
+        "models": len(entries),
+        "by_node": by_node,
+        "recommendations": recommend_roles(storage),
+    }

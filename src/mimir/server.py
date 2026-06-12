@@ -826,6 +826,20 @@ async function loadFleet() {
     const up = (data.stats && data.stats.nodes_up) || 0;
     $("fleetMsg").textContent = `${data.nodes} node(s) catalogued, ${up} up, ${data.models} models. Scan to refresh.`;
     const list = $("fleetList"); list.innerHTML = "";
+    const recs = data.recommendations || {};
+    const recRoles = Object.entries(recs).filter(([_r, v]) => v);
+    if (recRoles.length) {
+      const box = document.createElement("div"); box.className = "selfmodel";
+      box.innerHTML = "<b>Recommendations</b>";
+      recRoles.forEach(([role, r]) => {
+        const line = document.createElement("div"); line.style.marginTop = "5px";
+        const q = (r.quality != null) ? `q${r.quality}` : "";
+        const t = (r.return_time != null) ? ` · ${r.return_time}s` : "";
+        line.textContent = `${role} → ${r.model} (${q}${t}, prefers ${r.prefer}) on ${r.nodes[0]}`;
+        box.appendChild(line);
+      });
+      list.appendChild(box);
+    }
     Object.entries(data.by_node || {}).forEach(([node, models]) => {
       const d = document.createElement("div"); d.className = "mem";
       const h = document.createElement("div"); h.className = "text"; h.textContent = `${node}  (${models.length} models)`; d.appendChild(h);
