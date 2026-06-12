@@ -216,6 +216,17 @@ def evaluate_epistemics(chat_fn: ChatFn, *, model: str = "", samples: int = 1) -
                            flat_score=round(f, 3), lift=round(s - f, 3))
 
 
+def score_epistemic_competence(chat_fn: ChatFn, *, samples: int = 2) -> float:
+    """How well a model exploits the epistemic framework — the structured arm only (no flat
+    baseline). This is the qualification signal (DESIGN §4): the fraction of probes passed when the
+    model is given the real tiered/provenance/gated context. A model that ignores evidence tiers or
+    confabulates on thin evidence scores low here and is barred from the identity roles.
+    """
+    samples = max(1, samples)
+    scores = [_run_arm(chat_fn, structured_prompt(p), p, samples) for p in PROBES]
+    return sum(scores) / len(scores)
+
+
 def run_epistemics(
     model: ModelGateway, model_names: list[str], *, samples: int = 3
 ) -> list[EpistemicResult]:

@@ -162,6 +162,7 @@ class CatalogueEntry:
     code: float | None = None
     coherence: float | None = None
     discipline: float | None = None
+    epistemics: float | None = None
     scanned_at: float = 0.0
 
 
