@@ -14,6 +14,23 @@ thin evidence instead of confabulating.
 > hardened or tuned** — APIs and schema may change. Setup lives in [`docs/SETUP.md`](docs/SETUP.md);
 > see [`CHANGELOG.md`](CHANGELOG.md) for what's in `0.1.0`.
 
+## What's included vs. what you provide
+
+This repo ships **only code** — everything in it is ours, under Apache-2.0. Anything that *runs a
+model* is yours to install; Mimir talks to it over a local endpoint and never bundles it. That
+keeps the repo fully distributable and your install footprint minimal.
+
+| ✅ Included (in this repo) | 🔧 You provide (install yourself) |
+|---|---|
+| The library + reference web UI — **pure Python, zero runtime dependencies** | **[Ollama](https://ollama.com)** (or any chat/embeddings endpoint) — for real model inference |
+| **SQLite** storage — bundled with Python; no install, no server, no daemon | **Open model(s)** — `ollama pull` whatever you like (each under its own license) |
+| A deterministic **mock provider + stdlib embedder** so the core runs with *nothing* installed | *(optional)* `pypdf` — only for PDF ingestion (the `[documents]` extra) |
+
+**Core runtime dependencies: none.** Python's standard library (including SQLite) is the entire
+floor — the mock provider and bootstrap embedder run the full acceptance loop on Python alone. You
+only need Ollama + a model when you want a real LLM conversation. Nothing here is something you
+*can't* freely use or redistribute.
+
 ## Try it in 10 seconds (zero account, no model server)
 
 ```bash
