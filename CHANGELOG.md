@@ -29,6 +29,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   you know, name the gap, ask one question) and is told not to narrate its source count.
 
 ### Added
+- **Automatic model selection (`model = "auto"`).** A role's `model` can be pinned, set to `"auto"`,
+  or omitted (→ auto). Auto resolves from the fleet by a strict hierarchy — **pin > measured-best
+  (benchmarked + role-gated) > approved-family heuristic > any reachable model** — re-resolving on
+  every rescan so a freshly benchmarked model is picked up. Users can **disable** a model (a bias
+  veto) via `brain.set_model_enabled(...)` and it's skipped everywhere; the gateway stop-gaps an
+  unresolved `auto` role to any reachable model so a turn never fails while the fleet is still
+  inventorying. Default stays **local-only** (the LAN fleet is opt-in). New `model_prefs` table
+  (schema v10) and a `brain.model_pool()` view (qualified ✓, speed, size, nodes, enabled, roles
+  served) for the forthcoming Model Pool UI.
 - **`discipline` capability in the fleet IQ test.** The benchmark battery now scores a fourth
   dimension: does the model honor prohibitions, above all **not reproducing the internal
   `[tier=...; source=...]` scaffolding it is shown**. The probe replicates the *production* condition

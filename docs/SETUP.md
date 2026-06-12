@@ -308,10 +308,13 @@ min_match = 0.3                 # minimum trigger relevance before a habit fires
 type = "ollama"                 # "ollama" | "mock"
 host = "http://localhost:11434" # ollama only
 
-# One table per cognitive role. `model` is required; everything else is passed to the provider
-# as tuned params (temperature, num_ctx, max_tokens → Ollama's num_predict, ...).
+# One table per cognitive role. `model` is a model name, or "auto" (or omit it) to let Mimir
+# pick from the fleet — measured-best if benchmarked, else an approved-family model, re-chosen on
+# each scan. A pin always wins; disable models you distrust from the web UI (or
+# brain.set_model_enabled(...)) and `auto` skips them. Everything else is passed to the provider as
+# tuned params (temperature, num_ctx, max_tokens → Ollama's num_predict, ...).
 [roles.chat]
-model = "llama3.1:8b"
+model = "llama3.1:8b"   # or: model = "auto"
 temperature = 0.7
 num_ctx = 8192
 

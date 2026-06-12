@@ -461,6 +461,34 @@ def update_catalogue_speed(
     gateway.submit(_write)
 
 
+# -- model preferences (user enable/disable for `auto` routing) -----------------------
+
+
+def set_model_enabled(gateway: StorageGateway, model: str, enabled: bool) -> None:
+    """Record a user's enable/disable choice for a model (upsert). Disabled → `auto` skips it."""
+    now = time.time()
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "INSERT INTO model_prefs (model, enabled, updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(model) DO UPDATE SET "
+            "enabled=excluded.enabled, updated_at=excluded.updated_at",
+            (model, 1 if enabled else 0, now),
+        )
+
+    gateway.submit(_write)
+
+
+def disabled_models(gateway: StorageGateway) -> set[str]:
+    """The set of models the user has explicitly disabled (everything else is enabled)."""
+
+    def _read(conn: sqlite3.Connection) -> set[str]:
+        rows = conn.execute("SELECT model FROM model_prefs WHERE enabled = 0").fetchall()
+        return {r["model"] for r in rows}
+
+    return gateway.read(_read)
+
+
 def list_catalogue(gateway: StorageGateway) -> list[CatalogueEntry]:
     def _read(conn: sqlite3.Connection) -> list[CatalogueEntry]:
         rows = conn.execute(

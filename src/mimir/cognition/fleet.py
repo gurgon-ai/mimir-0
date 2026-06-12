@@ -17,6 +17,7 @@ from ..model.gateway import ModelGateway
 from ..storage.gateway import StorageGateway
 from ..storage.models import CatalogueEntry
 from ..storage.repo import list_catalogue, replace_catalogue
+from .benchmark import is_approved
 
 log = logging.getLogger("mimir.fleet")
 
@@ -69,14 +70,20 @@ ROLE_NEEDS: dict[str, tuple[str, str]] = {
 _CAPABILITY_FLOOR = 0.5
 
 
-def recommend_roles(storage: StorageGateway) -> dict[str, dict[str, Any] | None]:
+def recommend_roles(
+    storage: StorageGateway, *, disabled: set[str] | None = None
+) -> dict[str, dict[str, Any] | None]:
     """From the benchmarked catalogue, recommend the best model for each role (DESIGN §4).
 
     Recommend-only — it does not reassign roles. ``None`` for a role means nothing benchmarked
-    clears the capability floor yet (run a benchmark first).
+    clears the capability floor yet (run a benchmark first). ``disabled`` models (a user's
+    enable/disable choices) are excluded from every recommendation.
     """
+    disabled = disabled or set()
     by_model: dict[str, dict[str, Any]] = {}
     for entry in list_catalogue(storage):
+        if entry.model in disabled:
+            continue
         slot = by_model.setdefault(
             entry.model,
             {
@@ -130,6 +137,119 @@ def recommend_roles(storage: StorageGateway) -> dict[str, dict[str, Any] | None]
             "prefer": prefer,
         }
     return recommendations
+
+
+# Per-role ideal size (params_b) for the pre-benchmark heuristic — a defensible first guess only;
+# measured scores override it the moment a benchmark runs (DESIGN §4, "future-proof"). chat and
+# reasoning carry identity, so favour a mid-size capable model; bake (extraction) can run smaller.
+_ROLE_IDEAL_SIZE_B: dict[str, float] = {"chat": 12.0, "reasoning": 12.0, "bake": 7.0}
+
+
+def resolve_auto_model(
+    storage: StorageGateway,
+    role: str,
+    *,
+    available: set[str],
+    disabled: set[str] | None = None,
+) -> str | None:
+    """Resolve a role's model for ``auto`` routing (DESIGN §4) — best model with no explicit pin.
+
+    Hierarchy, each level vetoing disabled models and anything the pool can't currently reach:
+
+    1. **measured-best** — the benchmarked, role-gated recommendation (quality + the discipline
+       floor for identity roles). Measured scores always win, so the system future-proofs itself
+       as new models appear and get benchmarked.
+    2. **approved-family heuristic** — before any benchmark exists, prefer a curated-family model
+       near the role's ideal size (approved models win the first round).
+    3. **any reachable enabled model** — last resort, so ``auto`` always yields something runnable.
+
+    Returns a concrete model name, or ``None`` if nothing is reachable yet.
+    """
+    disabled = disabled or set()
+
+    def usable(name: str) -> bool:
+        return name in available and name not in disabled and "embed" not in name.lower()
+
+    # 1. Measured-best (already gated + disabled-filtered by recommend_roles).
+    rec = recommend_roles(storage, disabled=disabled).get(role)
+    if rec and usable(rec["model"]):
+        return str(rec["model"])
+
+    # 2/3. Heuristic over the catalogue's discovery fields (present even before benchmarking).
+    by_model: dict[str, CatalogueEntry] = {}
+    for entry in list_catalogue(storage):
+        if usable(entry.model):
+            by_model.setdefault(entry.model, entry)
+    pool = list(by_model.values())
+    if pool:
+        ideal = _ROLE_IDEAL_SIZE_B.get(role, 12.0)
+        approved = [e for e in pool if is_approved(e.family)]
+        ranked = approved or pool  # approved win the first round; any model if none are approved
+        # closest to the role's ideal size; tie-break toward the larger (more capable) model.
+        best = min(ranked, key=lambda e: (abs((e.params_b or ideal) - ideal), -(e.params_b or 0.0)))
+        return best.model
+
+    # Catalogue not built yet (no scan) but the pool can reach models → pick deterministically.
+    reachable = sorted(n for n in available if usable(n))
+    return reachable[0] if reachable else None
+
+
+def fleet_model_pool(
+    storage: StorageGateway,
+    *,
+    disabled: set[str] | None = None,
+    active_roles: dict[str, str] | None = None,
+    auto_roles: set[str] | None = None,
+) -> dict[str, Any]:
+    """One row per distinct chat model: discovery + scores + a ``passed`` flag + state (DESIGN §4).
+
+    The data behind the web UI's Model Pool tab. ``passed`` means the model was benchmarked and
+    cleared the qualification floor; ``roles`` is which roles it currently serves; ``enabled``
+    reflects the user's veto. Embedding models are omitted (they aren't routable chat models).
+    """
+    disabled = disabled or set()
+    active_roles = active_roles or {}
+    auto_roles = auto_roles or set()
+    serving: dict[str, list[str]] = {}
+    for role, model in active_roles.items():
+        serving.setdefault(model, []).append(role)
+
+    rows: dict[str, dict[str, Any]] = {}
+    for e in list_catalogue(storage):
+        if "embed" in e.model.lower():
+            continue
+        slot = rows.get(e.model)
+        if slot is None:
+            rows[e.model] = slot = {
+                "model": e.model,
+                "family": e.family,
+                "params_b": e.params_b,
+                "quality": e.quality,
+                "discipline": e.discipline,
+                "return_time": e.return_time,
+                "approved": is_approved(e.family),
+                "benchmarked": e.quality is not None,
+                "nodes": [],
+            }
+        slot["nodes"].append(e.node)
+        if e.return_time is not None and (
+            slot["return_time"] is None or e.return_time < slot["return_time"]
+        ):
+            slot["return_time"] = e.return_time
+
+    models: list[dict[str, Any]] = []
+    for model, slot in rows.items():
+        slot["enabled"] = model not in disabled
+        slot["passed"] = slot["quality"] is not None and slot["quality"] >= _CAPABILITY_FLOOR
+        slot["roles"] = sorted(serving.get(model, []))
+        models.append(slot)
+    # Best first: enabled, then highest quality, then fastest.
+    models.sort(key=lambda s: (not s["enabled"], -(s["quality"] or -1.0), s["return_time"] or 1e9))
+    return {
+        "models": models,
+        "auto_roles": sorted(auto_roles),
+        "active_roles": active_roles,
+    }
 
 
 def fleet_report(storage: StorageGateway) -> dict[str, Any]:

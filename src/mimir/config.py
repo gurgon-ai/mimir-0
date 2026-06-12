@@ -23,6 +23,11 @@ from .prompts import DEFAULT_IDENTITY
 # Roles the v0 spine cannot run without. `embed` is required only in endpoint mode.
 REQUIRED_ROLES = ("chat", "bake", "reasoning")
 
+# Sentinel a role's `model` takes when the user wants automatic selection (DESIGN §4): the brain
+# resolves it from the fleet (measured-best > approved-family heuristic > any reachable model). A
+# role with no `model` entry defaults to this — "as automatic as possible, but configurable."
+AUTO_MODEL = "auto"
+
 
 @dataclass(slots=True)
 class RoleSpec:
@@ -114,10 +119,10 @@ def _parse_roles(raw: dict[str, Any]) -> dict[str, RoleSpec]:
     for name, table in raw.items():
         if not isinstance(table, dict):
             raise ConfigError(f"[roles.{name}] must be a table")
-        if "model" not in table:
-            raise ConfigError(f"[roles.{name}] is missing a `model` entry")
+        # A missing or "auto" model means automatic selection from the fleet (DESIGN §4).
+        model = str(table.get("model", AUTO_MODEL))
         params = {k: v for k, v in table.items() if k != "model"}
-        roles[name] = RoleSpec(model=str(table["model"]), params=params)
+        roles[name] = RoleSpec(model=model, params=params)
     return roles
 
 
