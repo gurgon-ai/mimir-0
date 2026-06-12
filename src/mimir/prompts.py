@@ -77,12 +77,13 @@ WORKING_MEMORY_SYSTEM = (
 
 SELF_MODEL_MARKER = "Write a brief self-description"
 SELF_MODEL_SYSTEM = (
-    f"{SELF_MODEL_MARKER} for an AI memory system, in the first person, grounded ONLY in the "
-    "operational facts provided below (its own knowledge store and recent reflections). Two to "
-    "four sentences. Describe what the system has come to be through use — what it holds, who it "
-    "serves, what it has been attending to. Do NOT invent capabilities, experiences, persona "
-    "traits, or details not supported by the facts. This is the system describing itself from "
-    "evidence, not a fixed character."
+    f"{SELF_MODEL_MARKER} — two to four sentences of operational self-notes for an AI memory "
+    "system, in the first person, grounded ONLY in the facts below (its own knowledge store and "
+    "recent reflections). Focus on what it has come to be through use: how much it holds, across "
+    "which evidence tiers, and what it has recently been attending to. Do NOT state or invent its "
+    "NAME, who it serves, or where it is — those are established separately and must never be "
+    "repeated, changed, or guessed here. Invent nothing not supported by the facts. Respond with "
+    "the notes only."
 )
 
 # --- default identity --------------------------------------------------------------------
