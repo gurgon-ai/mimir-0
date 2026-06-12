@@ -246,8 +246,10 @@ lan_backend = true             # scan the LAN for Ollama nodes (localhost is ALW
 refresh_interval_s = 60        # active health/inventory refresh
 max_model_size_b = 30          # only YOU know your hardware: benchmark/route models up to this many
                                # billion params (raise on a big GPU, lower on a Pi). Bigger = skipped.
-max_latency_s = 0              # routing latency target in seconds; 0 = off. When set, models measured
-                               # slower than this are excluded from auto-routing (set low for "instant").
+max_latency_s = 0              # latency target in seconds; 0 = off. When set, it also becomes the
+                               # benchmark's per-model timeout: a model whose trivial call exceeds it
+                               # is skipped (not viable). When off, a 30s default skip still applies so
+                               # one slow model can't stall the whole run. (Routing-exclusion: next.)
 ```
 
 On boot Mimir scans the subnet for `:11434`, inventories each node's models (family, weight,

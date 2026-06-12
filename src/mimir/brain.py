@@ -571,6 +571,7 @@ class Mimir:
         cap = max_params_b if max_params_b is not None else (
             self.config.backend.max_model_size_b if self.config.backend else 30.0
         )
+        budget = self.config.backend.max_latency_s if self.config.backend else 0.0
         self.scan_fleet()
         return _benchmark_fleet(
             self._model,
@@ -579,6 +580,7 @@ class Mimir:
             limit=limit,
             max_params_b=cap,
             judge=judge,
+            latency_budget_s=budget,
             progress=progress,
         )
 
