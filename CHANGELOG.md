@@ -20,7 +20,11 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   excluded and the recommendations were dominated by tiny models. Now the benchmark covers **all**
   approved models up to a **user-set size cap** (`[backend] max_model_size_b`, default 30B — only the
   user knows their hardware), and reports coverage ("benchmarked N of M; K skipped as too large") in
-  the UI and logs. Added `[backend] max_latency_s` (routing latency target; wired into routing next).
+  the UI and logs. **Per-model latency timeout:** before the expensive battery, each model gets a
+  trivial-prompt probe; one that exceeds the budget (`max_latency_s` if set, else a 30s default) is
+  **skipped** instead of stalling the whole run — so a slow big model can no longer hang the
+  benchmark (or hold the lock so a second run "doesn't work"). The UI now also shows the **scan
+  phase** ("scanning the fleet…") instead of a blank "0/0", and reports too-slow skips.
 - **Benchmark looked frozen / gave no progress.** The fleet benchmark ran synchronously while
   holding the brain lock, so the entire web UI (including header polling) blocked for the multi-minute
   run, and nothing logged per model — it was impossible to tell a running benchmark from a broken one.

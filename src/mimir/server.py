@@ -309,7 +309,8 @@ class _Handler(BaseHTTPRequestHandler):
         with srv.bench_lock:
             if srv.bench_state.get("running"):
                 return {"started": False, **srv.bench_state}  # already running
-            srv.bench_state = {"running": True, "i": 0, "total": 0, "current": "", "done": False}
+            srv.bench_state = {"running": True, "i": 0, "total": 0,
+                               "current": "scanning the fleet…", "done": False}
 
         def _progress(i: int, total: int, model: str) -> None:
             with srv.bench_lock:
@@ -324,6 +325,7 @@ class _Handler(BaseHTTPRequestHandler):
                         running=False, done=True, current="",
                         benchmarked=result.benchmarked, judges_ok=result.judges_ok,
                         eligible=result.eligible, skipped_too_big=result.skipped_too_big,
+                        skipped_too_slow=result.skipped_too_slow,
                     )
             except Exception as exc:  # surfaced via status, never a silent death (DESIGN §10)
                 log.exception("benchmark run failed")
@@ -979,12 +981,16 @@ $("fleetBenchBtn").addEventListener("click", async () => {
       const s = await api("GET", "/api/fleet/benchmark/status");
       if (s.error) { $("fleetMsg").textContent = "Benchmark error: " + s.error; break; }
       if (s.done || !s.running) {
-        const skipped = s.skipped_too_big ? `, ${s.skipped_too_big} skipped as too large` : "";
-        $("fleetMsg").textContent = `Benchmarked ${s.benchmarked || 0} of ${s.eligible || 0} eligible model(s)${skipped}` + (s.judges_ok ? "" : " (coherence judges untrusted — skipped)") + ".";
+        const skips = [];
+        if (s.skipped_too_big) skips.push(`${s.skipped_too_big} too large`);
+        if (s.skipped_too_slow) skips.push(`${s.skipped_too_slow} too slow`);
+        const skipped = skips.length ? ` (${skips.join(", ")} skipped)` : "";
+        $("fleetMsg").textContent = `Benchmarked ${s.benchmarked || 0} of ${s.eligible || 0} eligible model(s)${skipped}` + (s.judges_ok ? "" : " — coherence judges untrusted") + ".";
         loadFleet();
         break;
       }
-      $("fleetMsg").textContent = `Benchmarking ${s.i}/${s.total}: ${s.current}…`;
+      // Until the first model starts, total is 0 — show the scan phase rather than "0/0".
+      $("fleetMsg").textContent = s.total ? `Benchmarking ${s.i}/${s.total}: ${s.current}…` : `${s.current || "Preparing…"}`;
     }
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
   $("fleetBenchBtn").disabled = false;

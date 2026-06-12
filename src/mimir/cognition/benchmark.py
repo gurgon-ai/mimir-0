@@ -291,6 +291,7 @@ class FleetBenchmarkResult:
     results: list[ModelBenchmark]
     eligible: int = 0          # approved, non-embedding models in the catalogue (any size)
     skipped_too_big: int = 0   # eligible models skipped because they exceed max_params_b
+    skipped_too_slow: int = 0  # eligible models skipped because a trivial call exceeded the budget
 
 
 def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True) -> ModelBenchmark:
@@ -334,20 +335,27 @@ def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True)
     )
 
 
-def _measure_node_speed(node: str, model_name: str) -> float | None:
+def _measure_node_speed(
+    node: str, model_name: str, *, timeout_s: float = SPEED_TIMEOUT_S
+) -> float | None:
     """Time a trivial call to a *specific* node directly (no pool/retry); None for non-URL nodes.
 
     Returns elapsed seconds — even on timeout/failure, the elapsed time is the 'too slow' signal.
     """
     if not node.startswith("http"):
         return None  # mock/non-URL node — nothing real to time
-    provider = OllamaProvider(node, timeout=SPEED_TIMEOUT_S)
+    provider = OllamaProvider(node, timeout=timeout_s)
     started = time.monotonic()
     try:
         provider.chat(model_name, _SPEED_PROMPT, {})
     except Exception:
         return round(time.monotonic() - started, 3)  # the (timed-out) duration ranks it slow
     return round(time.monotonic() - started, 3)
+
+
+# When the user hasn't set a latency target, still skip a model whose trivial-prompt call takes
+# longer than this — it's not viable for interactive use, and the full battery would stall the run.
+_DEFAULT_SKIP_S: float = 30.0
 
 
 def benchmark_fleet(
@@ -358,6 +366,7 @@ def benchmark_fleet(
     limit: int = 8,
     max_params_b: float = 30.0,
     judge: bool = True,
+    latency_budget_s: float = 0.0,
     progress: Callable[[int, int, str], None] | None = None,
 ) -> FleetBenchmarkResult:
     """Benchmark the distinct models in the catalogue and write their scores back.
@@ -389,13 +398,29 @@ def benchmark_fleet(
     models = sorted(sizes, key=lambda m: sizes[m])[:limit]  # smallest (fastest) first
 
     total = len(models)
-    log.info("benchmark: starting — %d model(s) to score (judge=%s)", total, judge)
+    skip_budget = latency_budget_s if latency_budget_s > 0 else _DEFAULT_SKIP_S
+    too_slow: set[str] = set()
+    log.info("benchmark: starting — %d model(s) to score (judge=%s, skip > %.0fs)",
+             total, judge, skip_budget)
     judges_ok = judges_trustworthy(model) if judge else False
     results: list[ModelBenchmark] = []
     for i, model_name in enumerate(models, start=1):
         log.info("benchmark: [%d/%d] %s …", i, total, model_name)
         if progress is not None:
             progress(i, total, model_name)
+        # Latency pre-gate: a single trivial-prompt probe (timeout = the budget). A model that can't
+        # answer "ok" within budget isn't viable for interactive use — skip it before the expensive
+        # full battery stalls the run. The probe also seeds this node's speed.
+        probe_node = next((n for n in nodes_with.get(model_name, []) if n.startswith("http")), None)
+        if probe_node is not None:
+            speed = _measure_node_speed(probe_node, model_name, timeout_s=skip_budget)
+            if speed is not None and speed >= skip_budget:
+                log.warning("benchmark: [%d/%d] %s SKIPPED — %.1fs >= %.0fs latency budget",
+                            i, total, model_name, speed, skip_budget)
+                too_slow.add(model_name)
+                continue
+            if speed is not None:
+                update_catalogue_speed(storage, probe_node, model_name, speed)
         try:
             bench = benchmark_model(model, model_name, judge=judges_ok)
         except Exception as exc:
@@ -415,17 +440,19 @@ def benchmark_fleet(
             discipline=bench.discipline,
             epistemics=bench.epistemics,
         )
-        # Per-node speed: time the model directly on each node that has it (no pool, no retry).
+        # Per-node speed for the OTHER nodes (the probe node was already measured above).
         for node in nodes_with.get(model_name, []):
-            elapsed = _measure_node_speed(node, model_name)
+            if node == probe_node:
+                continue
+            elapsed = _measure_node_speed(node, model_name, timeout_s=skip_budget)
             if elapsed is not None:
                 update_catalogue_speed(storage, node, model_name, elapsed)
         results.append(bench)
     log.info(
-        "benchmark: scored %d of %d eligible model(s); %d skipped as > %.0fB; judges_ok=%s",
-        len(results), len(eligible), len(too_big), max_params_b, judges_ok,
+        "benchmark: scored %d of %d eligible; %d too big, %d too slow; judges_ok=%s",
+        len(results), len(eligible), len(too_big), len(too_slow), judges_ok,
     )
     return FleetBenchmarkResult(
         benchmarked=len(results), judges_ok=judges_ok, results=results,
-        eligible=len(eligible), skipped_too_big=len(too_big),
+        eligible=len(eligible), skipped_too_big=len(too_big), skipped_too_slow=len(too_slow),
     )
