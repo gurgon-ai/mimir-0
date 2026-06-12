@@ -577,6 +577,9 @@ _HTML = """<!doctype html>
   input[type=text], textarea { background:#11161d; border:1px solid #2b333f; color:#d7dde5; border-radius:8px; padding:9px 11px; font:inherit; }
   button { background:#238636; color:#fff; border:0; border-radius:8px; padding:9px 14px; font:inherit; cursor:pointer; }
   button.secondary { background:#30363d; }
+  button.working { background:#9e6a03; }   /* amber — in progress */
+  button.done    { background:#1f7a37; }   /* green — completed */
+  button.failed  { background:#b62324; }   /* red — errored */
   button:disabled { opacity:.5; cursor:default; }
   aside { overflow-y:auto; padding:16px; }
   aside section { margin-bottom:26px; }
@@ -693,7 +696,7 @@ _HTML = """<!doctype html>
 
     <div class="tabpane hidden" id="tab-fleet">
       <div class="row">
-        <button id="fleetScanBtn" type="button" title="List what models are installed on each node. Fast — runs no models.">1 · Find models</button>
+        <button class="secondary" id="fleetScanBtn" type="button" title="List what models are installed on each node. Fast — runs no models.">1 · Find models</button>
         <button class="secondary" id="fleetBenchBtn" type="button" title="Run each model through the test battery to score it. Slow — this is the expensive step.">2 · Benchmark (score)</button>
         <button class="secondary" id="fleetApplyBtn" type="button" title="Point each role at its top-scoring model from the benchmark.">3 · Apply best</button>
       </div>
@@ -988,13 +991,20 @@ async function loadFleet() {
   } catch (e) { $("fleetList").innerHTML = "error: " + e.message; }
 }
 
+// Workflow buttons light up by state: amber (working) → green (done) → red (failed).
+function btnState(id, state) {
+  const b = $(id); if (!b) return;
+  b.classList.remove("working", "done", "failed");
+  if (state) b.classList.add(state);
+}
+
 $("fleetScanBtn").addEventListener("click", async () => {
-  $("fleetMsg").textContent = "Finding models on the fleet…"; $("fleetScanBtn").disabled = true;
+  $("fleetMsg").textContent = "Finding models on the fleet…"; $("fleetScanBtn").disabled = true; btnState("fleetScanBtn", "working");
   try {
     const r = await api("POST", "/api/fleet/scan");
     $("fleetMsg").textContent = `Found ${r.models} models across ${r.nodes} node(s).`;
-    loadFleet(); refreshState();
-  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
+    btnState("fleetScanBtn", "done"); loadFleet(); refreshState();
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; btnState("fleetScanBtn", "failed"); }
   $("fleetScanBtn").disabled = false;
 });
 
@@ -1004,12 +1014,13 @@ $("fleetScanBtn").addEventListener("click", async () => {
 let _benchPolling = false;
 async function pollBenchmark() {
   if (_benchPolling) return;
-  _benchPolling = true; $("fleetBenchBtn").disabled = true;
+  _benchPolling = true; $("fleetBenchBtn").disabled = true; btnState("fleetBenchBtn", "working");
   try {
     while (true) {
       const s = await api("GET", "/api/fleet/benchmark/status");
-      if (s.error) { $("fleetMsg").textContent = "Benchmark error: " + s.error; break; }
+      if (s.error) { $("fleetMsg").textContent = "Benchmark error: " + s.error; btnState("fleetBenchBtn", "failed"); break; }
       if (s.done || !s.running) {
+        btnState("fleetBenchBtn", "done");
         if (s.benchmarked !== undefined) {   // a finished run (not just the idle initial state)
           const skips = [];
           if (s.skipped_too_big) skips.push(`${s.skipped_too_big} too large`);
@@ -1029,21 +1040,23 @@ async function pollBenchmark() {
 }
 
 $("fleetBenchBtn").addEventListener("click", async () => {
-  $("fleetMsg").textContent = "Starting benchmark…";
+  $("fleetMsg").textContent = "Starting benchmark…"; btnState("fleetBenchBtn", "working");
   try {
     const scope = { max_model_size_b: $("benchMaxSize").value, max_latency_s: $("benchMaxLatency").value };
     await api("POST", "/api/fleet/benchmark", scope);   // returns immediately; runs in the background
     pollBenchmark();
-  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; btnState("fleetBenchBtn", "failed"); }
 });
 
 $("fleetApplyBtn").addEventListener("click", async () => {
+  btnState("fleetApplyBtn", "working");
   try {
     const r = await api("POST", "/api/fleet/apply");
     const n = Object.keys(r.applied || {}).length;
     $("fleetMsg").textContent = n ? `Applied recommendations to ${n} role(s): ` + Object.entries(r.applied).map(([k,v]) => `${k}=${v}`).join(", ") : "Nothing to apply (benchmark first).";
+    btnState("fleetApplyBtn", n ? "done" : "");
     refreshState();
-  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; btnState("fleetApplyBtn", "failed"); }
 });
 
 async function loadModels() {
