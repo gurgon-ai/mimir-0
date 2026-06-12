@@ -121,6 +121,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._procedures())
             elif route == "/api/fleet":
                 self._send_json(self._fleet())
+            elif route == "/api/fleet/pool":
+                self._send_json(self._model_pool())
             elif route == "/favicon.ico":
                 self._send(204, b"", "image/x-icon")
             else:
@@ -156,6 +158,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._benchmark_fleet())
             elif route == "/api/fleet/apply":
                 self._send_json({"applied": self._apply_recommendations()})
+            elif route == "/api/fleet/model":
+                self._send_json(self._set_model_enabled(body))
             else:
                 self._send_json({"error": "not found"}, status=404)
         except json.JSONDecodeError:
@@ -288,6 +292,23 @@ class _Handler(BaseHTTPRequestHandler):
     def _apply_recommendations(self) -> dict[str, str]:
         with self.server.brain_lock:
             return self.server.brain.apply_recommendations()
+
+    def _model_pool(self) -> dict[str, Any]:
+        with self.server.brain_lock:
+            brain = self.server.brain
+            pool = brain.model_pool()
+            pool["lan_backend"] = brain.config.backend is not None
+            pool["nodes_up"] = brain._model.get_stats().get("nodes_up", 0)
+        return pool
+
+    def _set_model_enabled(self, body: dict[str, Any]) -> dict[str, Any]:
+        model = str(body.get("model", "")).strip()
+        if not model:
+            raise ValueError("model is required")
+        enabled = bool(body.get("enabled", True))
+        with self.server.brain_lock:
+            moved = self.server.brain.set_model_enabled(model, enabled)
+        return {"model": model, "enabled": enabled, "moved": moved}
 
     def _procedures(self) -> dict[str, Any]:
         with self.server.brain_lock:
@@ -520,6 +541,7 @@ _HTML = """<!doctype html>
       <button data-tab="procedures">Habits</button>
       <button data-tab="council">Council</button>
       <button data-tab="fleet">Fleet</button>
+      <button data-tab="models">Models</button>
       <button data-tab="docs">Docs</button>
     </div>
 
@@ -591,6 +613,12 @@ _HTML = """<!doctype html>
       </div>
       <div id="fleetMsg" class="hint">Discovers Ollama nodes on your LAN and catalogues their models.</div>
       <div id="fleetList"></div>
+    </div>
+
+    <div class="tabpane hidden" id="tab-models">
+      <div id="poolBackend" class="hint"></div>
+      <div id="poolMsg" class="hint">Models Mimir can route to. A checked box keeps a model in the automatic pool; uncheck to exclude it. ✓ = passed the qualification gate.</div>
+      <div id="poolList"></div>
     </div>
 
     <div class="tabpane hidden" id="tab-docs">
@@ -725,7 +753,7 @@ $("ingestBtn").addEventListener("click", async () => {
 });
 
 // --- tabs ---
-const loaders = { mind: loadMind, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet };
+const loaders = { mind: loadMind, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet, models: loadModels };
 document.querySelectorAll(".tabs button").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));
@@ -888,6 +916,51 @@ $("fleetApplyBtn").addEventListener("click", async () => {
     refreshState();
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
 });
+
+async function loadModels() {
+  try {
+    const data = await api("GET", "/api/fleet/pool");
+    const backend = data.lan_backend ? `LAN fleet (${data.nodes_up} node(s) up)` : "Local only";
+    const auto = (data.auto_roles || []).join(", ") || "none (all roles pinned)";
+    $("poolBackend").innerHTML = `<b>Backend:</b> ${backend} &middot; <b>Auto roles:</b> ${auto}. Locality is set by [backend] lan_backend in mimir.toml (restart to change).`;
+    const list = $("poolList"); list.innerHTML = "";
+    const models = data.models || [];
+    if (!models.length) { list.innerHTML = '<div class="hint">No models catalogued yet — open the Fleet tab and Scan.</div>'; return; }
+    models.forEach(m => {
+      const row = document.createElement("div"); row.className = "mem"; if (!m.enabled) row.style.opacity = "0.5";
+      const label = document.createElement("label"); label.style.display = "flex"; label.style.alignItems = "center"; label.style.gap = "8px"; label.style.cursor = "pointer";
+      const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!m.enabled;
+      cb.addEventListener("change", () => setModelEnabled(m.model, cb.checked));
+      const name = document.createElement("span"); name.className = "text";
+      name.textContent = `${m.passed ? "✓ " : (m.benchmarked ? "✗ " : "· ")}${m.model}`;
+      name.title = m.passed ? "passed the qualification gate" : (m.benchmarked ? "benchmarked, below the gate" : "not yet benchmarked");
+      label.appendChild(cb); label.appendChild(name); row.appendChild(label);
+      const tags = document.createElement("div"); tags.className = "tags";
+      const bits = [];
+      if (m.params_b) bits.push(`${m.params_b}B`);
+      if (m.quality != null) bits.push(`q${m.quality}`);
+      if (m.discipline != null) bits.push(`disc ${m.discipline}`);
+      if (m.return_time != null) bits.push(`${m.return_time}s`);
+      bits.push(`${(m.nodes || []).length} node(s)`);
+      if (m.approved) bits.push("approved");
+      (m.roles || []).forEach(r => bits.push("▶ " + r));
+      bits.forEach(b => { const sp = document.createElement("span"); sp.className = "tag"; sp.textContent = b; tags.appendChild(sp); });
+      row.appendChild(tags); list.appendChild(row);
+    });
+  } catch (e) { $("poolList").innerHTML = "error: " + e.message; }
+}
+
+async function setModelEnabled(model, enabled) {
+  $("poolMsg").textContent = `${enabled ? "Enabling" : "Disabling"} ${model}…`;
+  try {
+    const r = await api("POST", "/api/fleet/model", { model, enabled });
+    const moved = Object.entries(r.moved || {});
+    $("poolMsg").textContent = moved.length
+      ? `${model} ${enabled ? "enabled" : "disabled"} — re-routed ` + moved.map(([k,v]) => `${k}→${v}`).join(", ")
+      : `${model} ${enabled ? "enabled" : "disabled"}.`;
+    loadModels(); refreshState();
+  } catch (e) { $("poolMsg").textContent = "Error: " + e.message; loadModels(); }
+}
 
 $("procBtn").addEventListener("click", async () => {
   const trigger = $("procTrigger").value.trim(); const procedure = $("procBody").value.trim();
