@@ -54,6 +54,11 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
 - **The benchmark scorecard is grouped by node/IP**, so it's obvious which machine each model runs
   on (LAN-only leftovers cluster under their IP instead of looking local), and gained a `Reason`
   column.
+- **The Fleet tab leads with the tournament** as the recommended path; the manual
+  Find / Benchmark / Apply buttons move below as the one-step-at-a-time equivalents.
+- **Docs synced** — INFERENCE_ENGINE, DESIGN §4, README, and SETUP now describe the `reasoning`
+  dimension, the epistemic gauntlet, real-turn latency, the size floor, `benchmark_num_ctx`, the
+  quality-under-cap routing objective, and the qualifying tournament.
 
 ### Fixed
 - **Benchmark timed cold model-loads, not warm performance.** With models swapping in and out of

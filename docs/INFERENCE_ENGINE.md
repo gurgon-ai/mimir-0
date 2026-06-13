@@ -51,7 +51,7 @@ $10k AI box), the engine *is* the difference between good and useless cognition.
 1. **Model-agnostic.** No model is hardcoded or privileged in code. A curated *recommended* list is
    a documented, versioned default — never a lock-in. Any model the user installs can compete.
 2. **Objective measurement.** A model earns a role by **measured** behaviour on a fixed battery
-   (talk, tools, code, discipline, epistemics, coherence), not by reputation or size.
+   (talk, tools, code, reasoning, discipline, epistemics, coherence), not by reputation or size.
 3. **Local-first, distributed-optional.** Default is local-only; the LAN fleet is opt-in and, when
    enabled, *local is preferred* — remote nodes are for burst, overflow, or edge deployments.
 4. **Evergreen.** New models are first-class. Stale measurements self-invalidate (model digest +
@@ -103,7 +103,7 @@ nodes           ["http://192.168.2.50:11434", ...]   # every node that has it
 digest          "sha256:1a2b…"        # [new] Ollama model digest — staleness key (§8)
 recommended     true                  # [new] present in the registry (§4)
 enabled         true                  # user veto (model_prefs.enabled)
-scores          { <dimension>: ScoreRecord }          # talk/tools/code/discipline/epistemics/coherence
+scores          { <dimension>: ScoreRecord }   # talk/tools/code/reasoning/discipline/epistemics/coherence
 quality         0.92                  # aggregate
 return_time     0.86                  # fastest node, seconds
 battery_version 3                     # [new] which battery produced `scores` (§8)
@@ -246,8 +246,32 @@ models, new hardware, a model update), preserving overrides unless changed.
 
 ## 6. Qualification  **[partial]**
 
-The battery (`DESIGN.md` §4) scores five deterministic dimensions — **talk, tools, code,
-discipline, epistemics** — plus a judged **coherence** pass, smallest-first, capacity-capped. **[built]**
+The battery (`DESIGN.md` §4) scores **six deterministic dimensions** — **talk, tools, code,
+reasoning, discipline, epistemics** — plus a judged **coherence** pass, outside-in ordered and
+size/latency-bounded. **[built]**
+
+What the non-obvious dimensions actually test **[built]**:
+
+- **reasoning** — real problems with one regex-checkable answer (multi-step arithmetic,
+  letter-counting, sequence completion, a code-trace, an instruction transform). This is what keeps
+  `quality` from saturating near 1.0 for any fluent model: following a *format* is easy, *solving* is
+  not. chat/reasoning/code gate on it.
+- **discipline** — does **not** reproduce the internal `[tier=…; source=…]` scaffolding when shown it
+  (sampled K×; a consistent leaker scores ~0 and is barred from the identity roles).
+- **epistemics** — does it exploit Mimir's tiered/provenance/gated context (`DESIGN.md` §3)? The
+  structured-arm score over a gauntlet: a **layered conflicting-tier** probe (a high-tier "blue" vs a
+  low-tier "red" buried in filler → defer to the high tier *under noise* — the structured arm can, a
+  flat blob can't), a **grounding** floor (recall a nonce that exists *only* in the context), and a
+  **long-context needle** (a nonce planted mid-way through a ~2k-token document, past Ollama's 2048
+  default). The chat-LLM qualifier; chat/reasoning gate on it.
+
+**Representative latency [built].** `return_time` is timed from one *real-length* generation,
+normalized to seconds per ~256-token turn — not the round-trip of a 3-token reply, which can't tell a
+slow remote 12B from a snappy local 3B. **Context window [built]:** every benchmark call pins
+`backend.benchmark_num_ctx` (default 8192) so Ollama's 2048 default can't silently truncate the
+layered prompts. **Size bounds [built]:** `max_model_size_b` (ceiling) and `min_model_size_b` (floor —
+on capable hardware, don't let a tiny model that scores "high enough" out-compete a bigger, genuinely
+better one) bound the field; both are UI/config knobs.
 
 Extensions this engine adds:
 
@@ -290,11 +314,52 @@ Extensions this engine adds:
 
 ---
 
+## 6a. The qualifying tournament  **[built]**
+
+The web UI exposes qualification as a **staged, human-veto knock-out** (Fleet tab → "🏆 Run
+qualifying tournament") — the interactive realization of triage→score, with the user in the loop
+between rounds. It separates the two questions a fleet must answer, which behave differently across
+machines:
+
+- **Can the model do the job? (quality — node-independent.)** A model is as capable on any box, so it
+  is scored **once**. **Round 0 · Qualifying** runs the cheap capability dimensions over the whole
+  fleet (ephemeral — nothing saved); the user unticks who shouldn't advance; **Round 1 · Gauntlet**
+  re-tests only the survivors through the full framework qualification (reasoning + the epistemic
+  gauntlet), persisting scores.
+- **Is it fast enough? (speed — node-dependent.)** The one genuinely per-machine question.
+  **Round 2 · Finals** picks each role's champion *among the user's finalists only* (the veto beats
+  the global best). **Round 3 · Vision** is reserved for the vision dimension.
+
+The latency cap (`max_latency_s`) is an early **skip-gate** in every round (a model no node can run
+under the cap never reaches the expensive gauntlet) and the **selection** criterion in the finals.
+The objective, plainly: *the best-scoring model for this system that you're willing to wait for.*
+
+Built on three staging primitives on `benchmark_fleet`: `only_models` (a round re-tests just the
+survivors), `framework=False` (triage — cheap dimensions only), and `persist=False` (ephemeral — a
+scouting round can't pollute the saved scores).
+
+**Agreed, next [proposed]:**
+- **Quality/speed split.** Make the Finals a dedicated **per-node speed round**: time each
+  quality-survivor on *every enabled node* against the cap → a model×node grid → champion = best
+  quality with a node under the cap, routed there. The gauntlet then stops per-node speed-probing
+  (pure quality = faster).
+- **Per-node toggle.** Each discovered edge node can be **toggled off** (a node-level veto, mirroring
+  the per-model one), excluding it from discovery, qualification, the speed finals, and routing —
+  even if reachable.
+
+---
+
 ## 7. Routing  **[partial]**
 
 Resolution hierarchy (`auto` roles): **pin > measured-best (role-gated) > recommended/approved-family
 heuristic > any reachable model** — re-resolved on every rescan, with user disables vetoing at every
 level. **[built]**
+
+**The objective [built].** *The best-scoring model for this system that you're willing to wait for.*
+Latency is a **hard cap, not a penalty**: `max_latency_s` excludes too-slow models before scoring, and
+within the cap every role ranks on **pure quality** — a dominant model wins outright and speed only
+breaks ties. So a 26B a second behind a 4B at a higher score wins, because under the cap the wait is
+already deemed worth it. (This replaced an earlier quality-minus-speed "balanced" formula for `chat`.)
 
 **Identity roles** — `chat`, `reasoning`, `judge`, `sentinel` — are the roles that *speak or reason
 as the system*. They have a hard rule: **never route to an unqualified model** (one without a

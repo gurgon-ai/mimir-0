@@ -288,12 +288,24 @@ Inspect or refresh the catalogue from `brain.scan_fleet()` / `brain.fleet_report
 UI's **Fleet** tab.
 
 **Benchmark your models** (`brain.benchmark_fleet()` or the Fleet tab's *Benchmark* button) to fill
-the catalogue's `quality` and `return_time`. Each model runs a short capability "IQ test" — *talk*
-(instruction following), *tools* (emit a valid tool call), *code* (write parseable code) — plus a
-*coherence* pass scored by a panel of your other models, guarded by a canary (the judges must rank
-a known-good answer above a garbled one, or coherence is skipped). It's call-heavy, so run it
-on-demand. Recommended models are instruction-following families — `gemma`, `qwen`, `llama`,
-`mistral`, `phi`, `command-r`, `deepseek`; running a **variety** of families is ideal.
+the catalogue's `quality` and `return_time`. Each model runs a capability battery — *talk*
+(instruction following), *tools* (emit a valid tool call), *code* (write parseable code), *reasoning*
+(solve a problem with one checkable answer), *discipline* (don't leak the internal `[tier=…]` tags),
+and *epistemics* (use Mimir's tiered/provenance context — defer to the high tier under noise, recall
+context-only facts, handle long context) — plus a *coherence* pass scored by a panel of your other
+models, guarded by a canary (the judges must rank a known-good answer above a garbled one, or
+coherence is skipped). It's call-heavy, so run it on-demand. Recommended models are
+instruction-following families — `gemma`, `qwen`, `llama`, `mistral`, `phi`, `command-r`, `deepseek`;
+running a **variety** of families is ideal.
+
+**Or run the qualifying tournament** (Fleet tab → *🏆 Run qualifying tournament*) — a staged,
+human-veto narrowing instead of one big pass. **Round 0 · Qualifying** scores the whole fleet fast
+and cheap; you untick who shouldn't advance; **Round 1 · Gauntlet** puts the survivors through the
+full framework qualification; **Round 2 · Finals** points each role at its champion *among your
+finalists* (your veto beats the global best). The board takes over the chat pane and resumes if you
+switch tabs. The size/latency scope fields (`min_model_size_b`, `max_model_size_b`, `max_latency_s`)
+apply to the whole run. This is the recommended path; *Find / Benchmark / Apply* remain as the manual,
+one-step-at-a-time equivalents.
 
 ## 6. Configuration reference
 
