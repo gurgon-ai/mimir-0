@@ -19,6 +19,13 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   (it still fails *over* to another node that has the model — it just doesn't retry the slow one).
   New plumbing: a reserved `__timeout_s__` param the Ollama provider honours per call, and a
   `max_retries` override on the pool/gateway.
+- **The latency cap must never cut *capability* — a model slow on one weak node may be excellent on
+  another.** Capability is per-model (test it once, anywhere); latency is per-(model, node) and only
+  governs routing. The benchmark no longer skips a model because it exceeds the user's cap; it only
+  skips a node too slow to *test* on within a generous budget (`max(30s, cap)` per turn), records the
+  per-node speed for routing, and the cap is applied at finals/routing — not as a quality filter.
+  (This reverses an earlier "cap skips early" choice. Per-node *requeue* — try a faster node before
+  giving up — and concurrent distribution across nodes are the next build.)
 - **The latency cap's pre-gate measured the wrong thing, so it never skipped slow models.** The gate
   timed `"reply ok"` — one token, instant for anything — so a model that's snappy on a token but
   takes ~13s on a real turn sailed through a 7s cap, then crawled through the ~15-call battery

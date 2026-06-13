@@ -273,6 +273,24 @@ layered prompts. **Size bounds [built]:** `max_model_size_b` (ceiling) and `min_
 on capable hardware, don't let a tiny model that scores "high enough" out-compete a bigger, genuinely
 better one) bound the field; both are UI/config knobs.
 
+**Capability and latency are orthogonal — and neither may contaminate the other [next, the design].**
+This is the load-bearing rule for the distributed scheduler:
+
+- **Capability is per-MODEL** (node-independent): establish it **once**, on whatever node can run it.
+  A model that's slow on one weak edge is **never failed** — that fails the *(model, node) pairing*,
+  not the model. So a capability call must **never be scored 0 because a node was slow**: if a node
+  is too slow to test on, the model is **requeued to another node**, not marked incapable.
+- **Latency is per-(MODEL, NODE)**: recorded so we don't re-probe a pairing, and used **only for
+  routing/placement** (does *this* box meet the user's `max_latency_s`?), never to gate capability.
+- **The objective is distributed compute, not "use every box."** On one-beast-plus-weak-edges
+  hardware it is *correct* for everything to run on the beast — shipping a 4B to a Pi at 5s when the
+  beast does two 26Bs in that time is a loss. An edge earns a role only by having the capability
+  **and** meeting latency. The scheduler therefore: distributes to test fast, probes a node cheaply,
+  and if it's too slow to bother → marks that (model, node) and **requeues the model to another
+  node** (capability lands on the fastest node that can run it); per-node speed is recorded for
+  routing. The latency cap is a **routing/finals** criterion, **not** a quality-round filter (an
+  earlier "cap skips early everywhere" decision was reversed for exactly this reason).
+
 Extensions this engine adds:
 
 - **Recommended-first ordering [proposed].** Qualify trusted models before unknowns so the system is

@@ -587,14 +587,16 @@ def benchmark_fleet(
     models = _outside_in(by_size)[:limit]
 
     total = len(models)
-    skip_budget = latency_budget_s if latency_budget_s > 0 else _DEFAULT_SKIP_S
-    # Per-call ceiling for the scoring battery (≠ the pre-gate probe): generous enough not to
-    # false-cut a thorough answer, tight enough that a wedged model fails in seconds, not the
-    # production 120s × 3 retries. Scales gently with the user's budget.
-    call_timeout = min(90.0, max(45.0, 2.0 * skip_budget))
-    too_slow: set[str] = set()
-    log.info("benchmark: starting — %d model(s) to score (judge=%s, skip > %.0fs)",
-             total, judge, skip_budget)
+    # Capability is NOT gated on the user's latency cap (DESIGN §6): a model slow on this node may
+    # be excellent on another, so the cap must never cut capability. We only skip a node too slow to
+    # even TEST on within a *generous* budget; the cap is recorded per-node, applied at routing.
+    # (Per-node requeue — try a faster node before giving up — is the next build; for now we test on
+    # the probe node, which is localhost/the-beast first, so the common case lands on the fast box.)
+    test_budget = max(_DEFAULT_SKIP_S, latency_budget_s)
+    call_timeout = 60.0   # hang protection per scoring call (no retries); NOT the latency cap
+    too_slow: set[str] = set()   # too slow to TEST on a reachable node — not a capability verdict
+    log.info("benchmark: starting — %d model(s) to score (judge=%s, test budget %.0fs/turn)",
+             total, judge, test_budget)
     judges_ok = judges_trustworthy(model) if judge else False
     results: list[ModelBenchmark] = []
     loop_start = time.monotonic()
@@ -606,21 +608,21 @@ def benchmark_fleet(
             done = i - 1
             eta = (time.monotonic() - loop_start) / done * (total - done) if done else None
             progress(i, total, model_name, eta)
-        # Latency pre-gate: a single trivial-prompt probe (timeout = the budget). A model that can't
-        # answer "ok" within budget isn't viable for interactive use — skip it before the expensive
-        # full battery stalls the run. The probe also seeds this node's speed.
+        # Warm the model on its node and measure a representative per-turn latency. Record it (the
+        # per-node speed feeds routing/finals) — but only SKIP if it's too slow to even test here
+        # within the generous test budget; the user's cap is a routing concern, never a quality cut.
         probe_node = next((n for n in nodes_with.get(model_name, []) if n.startswith("http")), None)
         if probe_node is not None:
-            # Warm the model into VRAM, THEN time it — so the gate sees warm latency, not cold load.
-            speed = _measure_node_speed(probe_node, model_name, timeout_s=skip_budget,
+            speed = _measure_node_speed(probe_node, model_name, timeout_s=test_budget,
                                         warmup=True, num_ctx=num_ctx)
-            if speed is not None and speed >= skip_budget:
-                log.warning("benchmark: [%d/%d] %s SKIPPED — %.1fs >= %.0fs latency budget",
-                            i, total, model_name, speed, skip_budget)
-                too_slow.add(model_name)
-                continue
             if speed is not None and persist:
                 update_catalogue_speed(storage, probe_node, model_name, speed)
+            if speed is not None and speed >= test_budget:
+                log.warning("benchmark: [%d/%d] %s — %.1fs/turn ≥ %.0fs test budget on %s; "
+                            "skipped HERE (a faster node would still qualify it)",
+                            i, total, model_name, speed, test_budget, probe_node)
+                too_slow.add(model_name)
+                continue
         try:
             bench = benchmark_model(model, model_name, judge=judges_ok, num_ctx=num_ctx,
                                     framework=framework, call_timeout_s=call_timeout)
@@ -648,7 +650,7 @@ def benchmark_fleet(
             for node in nodes_with.get(model_name, []):
                 if node == probe_node:
                     continue
-                elapsed = _measure_node_speed(node, model_name, timeout_s=skip_budget,
+                elapsed = _measure_node_speed(node, model_name, timeout_s=test_budget,
                                               warmup=True, num_ctx=num_ctx)
                 if elapsed is not None:
                     update_catalogue_speed(storage, node, model_name, elapsed)
