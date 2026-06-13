@@ -808,7 +808,7 @@ _HTML = """<!doctype html>
   .field { margin-bottom:9px; }
   .field label { display:block; font-size:12px; color:#9aa4b2; margin-bottom:3px; }
   .field input { width:100%; }
-  .row { display:flex; gap:8px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
   .hint { font-size:12px; color:#6f7a8a; margin-top:6px; }
   #ingestResult, #identMsg { font-size:12px; color:#7fd17f; margin-top:6px; min-height:14px; }
   .tabs { display:flex; flex-wrap:wrap; gap:2px 4px; margin-bottom:14px; border-bottom:1px solid #232a35; }
@@ -937,8 +937,8 @@ _HTML = """<!doctype html>
       <div class="hint" style="margin-top:14px; opacity:0.8;">— or do it manually, one step at a time —</div>
       <div class="row" style="margin-top:6px;">
         <button class="secondary" id="fleetScanBtn" type="button" title="List what models are installed on each node. Fast — runs no models.">1 · Find models</button>
-        <button class="secondary" id="fleetBenchBtn" type="button" title="Run each model through the test battery to score it. Slow — this is the expensive step.">2 · Benchmark (score)</button>
-        <button class="secondary" id="fleetMatrixBtn" type="button" title="The time trial: speed-test each qualified model on every node it's installed on but not yet timed, so we know which edge can run what (the background-worker map). Records even slow results. Disabled while a benchmark/tournament is running.">3 · Speed-test remaining nodes</button>
+        <button class="secondary" id="fleetBenchBtn" type="button" title="Run each model through the test battery to score it. Slow — this is the expensive step.">2 · Benchmark</button>
+        <button class="secondary" id="fleetMatrixBtn" type="button" title="The time trial: speed-test each qualified model on every node it's installed on but not yet timed, so we know which edge can run what (the background-worker map). Records even slow results. Disabled while a benchmark/tournament is running.">3 · Speed-test</button>
         <button class="secondary" id="fleetApplyBtn" type="button" title="Point each role at its top-scoring model from the benchmark.">4 · Apply best</button>
       </div>
       <div class="hint" style="margin-top:6px;"><b>Find</b> lists installed models (fast, no scoring) → <b>Benchmark</b> scores them all (slow) → <b>Speed-test</b> fills the <b>placement matrix</b> (times each qualified model on the other nodes it lives on, so you learn which edges can host which models for background/council work — slow is fine there) → <b>Apply</b> routes each role to the best.</div>
