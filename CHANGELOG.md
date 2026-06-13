@@ -7,6 +7,16 @@ Pre-1.0: the API and schema may change between releases.
 
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
+### Fixed
+- **Per-node speed was clobbered model-wide, wrecking the placement matrix.** `update_catalogue_scores`
+  wrote `return_time` with `WHERE model=?`, so the *one* node a model was tested on had its latency
+  stamped onto **every** node's row — making a 12B look like 1.5s/turn on a Pi *and* the beast. Speed
+  is per-node: it now lives solely in `update_catalogue_speed` (per `(node, model)`), and
+  `update_catalogue_scores` writes `return_time` only when explicitly given (legacy/single-node
+  callers), omitting it otherwise. The benchmark records each node's real speed and leaves unmeasured
+  pairings blank — so the matrix is now honest. The Fleet tab's manual 1·2·3 buttons also light up as
+  the tournament runs (scan → score → apply), instead of staying grey.
+
 ### Fixed (benchmark hangs)
 - **The latency cap didn't actually bound the benchmark — a 7s cap could still hang for minutes.**
   Three compounding causes: (1) the pre-gate **warmup was untimed** (120s ceiling) *and* generated

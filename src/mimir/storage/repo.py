@@ -428,7 +428,7 @@ def update_catalogue_scores(
     gateway: StorageGateway,
     model: str,
     *,
-    return_time: float | None,
+    return_time: float | None = None,
     quality: float | None,
     talk: float | None,
     tools: float | None,
@@ -438,14 +438,22 @@ def update_catalogue_scores(
     epistemics: float | None = None,
     reasoning: float | None = None,
 ) -> None:
-    """Write benchmark scores for every catalogue row of a model (quality is node-independent)."""
+    """Write the **node-independent** scores (quality + capability dims) to every catalogue row of a
+    model. ``return_time`` is **per-node** — it belongs to ``update_catalogue_speed`` and is written
+    here only when explicitly given (omitted from the SQL when ``None``), so the benchmark, which
+    records speed per node, never clobbers a model's per-node times with one model-wide value.
+    """
 
     def _write(conn: sqlite3.Connection) -> None:
+        cols = ["quality=?", "talk=?", "tools=?", "code=?",
+                "coherence=?", "discipline=?", "epistemics=?", "reasoning=?"]
+        params: list[object] = [quality, talk, tools, code, coherence, discipline,
+                                epistemics, reasoning]
+        if return_time is not None:   # legacy/single-node callers may still set it model-wide
+            cols.insert(0, "return_time=?")
+            params.insert(0, return_time)
         conn.execute(
-            "UPDATE model_catalogue SET return_time=?, quality=?, talk=?, tools=?, code=?, "
-            "coherence=?, discipline=?, epistemics=?, reasoning=? WHERE model=?",
-            (return_time, quality, talk, tools, code, coherence, discipline, epistemics,
-             reasoning, model),
+            f"UPDATE model_catalogue SET {', '.join(cols)} WHERE model=?", (*params, model),
         )
 
     gateway.submit(_write)

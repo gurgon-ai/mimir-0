@@ -693,13 +693,15 @@ def benchmark_fleet(
                      done_count, total, model_name, bench.quality, bench.return_time,
                      f" on {chosen}" if chosen else "")
             if persist:
+                # Node-independent scores model-wide; return_time is per-node (NOT set here, or it
+                # would stamp the chosen node's latency onto every node row and wreck the matrix).
                 update_catalogue_scores(
-                    storage, model_name, return_time=bench.return_time, quality=bench.quality,
+                    storage, model_name, quality=bench.quality,
                     talk=bench.talk, tools=bench.tools, code=bench.code, coherence=bench.coherence,
                     discipline=bench.discipline, epistemics=bench.epistemics,
                     reasoning=bench.reasoning,
                 )
-                if chosen:   # refine the chosen node's speed with the real battery latency
+                if chosen:   # the chosen node's real battery latency — per-node only
                     update_catalogue_speed(storage, chosen, model_name, bench.return_time)
             results.append(bench)
             if progress is not None:
