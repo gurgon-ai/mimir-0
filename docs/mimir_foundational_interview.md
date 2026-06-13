@@ -114,8 +114,12 @@ goes** in Mimir-0's actual stores (§9). All evidence-bearing answers are tagged
    → `triples` + `memories` (entities). (Can merge into Q2 to tighten to a Core 11.)
 6. **What do you most want my help with — what's my job here?**
    → `memories` (mission) + a seed `self_model` (MemoryKind.SELF_MODEL): the start of "who I am."
-7. **What does a normal week look like — routines, cycles, standing commitments?**
-   → `memories` (routines). Temporal grounding for reminders and salience.
+7. **What does a normal week look like — routines, cycles, standing commitments? And when are you
+   usually away or asleep?**
+   → `memories` (routines) for temporal grounding/salience; the away/asleep window → config: the
+   **idle period**. Operationally load-bearing: it's the cron for heavy idle cognition (bake the
+   backlog, reason over the whole DB, surface discrepancies to the inner council for adversarial
+   review) — capacity-bound work that should run on the most capable model, latency irrelevant.
 8. **What do you like to do? Anything worth my knowing so I'm useful, not generic?**
    → `memories` (preferences).
 9. **When you ask me something, what's your default answer — brief, detailed, options with
