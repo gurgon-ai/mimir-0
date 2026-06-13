@@ -137,10 +137,23 @@ don't *need* to squeeze each node.
   scheduler, different battery depth.)
 - **Round 2 Finals = the speed/placement round.** For the eligible survivors, fill in the per-node
   speed matrix: we already have `speed[(M,N)]` for the nodes we tested on; the finals measures the
-  *remaining* enabled nodes (skipping pairings already recorded — minimal duplication). Then apply
-  `max_latency_s`: a (model, node) is **viable** iff `speed ≤ cap`; a model is routable iff it has
-  ≥1 viable node; each role's champion = best quality among routable, placed on its fastest viable
-  node. The pool does live node selection per call from there.
+  *remaining* enabled nodes (skipping pairings already recorded — minimal duplication).
+
+**Latency is a USER-FACING concern only — apply it last, and only where someone is waiting.** Most of
+Mimir's work is idle/between-turns (council, the sentinel's async pass, sleep, the burst worker
+reclaiming idle GPU); for that, latency is irrelevant and **absolute capacity wins** — you'd run the
+biggest, slowest, most capable model. So roles split by latency-sensitivity:
+
+- **User-facing roles (`chat`, tools-in-a-turn):** apply `max_latency_s`. A (model, node) is
+  **viable** iff `speed ≤ cap`; the role is routable iff it has ≥1 viable node; champion = best
+  quality among routable, placed on its fastest viable node. The pool does live node selection from there.
+- **Idle roles (council, sentinel, reasoning, bake, sleep, burst-worker):** **no cap** — champion =
+  best quality, full stop; placed on its fastest *capable* node (speed only breaks ties).
+
+A slow-but-brilliant model that fails the chat cap everywhere is therefore **kept** and routed to the
+idle roles where it's the best choice — it just drops off the user-facing shortlist. The scheduler's
+"never fail capability on speed" invariant (§1) is what makes this possible: capacity is preserved
+for every model, and the cap is a final, user-facing-only filter.
 
 ## 8. Failure modes (fail-loud)
 
