@@ -52,18 +52,20 @@ log = logging.getLogger("mimir.server")
 # never a server fault, so it must not log a stack trace.
 _CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
-# The qualifying tournament's rounds. Round 4 (vision) is reserved until the vision dimension ships,
-# so the live total is 3. Each round narrows the field; the user vetoes between rounds (DESIGN §4).
+# The qualifying tournament's rounds. The first is the Qualifying round (numbered Round 0 — it
+# qualifies the field before the real rounds); Round 3 (Vision) is reserved until the vision
+# dimension ships. ``n`` is the internal 1-based index; ``label`` is what the user sees. Each round
+# narrows the field; the user vetoes between rounds (DESIGN §4).
 _TOURNEY_ROUNDS: tuple[dict[str, Any], ...] = (
-    {"n": 1, "key": "triage", "name": "Triage",
-     "blurb": "Fast scoring to narrow the field — the cheap battery only, no gauntlet, nothing saved."},
-    {"n": 2, "key": "gauntlet", "name": "Framework gauntlet",
-     "blurb": "The real qualification on the survivors: reasoning + the epistemic framework "
+    {"n": 1, "key": "qualifying", "label": "Round 0", "name": "Qualifying",
+     "blurb": "Fast scoring to qualify the field — the cheap battery only, no gauntlet, nothing saved."},
+    {"n": 2, "key": "gauntlet", "label": "Round 1", "name": "Framework gauntlet",
+     "blurb": "The real test on the survivors: reasoning + the epistemic framework "
               "(layered tiers, grounding, long-context). Scores are saved."},
-    {"n": 3, "key": "finals", "name": "Finals",
+    {"n": 3, "key": "finals", "label": "Round 2", "name": "Finals",
      "blurb": "The per-role champions among your finalists — confirm, then Apply."},
 )
-_TOURNEY_TOTAL = 3
+_TOURNEY_TOTAL = 3  # active rounds (0–2); Round 3 (Vision) is reserved
 
 
 class MimirHTTPServer(ThreadingHTTPServer):
@@ -434,7 +436,8 @@ class _Handler(BaseHTTPRequestHandler):
                 prev = [r for r in srv.tourney_state.get("results", []) if r["model"] in keep]
                 meta = _TOURNEY_ROUNDS[2]
                 srv.tourney_state.update(
-                    round=3, round_name=meta["name"], round_key="finals", blurb=meta["blurb"],
+                    round=3, round_name=meta["name"], round_key="finals",
+                    round_label=meta["label"], blurb=meta["blurb"],
                     phase="done", current="", recommendations=recs, results=prev,
                     finalists=sorted(keep),
                 )
@@ -462,9 +465,9 @@ class _Handler(BaseHTTPRequestHandler):
             scope = dict(srv.tourney_state.get("scope", {}))
             srv.tourney_state.update(
                 active=True, round=round_num, round_name=meta["name"], round_key=meta["key"],
-                blurb=meta["blurb"], total_rounds=_TOURNEY_TOTAL, phase="running",
-                i=0, total=0, current="scanning the fleet…", eta=None, results=[],
-                error=None, recommendations=None,
+                round_label=meta["label"], blurb=meta["blurb"], total_rounds=_TOURNEY_TOTAL,
+                phase="running", i=0, total=0, current="scanning the fleet…", eta=None,
+                results=[], error=None, recommendations=None,
             )
 
         def _progress(i: int, total: int, model: str, eta: float | None) -> None:
@@ -865,9 +868,9 @@ _HTML = """<!doctype html>
       </div>
       <div class="hint" style="margin-top:6px;"><b>Find</b> lists installed models (fast, no scoring) → <b>Benchmark</b> scores them by running tests (slow) → <b>Apply</b> routes each role to the best.</div>
       <div class="row" style="margin-top:10px;">
-        <button id="fleetTourneyBtn" type="button" title="A staged, knock-out qualifier: fast triage → you pick survivors → the full framework gauntlet → finals. You choose who advances between rounds.">🏆 Run qualifying tournament</button>
+        <button id="fleetTourneyBtn" type="button" title="A staged knock-out: Round 0 qualifying (fast) → you pick survivors → Round 1 the full framework gauntlet → Round 2 finals. You choose who advances between rounds.">🏆 Run qualifying tournament</button>
       </div>
-      <div class="hint" style="margin-top:6px;">The tournament narrows the fleet in rounds — <b>triage</b> (fast) → <b>🥊 you keep the survivors</b> → <b>framework gauntlet</b> (the real test) → <b>finals</b>. The scoreboard takes over the chat pane.</div>
+      <div class="hint" style="margin-top:6px;">The tournament narrows the fleet in rounds — <b>Round 0 · Qualifying</b> (fast) → <b>🥊 you keep the survivors</b> → <b>Round 1 · Framework gauntlet</b> (the real test) → <b>Round 2 · Finals</b>. (Round 3 · Vision is reserved.) The scoreboard takes over the chat pane.</div>
       <div class="row" style="margin-top:8px; align-items:center; gap:14px; flex-wrap:wrap;">
         <label class="hint" style="display:flex; align-items:center; gap:6px;">Benchmark — min model size (B)
           <input type="number" id="benchMinSize" min="0" step="1" style="width:70px;"/></label>
@@ -1269,8 +1272,8 @@ function tourneyTable(results, showChecks, round) {
 function renderTourney(s) {
   if (_benchBoardClosed) return;
   benchShow(true);
-  const round = s.round || 1, total = s.total_rounds || 3, phase = s.phase;
-  let h = `<h2>🏆 Tournament — Round ${round}/${total}: ${s.round_name || ""} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
+  const round = s.round || 1, phase = s.phase, label = s.round_label || `Round ${round}`;
+  let h = `<h2>🏆 Tournament — ${label} · ${s.round_name || ""} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
   h += `<div class="legend">${s.blurb || ""} &nbsp;|&nbsp; ✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50</div>`;
   if (phase === "running") {
     const eta = (s.eta != null) ? ` · ~${fmtDuration(s.eta)} left` : "";
@@ -1279,7 +1282,7 @@ function renderTourney(s) {
   if (s.round_key === "finals") h += renderFinals(s.recommendations);
   h += tourneyTable((s.results || []).slice(), phase === "awaiting_veto", round);
   if (phase === "awaiting_veto") {
-    const next = round === 1 ? "🥊 FIGHT → Round 2 (gauntlet)" : "🏁 Compute finals";
+    const next = round === 1 ? "🥊 FIGHT → Round 1 (gauntlet)" : "🏁 Compute finals (Round 2)";
     h += `<div class="row" style="margin-top:12px; gap:10px; align-items:center;"><button id="tourneyAdvanceBtn" type="button" onclick="advanceTourney()">${next}</button><span class="hint">Untick any model you don't want to advance, then ${round === 1 ? "fight" : "finalize"}.</span></div>`;
   } else if (phase === "done") {
     h += '<div class="row" style="margin-top:12px; gap:10px;"><button id="tourneyApplyBtn" type="button" onclick="applyTourney()">✅ Apply finals to roles</button><button class="secondary" type="button" onclick="closeBench()">Done</button></div>';
@@ -1300,11 +1303,12 @@ async function pollTournament() {
       renderTourney(s);
       if (s.phase === "running") {
         const eta = (s.eta != null) ? ` · ~${fmtDuration(s.eta)} left` : "";
-        $("fleetMsg").textContent = s.total ? `Round ${s.round}: ${s.i}/${s.total} ${s.current}…${eta}` : `Round ${s.round}: ${s.current || "preparing"}…`;
+        const lbl = s.round_label || `Round ${s.round}`;
+        $("fleetMsg").textContent = s.total ? `${lbl}: ${s.i}/${s.total} ${s.current}…${eta}` : `${lbl}: ${s.current || "preparing"}…`;
         await new Promise(r => setTimeout(r, 1500));
         continue;
       }
-      if (s.phase === "awaiting_veto") { $("fleetMsg").textContent = `Round ${s.round} done — pick who advances, then FIGHT.`; btnState("fleetTourneyBtn", "done"); }
+      if (s.phase === "awaiting_veto") { $("fleetMsg").textContent = `${s.round_label || ("Round " + s.round)} done — pick who advances, then FIGHT.`; btnState("fleetTourneyBtn", "done"); }
       else if (s.phase === "done") { $("fleetMsg").textContent = "🏆 Tournament complete — review the finals."; btnState("fleetTourneyBtn", "done"); }
       else if (s.phase === "error") { $("fleetMsg").textContent = "Tournament error: " + s.error; btnState("fleetTourneyBtn", "failed"); }
       break;   // interactive now — stop polling until the user acts
