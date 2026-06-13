@@ -724,3 +724,56 @@ def benchmark_fleet(
         eligible=len(eligible), skipped_too_big=len(too_big),
         skipped_too_small=len(too_small), skipped_too_slow=len(no_viable),
     )
+
+
+def complete_speed_matrix(
+    storage: StorageGateway, *, min_quality: float = 0.5, num_ctx: int = 8192,
+    timeout_s: float = 90.0, disabled_nodes: set[str] | None = None,
+    only_models: set[str] | None = None,
+    progress: Callable[[int, int, str], None] | None = None,
+) -> int:
+    """The **final time trial**: fill the per-node placement matrix. Qualification establishes
+    capability (per-model) and times each model on whatever node it ran on; this pass speed-tests
+    each **acceptable** model (``quality >= min_quality``) on every enabled http node it's installed
+    on but **not yet timed on** — "which edge runs what, how fast" for the background pool.
+
+    Reads the EXISTING catalogue (no rescan — that would wipe the quality scores). Slow results are
+    RECORDED, never dropped: a slow (model, node) is still a real resource for capacity-bound
+    work. A generous per-probe timeout captures a slow-but-real number rather than cutting it.
+    Concurrent across nodes (one model at a time per node — VRAM). Returns the pairings probed.
+    """
+    disabled_nodes = disabled_nodes or set()
+    pending: dict[str, list[str]] = {}   # node → models still to time on it
+    for e in list_catalogue(storage):
+        if not e.node.startswith("http") or e.node in disabled_nodes:
+            continue
+        if "embed" in e.model.lower() or e.return_time is not None:
+            continue   # not a chat model, or already timed on this node
+        if e.quality is None or e.quality < min_quality:
+            continue   # only bother timing models good enough to place
+        if only_models is not None and e.model not in only_models:
+            continue
+        pending.setdefault(e.node, []).append(e.model)
+    total = sum(len(v) for v in pending.values())
+    log.info("matrix: %d (model, node) pairings to time across %d node(s)", total, len(pending))
+    if not total:
+        return 0
+    state_lock = threading.Lock()
+    done = 0
+
+    def _worker(item: tuple[str, list[str]]) -> None:
+        nonlocal done
+        node, models = item
+        for m in models:
+            speed = _measure_node_speed(node, m, timeout_s=timeout_s, warmup=True, num_ctx=num_ctx)
+            with state_lock:
+                done += 1
+                if speed is not None:
+                    update_catalogue_speed(storage, node, m, speed)   # record even if slow
+                if progress is not None:
+                    progress(done, total, f"{m} @ {node}")
+
+    with ThreadPoolExecutor(max_workers=max(1, len(pending)), thread_name_prefix="trial") as ex:
+        list(ex.map(_worker, pending.items()))
+    log.info("matrix: timed %d pairing(s)", total)
+    return total

@@ -89,6 +89,41 @@ def test_choose_test_node_picks_fast_enough_else_fastest_never_fails() -> None:
     assert node is None and sp == {}
 
 
+def test_complete_speed_matrix_times_only_untimed_acceptable_http_pairings(db_path: str) -> None:
+    from mimir.cognition.benchmark import complete_speed_matrix
+    from mimir.storage.gateway import StorageGateway
+    from mimir.storage.models import CatalogueEntry
+    from mimir.storage.repo import (
+        replace_catalogue,
+        update_catalogue_scores,
+        update_catalogue_speed,
+    )
+
+    sg = StorageGateway(db_path)
+    n = "http://127.0.0.1:9"   # a refused port → the probe fails fast (no real Ollama needed)
+    try:
+        replace_catalogue(sg, [
+            CatalogueEntry(node=n, model="good:8b", family="x", params_b=8.0, scanned_at=1.0),
+            CatalogueEntry(node=n, model="timed:8b", family="x", params_b=8.0, scanned_at=1.0),
+            CatalogueEntry(node=n, model="weak:8b", family="x", params_b=8.0, scanned_at=1.0),
+            CatalogueEntry(node="endpoint-0", model="local:8b", family="x", params_b=8.0,
+                           scanned_at=1.0),
+            CatalogueEntry(node=n, model="nomic-embed", family="x", params_b=0.1, scanned_at=1.0),
+        ])
+        sc = dict(talk=1.0, tools=1.0, code=1.0, coherence=None, discipline=1.0, epistemics=1.0,
+                  reasoning=1.0)
+        update_catalogue_scores(sg, "good:8b", quality=0.9, **sc)    # acceptable, untimed → probe
+        update_catalogue_scores(sg, "timed:8b", quality=0.9, **sc)
+        update_catalogue_speed(sg, n, "timed:8b", 5.0)               # already timed → skip
+        update_catalogue_scores(sg, "weak:8b", quality=0.3, **sc)    # below the floor → skip
+        update_catalogue_scores(sg, "local:8b", quality=0.9, **sc)   # non-http node → skip
+        # nomic-embed: never scored (embed) → skip
+        timed = complete_speed_matrix(sg, min_quality=0.5, num_ctx=2048)
+        assert timed == 1   # only good:8b qualifies for a time trial
+    finally:
+        sg.close()
+
+
 def test_outside_in_ordering() -> None:
     from mimir.cognition.benchmark import _outside_in
 

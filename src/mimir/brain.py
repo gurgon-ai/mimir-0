@@ -24,6 +24,7 @@ from typing import Any
 from .cognition.bake import bake
 from .cognition.benchmark import FleetBenchmarkResult, ModelBenchmark
 from .cognition.benchmark import benchmark_fleet as _benchmark_fleet
+from .cognition.benchmark import complete_speed_matrix as _complete_speed_matrix
 from .cognition.council import CouncilResult, deliberate
 from .cognition.epistemics import EpistemicResult, run_epistemics
 from .cognition.fleet import (
@@ -644,6 +645,19 @@ class Mimir:
             persist=persist,
             progress=progress,
             on_result=on_result,
+        )
+
+    def complete_speed_matrix(
+        self, *, only_models: set[str] | None = None,
+        progress: Callable[[int, int, str], None] | None = None,
+    ) -> int:
+        """The final time trial: speed-test acceptable models on the enabled nodes they're installed
+        on but not yet timed on — completing the per-node placement matrix for the background pool.
+        Reads the existing catalogue (does NOT rescan — that would wipe the quality scores)."""
+        ctx = self.config.backend.benchmark_num_ctx if self.config.backend else 8192
+        return _complete_speed_matrix(
+            self._storage, num_ctx=ctx, disabled_nodes=disabled_nodes(self._storage),
+            only_models=only_models, progress=progress,
         )
 
     def evaluate_epistemics(

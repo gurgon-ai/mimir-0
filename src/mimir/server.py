@@ -86,6 +86,9 @@ class MimirHTTPServer(ThreadingHTTPServer):
         # background-run + poll pattern as the benchmark. Its own lock so status reads never block.
         self.tourney_lock = threading.Lock()
         self.tourney_state: dict[str, Any] = {"active": False}
+        # The "final time trial" — fills the per-node placement matrix in the background.
+        self.matrix_lock = threading.Lock()
+        self.matrix_state: dict[str, Any] = {"running": False}
 
 
 def create_server(brain: Mimir, host: str = "127.0.0.1", port: int = 8765) -> MimirHTTPServer:
@@ -163,6 +166,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._benchmark_status())
             elif route == "/api/fleet/tournament/status":
                 self._send_json(self._tournament_status())
+            elif route == "/api/fleet/matrix/status":
+                with self.server.matrix_lock:
+                    self._send_json(dict(self.server.matrix_state))
             elif route == "/favicon.ico":
                 self._send(204, b"", "image/x-icon")
             else:
@@ -204,6 +210,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._tournament_advance(body))
             elif route == "/api/fleet/tournament/apply":
                 self._send_json(self._tournament_apply())
+            elif route == "/api/fleet/matrix":
+                self._send_json(self._matrix_start())
             elif route == "/api/fleet/apply":
                 self._send_json({"applied": self._apply_recommendations()})
             elif route == "/api/fleet/model":
@@ -399,6 +407,34 @@ class _Handler(BaseHTTPRequestHandler):
     def _tournament_status(self) -> dict[str, Any]:
         with self.server.tourney_lock:
             return dict(self.server.tourney_state)
+
+    def _matrix_start(self) -> dict[str, Any]:
+        """Kick off the final time trial in the background: speed-test acceptable models on the
+        enabled nodes they're installed on but not yet timed on. UI polls /api/fleet/matrix/status."""
+        srv = self.server
+        with srv.matrix_lock:
+            if srv.matrix_state.get("running"):
+                return {"started": False, **srv.matrix_state}
+            srv.matrix_state = {"running": True, "i": 0, "total": 0, "current": "scanning…",
+                                "done": False}
+
+        def _progress(i: int, total: int, what: str) -> None:
+            with srv.matrix_lock:
+                srv.matrix_state.update(i=i, total=total, current=what)
+
+        def _run() -> None:
+            try:
+                with srv.brain_lock:
+                    timed = srv.brain.complete_speed_matrix(progress=_progress)
+                with srv.matrix_lock:
+                    srv.matrix_state.update(running=False, done=True, current="", timed=timed)
+            except Exception as exc:   # surfaced via status, never a silent death (DESIGN §10)
+                log.exception("speed-matrix time trial failed")
+                with srv.matrix_lock:
+                    srv.matrix_state.update(running=False, done=True, error=str(exc))
+
+        threading.Thread(target=_run, name="mimir-matrix", daemon=True).start()
+        return {"started": True}
 
     def _tournament_start(self, body: dict[str, Any]) -> dict[str, Any]:
         """Begin the tournament at Round 1 (triage). Scope caps (size floor/ceiling, latency) are
@@ -879,6 +915,10 @@ _HTML = """<!doctype html>
         <button id="fleetTourneyBtn" type="button" title="The recommended path. A staged knock-out: Round 0 qualifying (fast) → you pick survivors → Round 1 the full framework gauntlet → Round 2 finals. You choose who advances between rounds.">🏆 Run qualifying tournament</button>
       </div>
       <div class="hint" style="margin-top:6px;">The recommended way to qualify your fleet — narrows it in rounds: <b>Round 0 · Qualifying</b> (fast) → <b>🥊 you keep the survivors</b> → <b>Round 1 · Framework gauntlet</b> (the real test) → <b>Round 2 · Finals</b>. (Round 3 · Vision is reserved.) The scoreboard takes over the chat pane.</div>
+      <div class="row" style="margin-top:10px;">
+        <button class="secondary" id="fleetMatrixBtn" type="button" title="The final time trial: speed-test each qualified model on every node it's installed on but not yet timed, so we know which edge can run what (the background-worker map). Records even slow results.">⏱ Speed-test remaining nodes</button>
+      </div>
+      <div class="hint" style="margin-top:6px;">After qualifying, this fills the <b>placement matrix</b> — times every qualified model on the nodes it lives on but wasn't timed on, so you learn which edges can host which models for background/council work (slow is fine there). Per-node times then fill in below.</div>
       <div class="hint" style="margin-top:14px; opacity:0.8;">— or do it manually, one step at a time —</div>
       <div class="row" style="margin-top:6px;">
         <button class="secondary" id="fleetScanBtn" type="button" title="List what models are installed on each node. Fast — runs no models.">1 · Find models</button>
@@ -1189,6 +1229,8 @@ async function loadFleet() {
 // this just reconnects the view, so you always know whether something is still going.
 async function resumeFleetWork() {
   try {
+    const ms = await api("GET", "/api/fleet/matrix/status");
+    if (ms.running) pollMatrix();
     const bs = await api("GET", "/api/fleet/benchmark/status");
     if (bs.running) { _benchBoardClosed = false; pollBenchmark(); return; }
     const ts = await api("GET", "/api/fleet/tournament/status");
@@ -1451,6 +1493,35 @@ $("fleetTourneyBtn").addEventListener("click", async () => {
     await api("POST", "/api/fleet/tournament/start", scope);   // returns immediately; runs in the background
     pollTournament();
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; btnState("fleetTourneyBtn", "failed"); }
+});
+
+let _matrixPolling = false;
+async function pollMatrix() {
+  if (_matrixPolling) return;
+  _matrixPolling = true; $("fleetMatrixBtn").disabled = true; btnState("fleetMatrixBtn", "working");
+  try {
+    while (true) {
+      const s = await api("GET", "/api/fleet/matrix/status");
+      if (s.error) { $("fleetMsg").textContent = "Time trial error: " + s.error; btnState("fleetMatrixBtn", "failed"); break; }
+      if (s.done || !s.running) {
+        btnState("fleetMatrixBtn", "done");
+        if (s.timed !== undefined) $("fleetMsg").textContent = `⏱ Time trial done — timed ${s.timed} (model, node) pairing(s). Per-node times below are now complete.`;
+        loadFleet();
+        break;
+      }
+      $("fleetMsg").textContent = s.total ? `⏱ Time trial ${s.i}/${s.total}: ${s.current}…` : `⏱ ${s.current || "preparing"}…`;
+      await new Promise(r => setTimeout(r, 1200));
+    }
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
+  _matrixPolling = false; $("fleetMatrixBtn").disabled = false;
+}
+
+$("fleetMatrixBtn").addEventListener("click", async () => {
+  $("fleetMsg").textContent = "Starting the time trial…"; btnState("fleetMatrixBtn", "working");
+  try {
+    await api("POST", "/api/fleet/matrix", {});   // returns immediately; runs in the background
+    pollMatrix();
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; btnState("fleetMatrixBtn", "failed"); }
 });
 
 $("fleetApplyBtn").addEventListener("click", async () => {
