@@ -49,6 +49,14 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **The final time trial — per-node placement matrix.** A new Fleet-tab action ("⏱ Speed-test
+  remaining nodes") and `brain.complete_speed_matrix()` that, after qualification, speed-tests each
+  **acceptable** model (quality ≥ a floor) on every enabled node it's *installed on but wasn't timed
+  on* — so the catalogue learns *which edge can run what, how fast*. Slow results are **recorded, not
+  dropped** (a slow `(model, node)` is still a real backend resource for capacity-bound council/
+  background work); the probe timeout is generous so a slow-but-real number is captured. Reads the
+  existing catalogue (no rescan — preserves the quality scores), runs concurrently across nodes, and
+  the per-node times fill into the fleet view. This is the input to the background-worker roster.
 - **Concurrent, distributed qualification.** The benchmark now runs **one worker per enabled node**
   (the worker is the node's VRAM lock — one model at a time), with each model's candidate nodes
   **rotated** so different models start on different boxes (spread → real parallelism). Each model
