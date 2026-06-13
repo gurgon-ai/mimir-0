@@ -48,6 +48,7 @@ _LATENCY_PROMPT: list[Message] = [
 ]
 _LATENCY_NORM_TOKENS: int = 256   # report seconds per ~256-token turn (verbosity-independent)
 _LATENCY_MIN_TOKENS: int = 32     # floor so a terse/refusing model can't divide-by-tiny to nonsense
+_GATE_PREDICT: int = 64           # tokens the pre-gate generates to measure real per-turn latency
 
 
 def _measure_turn_latency(chat_fn: Callable[[list[Message]], str]) -> float:
@@ -455,38 +456,43 @@ def _measure_node_speed(
     node: str, model_name: str, *, timeout_s: float = SPEED_TIMEOUT_S, warmup: bool = False,
     num_ctx: int = 8192,
 ) -> float | None:
-    """Time a trivial call to a *specific* node directly (no pool/retry); None for non-URL nodes.
+    """Measure a node's **per-turn latency** for a model directly (no pool/retry); None for non-URL.
 
-    With ``warmup`` (used by benchmarking), the model is **loaded into VRAM first via an untimed
-    call**, so the returned time reflects *warm steady-state* latency, not the one-time cold swap —
-    models get evicted between benchmarks, and timing the load would both pollute the score and
-    unfairly trip the latency gate (e.g. skipping a 26B that's fast warm but slow to load). A model
-    that can't even load within ``WARMUP_TIMEOUT_S`` is reported as that-slow (so it's skipped).
+    Times a *representative* ~64-token generation and normalizes to **seconds per ~256-token turn**
+    — the same units as the latency cap. A trivial "reply ok" can't tell a model that's snappy on
+    one token from one that's 13s/turn on real generation, so it would let a slow model sail through
+    the pre-gate and only reveal itself after the multi-call battery (the bug behind a 7s cap not
+    skipping a 160s model). This measures the thing the cap actually means.
 
-    ``num_ctx`` matches the battery's context so the model loads ONCE at that size and stays warm —
-    otherwise the pre-gate would load it at one context and the battery reload it at another.
+    With ``warmup``, the model is **loaded into VRAM first** with a single token (so a thinking
+    model can't reason for minutes during the untimed load), so the timing reflects steady-state,
+    not the one-time cold swap. A model that can't load within ``WARMUP_TIMEOUT_S`` is reported as
+    that-slow (skipped). ``num_ctx`` matches the battery so the model loads once and stays warm.
 
-    Returns elapsed seconds — even on timeout/failure, the elapsed time is the 'too slow' signal.
+    Returns normalized seconds/turn — even on timeout/failure, the (large) elapsed time is the 'too
+    slow' signal that trips the gate.
     """
     if not node.startswith("http"):
         return None  # mock/non-URL node — nothing real to time
     opts = {"num_ctx": num_ctx}
     if warmup:
         try:
-            # Load into VRAM with a SINGLE token, so a thinking model can't reason for minutes
-            # during the (untimed) warmup — the bug behind a 7s latency cap still hanging 120s+.
             OllamaProvider(node, timeout=WARMUP_TIMEOUT_S).chat(
                 model_name, _SPEED_PROMPT, {**opts, "max_tokens": 1}
             )
         except Exception:
             return round(WARMUP_TIMEOUT_S, 3)  # couldn't load in time → unusably slow → skip
-    provider = OllamaProvider(node, timeout=timeout_s)
+    # Bound the measurement generously (a model that can't emit 64 tokens in this window is doomed),
+    # but always at least 30s so a near-the-cap model isn't cut by the measurement timeout itself.
+    provider = OllamaProvider(node, timeout=max(30.0, timeout_s))
     started = time.monotonic()
     try:
-        provider.chat(model_name, _SPEED_PROMPT, opts)
+        out = provider.chat(model_name, _LATENCY_PROMPT, {**opts, "max_tokens": _GATE_PREDICT})
     except Exception:
-        return round(time.monotonic() - started, 3)  # the (timed-out) duration ranks it slow
-    return round(time.monotonic() - started, 3)
+        return round(time.monotonic() - started, 3)  # timed out generating → ranks it slow → skip
+    elapsed = time.monotonic() - started
+    approx_tokens = max(_LATENCY_MIN_TOKENS, len(out) // 4)   # ~4 chars/token
+    return round(elapsed / approx_tokens * _LATENCY_NORM_TOKENS, 3)   # seconds per ~256-token turn
 
 
 # When the user hasn't set a latency target, still skip a model whose trivial-prompt call takes
