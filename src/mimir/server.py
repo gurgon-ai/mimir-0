@@ -1397,8 +1397,9 @@ function renderTourney(s) {
     const next = round === 1 ? "🥊 FIGHT → Round 1 (gauntlet)" : "🏁 Compute finals (Round 2)";
     h += `<div class="row" style="margin-top:12px; gap:10px; align-items:center;"><button id="tourneyAdvanceBtn" type="button" onclick="advanceTourney()">${next}</button><span class="hint">Untick any model you don't want to advance, then ${round === 1 ? "fight" : "finalize"}.</span></div>`;
   } else if (phase === "done") {
-    h += '<div class="hint" style="margin-top:12px;">🏆 Tournament complete. Next: <b>3 · Speed-test</b> the remaining nodes (fills the placement matrix — which edges can host which models), <i>then</i> <b>4 · Apply</b> the finals to your roles.</div>';
+    h += '<div class="hint" style="margin-top:12px;">🏆 Tournament complete. <b>4 · Apply</b> routes your chat / bake / reasoning roles now. <b>3 · Speed-test</b> is optional — it times the remaining edges to fill the placement matrix (which edge can host which model, for future background/council work); slow edges take 30–70s each. You can Apply without it.</div>';
     h += '<div class="row" style="margin-top:8px; gap:10px;"><button class="secondary" type="button" onclick="speedTestFromTourney()">⏱ 3 · Speed-test remaining nodes</button><button id="tourneyApplyBtn" type="button" onclick="applyTourney()">✅ 4 · Apply finals to roles</button><button class="secondary" type="button" onclick="closeBench()">Done</button></div>';
+    h += '<div id="tourneyMatrixMsg" class="hint" style="margin-top:6px;"></div>';
   } else if (phase === "error") {
     h += `<div class="hint" style="color:#ff8a8a; margin-top:10px;">Error: ${s.error}</div>`;
   }
@@ -1553,27 +1554,35 @@ async function pollMatrix() {
       if (s.error) { $("fleetMsg").textContent = "Time trial error: " + s.error; btnState("fleetMatrixBtn", "failed"); break; }
       if (s.done || !s.running) {
         btnState("fleetMatrixBtn", "done");
-        if (s.timed !== undefined) $("fleetMsg").textContent = `⏱ Time trial done — timed ${s.timed} (model, node) pairing(s). Per-node times below are now complete.`;
+        const msg = (s.timed === 0)
+          ? "✓ Speed-test: every eligible model is already timed — nothing to do. Go ahead and Apply."
+          : (s.timed !== undefined ? `✓ Speed-test complete — timed ${s.timed} (model, node) pairing(s). Per-node times are now filled in.` : "✓ Speed-test done.");
+        _setMatrixMsg(msg);
         loadFleet();
         break;
       }
-      $("fleetMsg").textContent = s.total ? `⏱ Time trial ${s.i}/${s.total}: ${s.current}…` : `⏱ ${s.current || "preparing"}…`;
+      _setMatrixMsg(s.total ? `⏱ Speed-testing ${s.i}/${s.total}: ${s.current}… (slow edges can take 30–70s each)` : `⏱ ${s.current || "checking which pairings need timing"}…`);
       await new Promise(r => setTimeout(r, 1200));
     }
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
   _matrixPolling = false; $("fleetMatrixBtn").disabled = false;
 }
 
+// Mirror time-trial status to BOTH the Fleet tab (fleetMsg) and the tournament board
+// (tourneyMatrixMsg, when present), so the user gets feedback wherever they're looking.
+function _setMatrixMsg(t) { $("fleetMsg").textContent = t; const b = $("tourneyMatrixMsg"); if (b) b.textContent = t; }
+
 async function startMatrix() {
-  $("fleetMsg").textContent = "Starting the time trial…"; btnState("fleetMatrixBtn", "working");
+  _setMatrixMsg("Starting the time trial — checking which (model, node) pairings still need timing…");
+  btnState("fleetMatrixBtn", "working");
   try {
     const r = await api("POST", "/api/fleet/matrix", {});   // returns immediately; runs in the background
     if (r.started === false) {   // backend refused (a benchmark/tournament is running) — don't poll
-      $("fleetMsg").textContent = r.reason || "The time trial is busy.";
+      _setMatrixMsg(r.reason || "The time trial is busy.");
       btnState("fleetMatrixBtn", null); setMatrixEnabled(!r.busy); return;
     }
     pollMatrix();
-  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; btnState("fleetMatrixBtn", "failed"); }
+  } catch (e) { _setMatrixMsg("Error: " + e.message); btnState("fleetMatrixBtn", "failed"); }
 }
 $("fleetMatrixBtn").addEventListener("click", startMatrix);
 
