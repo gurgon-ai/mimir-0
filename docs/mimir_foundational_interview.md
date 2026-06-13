@@ -1,267 +1,279 @@
 # Mimir-0 Foundational Interview
 
-A design brief for a first-run onboarding interview that makes Mimir feel locally grounded, useful, and bespoke without becoming invasive, annoying, or creepy.
+A first-run "get-to-know-you" that makes Mimir feel locally grounded and bespoke from day one —
+**without** becoming invasive, nosy, or creepy. It is the human half of first-run, run *alongside*
+the qualifying tournament: while the fleet is being scored upstairs, Mimir gets to know its household
+downstairs. By the time the questions are done, a chat model has qualified to make sense of them.
 
-This onboarding interview is justified by Mimir's architecture and goals: the system's value depends heavily on local, user-specific retrieval and memory, the setup flow already includes guided first-run onboarding, and Mimir is explicitly local-first, privacy-sensitive, and fail-loud in its design.[cite:2][cite:3][file:1]
+This is a design brief, not the final UI copy. It is **v0.1+** — built after the v0 acceptance loop
+and the tournament land. It must stay public-clean and **generic**: the questions and their answers
+become *seed config + memories*, never anything hardcoded into the core (see DESIGN §9; the household
+is the canonical example, not a baked-in assumption).
 
-## Purpose
+---
 
-The interview exists to create a **high-value foundation** for retrieval, personalization, and local relevance. It should collect the smallest set of durable facts that meaningfully improve responses, planning, monitoring, memory retrieval, and behavior tuning from day one.[cite:2][cite:8][file:1]
+## 1. Where it lives: paired with the tournament
 
-This is not a personality quiz, therapy intake, or surveillance form. The goal is practical grounding: who the user is in this environment, what this system is for, what “local” means, how the system should behave, and what it should or should not remember.[cite:2][cite:3][cite:8]
+First-run already has dead time — the qualifying tournament spends minutes scoring models. The
+interview fills it. The screen splits: the **tournament board** takes the upper portion (triage →
+veto → gauntlet), and a **one-question-at-a-time interview** sits below. Two things resolve together:
+the fleet picks its brains, and Mimir learns who it serves.
 
-## Design goals
+The pairing isn't just tidy — it's load-bearing. The interview's processing step *needs* a capable
+chat model, and the tournament is busy producing exactly that. So the sequencing falls out for free:
+**capture now (no model required), parse once a model qualifies.**
 
-The onboarding flow should:
+---
 
-- Make Mimir feel *from here* rather than generic, by learning place, context, names, routines, and priorities.[cite:2]
-- Improve day-one usefulness by capturing intended use cases, response preferences, and standing constraints.[cite:2][cite:9]
-- Establish explicit trust boundaries for memory, source trust, sensitivity, and retention behavior.[cite:3][cite:7][cite:8]
-- Stay low-friction enough that a new user completes it willingly during initialization, alongside model discovery and qualification.[cite:2][file:1]
-- Produce structured data that can be edited later, not opaque autobiographical sludge.[cite:2][cite:8]
+## 2. The law: capture deterministically, parse later
 
-## Non-goals
+Mimir's contract is that it boots on Python + SQLite with no model required, and never silently loses
+data (DESIGN §10). The interview obeys this with a strict three-stage pipeline:
 
-The interview should **not**:
+1. **Capture — pure stdlib, no LLM.** The form is plain Python/HTML. Each answer is the user's raw
+   text (or a selected option). Nothing here calls a model.
+2. **Persist raw immediately.** The moment an answer is given it is written to storage as the
+   canonical record — so a crash, a quit, or a fleet with *no* qualifying model loses nothing. The
+   raw answers are the source of truth forever; everything downstream is a derived optimization.
+3. **Parse after a model qualifies** (from the tournament, or any configured chat endpoint). A single
+   structured-extraction pass turns the raw answers into typed records (below), which the user
+   **reviews before they are promoted** to trusted memory.
 
-- Ask for a life story.
-- Ask broad psychoanalytic or emotional questions on first boot.
-- Push for highly sensitive data unless the user volunteers it for a clear operational reason.
-- Store weak-source claims as trusted memory by default.[cite:8]
-- Create the impression that Mimir is silently profiling the user behind the scenes.[cite:3][cite:8]
+If no model ever qualifies, the interview still succeeded: the raw answers are stored and editable,
+and keyword retrieval can use them. The parse pass simply runs later, when a model is available.
 
-## Core principles
+---
 
-1. **Ask only what improves behavior.** Every question should have a downstream use in routing, prompting, retrieval, monitoring, or memory policy.[cite:2][file:1]
-2. **Prefer durable facts over long narratives.** Stable facts and preferences retrieve better than rambling free text.[cite:2][cite:7]
-3. **Label memory consequences clearly.** The user should know whether an answer becomes long-term memory, editable preference, or temporary setup data.[cite:7][cite:8]
-4. **Everything is skippable.** A sovereign local AI should not coerce intimacy.[cite:2][cite:3]
-5. **Normalize after capture.** Answers may be conversational, but the stored form should be structured, tagged, and inspectable.[cite:2][cite:8]
-6. **Editable beats magical.** The canonical profile should be user-editable and reviewable after setup.[cite:2][file:1]
+## 3. Purpose
 
-## Recommended interview shape
+Collect the **smallest set of durable facts that measurably improve behavior** — retrieval,
+prompting, routing, and memory policy — from the first turn. Not a personality quiz, not a therapy
+intake, not a data grab. Practical grounding: who the user is here, who else is around, what this
+place is, what Mimir is *for*, how it should behave, and what it may or may not remember.
 
-For Mimir-0, the best default is a two-layer interview:
+## 4. Design goals
 
-- **Core setup:** 12 required questions, designed to take about 5 to 8 minutes.[cite:2]
-- **Expanded profile:** 8 to 12 optional follow-up questions for users who want deeper personalization.[cite:2]
+- Make Mimir feel *from here* — it learns place, people, routines, and priorities.
+- Improve day-one usefulness — intended jobs, answer style, standing constraints.
+- Set explicit trust and retention boundaries up front.
+- Stay low-friction enough to finish willingly during the tournament's wait.
+- Produce **structured, editable** data — not opaque autobiographical sludge.
 
-This keeps the initialization flow high-impact without making first boot feel like an application form. It also fits the broader setup philosophy already present in Mimir's onboarding design, where discovery, approval, review, and persistence happen in one guided pass.[file:1]
+## 5. Non-goals
 
-## Tone and framing
+- No life story, no childhood, no psychoanalysis on first boot.
+- No pressure for sensitive data unless the user volunteers it for a clear operational reason.
+- Never store a weak-source claim as a trusted fact by default.
+- Never give the impression Mimir is quietly profiling behind the user's back.
 
-The UX copy matters as much as the questions.
+## 6. Principles
 
-Recommended framing:
+1. **Ask only what changes behavior.** Every question has a downstream use in routing, prompting,
+   retrieval, or memory policy. If an answer wouldn't change a future response, cut the question.
+2. **Durable facts over narratives.** Stable facts retrieve better than rambling free text.
+3. **Label the memory consequence.** The user sees whether an answer becomes long-term memory, an
+   editable preference, or temporary setup data — before they answer.
+4. **Everything is skippable.** A sovereign local AI does not coerce intimacy.
+5. **Normalize after capture.** Answers may be conversational; the *stored* form is structured,
+   tiered, and inspectable.
+6. **Editable beats magical.** The profile is reviewable and re-runnable later as "refresh profile,"
+   never a one-time sacred ritual.
 
-> Help Mimir learn your environment, priorities, and boundaries. Answer as much or as little as you want. Everything can be edited later.
+## 7. Tone
 
-Recommended subtext:
+Warm but practical — Mimir's first real conversation with its household, not an onboarding form and
+not a fake-friendly chatbot. First person, plain-spoken, a little dry. Every section says, in one
+line, *why it helps*. Sensitive questions are marked and one tap from skipped.
 
-- “These answers help with local relevance, memory, and personalization.”[cite:2]
-- “Sensitive topics can be skipped.”[cite:3]
-- “You choose what becomes long-term memory.”[cite:7][cite:8]
+> Help me learn this place, the people here, and how you want me to work. Answer as much or as little
+> as you like — everything's editable later, and you choose what I remember.
 
-Avoid language that sounds therapeutic, manipulative, or corporate. The tone should feel practical, respectful, and slightly infrastructural.
+Avoid therapeutic warmth, corporate filler, and anything that sounds like it's mining you.
 
-## Best question set
+---
 
-### Core 12
+## 8. The question set
 
-These should be the default mandatory interview.
+Two layers: a **Core ~12** (the default) and an **Expanded ~8** (optional, for users who want deeper
+grounding) — roughly the "20 questions" shape. Each question is annotated with **→ where the answer
+goes** in Mimir-0's actual stores (§9). All evidence-bearing answers are tagged
+`tier = stated_by_primary_user` (the highest tier, 1.30×) with `provenance = "onboarding"`.
 
-1. **What should I call you, and what should I call myself here?**  
-   Purpose: user naming, system naming, tone anchoring, household personalization.[cite:2][cite:4][cite:6]
-2. **Who are the regular people in this household, team, or environment, and how should I distinguish them?**  
-   Purpose: identity disambiguation, household context, safer memory partitioning.[cite:4]
-3. **Where am I operating, and what nearby places matter most?**  
-   Purpose: local grounding, place-aware retrieval, environmental relevance.[cite:2]
-4. **What counts as “local” for you: on-property, nearby town, region, or something else?**  
-   Purpose: scope control for local retrieval and alerts.[cite:2]
-5. **What are the top three things you want me to help with?**  
-   Purpose: primary use cases, prioritization, early optimization.[cite:2][cite:9]
-6. **What would make Mimir genuinely useful in the first month?**  
-   Purpose: success criteria, onboarding calibration, future evaluation.[cite:2]
-7. **When you ask for help, what kind of answer do you usually want: brief, detailed, step-by-step, options with tradeoffs, or deep analysis?**  
-   Purpose: default response style.[cite:2]
-8. **How should I act when uncertain: ask clarifying questions, give a best effort with caveats, or stay conservative until I know enough?**  
-   Purpose: epistemic behavior and trust alignment.[cite:2][cite:8]
-9. **What facts about you, this place, or this system may I remember long-term?**  
-   Purpose: long-term memory boundary setting.[cite:2][cite:7][cite:8]
-10. **What topics or data should always be treated as sensitive or temporary unless you explicitly approve otherwise?**  
-    Purpose: privacy and retention rules.[cite:3][cite:8][cite:10]
-11. **What sources do you trust most, and which should I treat as low-trust?**  
-    Purpose: source ranking, evidence-tier behavior, memory trust labels.[cite:8][cite:9]
-12. **What standing rules, priorities, or constraints should override convenience?**  
-    Purpose: doctrine, safety rails, household rules, operational boundaries.[cite:2][cite:10]
+### Core
 
-### Expanded 10
+1. **What should I call you — and what would you like to call me?**
+   → `identity` store: `operator_name`, `assistant_name`. (Config-like identity, not a memory.)
+2. **Who else is around here I should know, and how do you refer to them?**
+   → `memories` (one per person, kind=memory) **and** `triples` (operator —lives_with/works_with→ X).
+   Named trusted people seed the future `stated_by_trusted` tier.
+3. **What kind of place is this, and what do you call it?**
+   → `identity`: `location`; plus a `memory` for the descriptive detail.
+4. **When I say "local," what should that mean — this property, the town, the region?**
+   → preference/config: `local_scope`. Bounds place-aware retrieval and alerts.
+5. **Any pets or other regulars in the day-to-day?**
+   → `triples` + `memories` (entities). (Can merge into Q2 to tighten to a Core 11.)
+6. **What do you most want my help with — what's my job here?**
+   → `memories` (mission) + a seed `self_model` (MemoryKind.SELF_MODEL): the start of "who I am."
+7. **What does a normal week look like — routines, cycles, standing commitments?**
+   → `memories` (routines). Temporal grounding for reminders and salience.
+8. **What do you like to do? Anything worth my knowing so I'm useful, not generic?**
+   → `memories` (preferences).
+9. **When you ask me something, what's your default answer — brief, detailed, options with
+   tradeoffs, or step-by-step?**
+   → preference/config: `answer_style`. Feeds the system prompt.
+10. **When I'm unsure, should I ask, give a best effort with caveats, or hold back until I know
+    more?**
+    → preference/config: `uncertainty_mode`. Tunes behavior at the **uncertainty gate** (DESIGN §3d).
+11. **What's fair game to remember long-term, and what should I treat as sensitive or temporary?**
+    → memory policy: `allow_long_term`, `sensitive_default`. Governs what bake persists.
+12. **Any standing rules or priorities that should override convenience?**
+    → `memories` (doctrine), high salience. The household's rails.
 
-These should appear as optional advanced questions.
+### Expanded (optional)
 
-13. **What systems, devices, sensors, services, or data stores are core parts of this environment?**  
-    Purpose: system map and retrieval anchor points.[cite:2][cite:9][cite:10]
-14. **What local conditions matter most here, such as weather, outages, fire risk, access, wildlife, water, or crime?**  
-    Purpose: location-specific salience weighting.[cite:2]
-15. **What names should I know for buildings, rooms, zones, machines, gardens, vehicles, or supply points?**  
-    Purpose: internal local vocabulary and spatial grounding.[cite:2]
-16. **Are there regular routines, seasonal cycles, maintenance tasks, or recurring reminders I should understand?**  
-    Purpose: temporal grounding and operational memory.[cite:2][cite:7]
-17. **How direct should I be when I think something is a bad idea: gentle, plain-spoken, or strongly cautionary?**  
-    Purpose: warning style and social calibration.[cite:2][cite:6]
-18. **Are there subjects, styles of response, or habits of speech you strongly prefer or dislike?**  
-    Purpose: interaction quality and annoyance avoidance.[cite:2]
-19. **What should I never do unless explicitly asked?**  
-    Purpose: anti-features and workflow boundaries.[cite:2]
-20. **In urgent situations, what events should trigger a strong warning or escalation?**  
-    Purpose: alert posture and operational safety.[cite:6][cite:10]
-21. **If I learn something from a weak or external source, how should I store it: temporary, source-derived, or not at all unless confirmed?**  
-    Purpose: trust-tier memory policy.[cite:8]
-22. **Is there anything else about this place, your goals, or your preferences that would make me substantially more useful?**  
-    Purpose: catch-all for high-value context without forcing a life story.[cite:2]
+13. **What systems, devices, or data here should I plug into or know about?**
+    → `memories` (system map) + future context-source config. *(This is your "how do you want to
+    incorporate my system?" — kept optional because it's advanced.)*
+14. **What local conditions matter most — weather, outages, fire risk, water, wildlife, access?**
+    → `memories` (local salience), high salience.
+15. **What names should I know for rooms, zones, machines, vehicles, gardens, supply points?**
+    → `memories` (local vocabulary). Internal spatial vocabulary.
+16. **How direct should I be when I think something's a bad idea — gentle, plain, or strongly
+    cautionary?**
+    → preference/config: `warning_style`.
+17. **Any subjects, styles, or habits of speech you strongly prefer or dislike?**
+    → preference/config + `memories` (anti-annoyance).
+18. **What should I never do unless you explicitly ask?**
+    → `memories` (anti-features), high salience.
+19. **In urgent situations, what should trigger a strong warning or escalation?**
+    → `memories` (alert posture).
+20. **Anything else about this place, your goals, or your preferences that would make me a lot more
+    useful?**
+    → catch-all `memory`. High-value context without forcing a life story.
 
-## Why these questions work
+**Answer modes** (use the least annoying control that still yields structure):
 
-These questions are high leverage because they map directly onto useful system behavior rather than abstract self-description. They define identity, geography, mission, response preferences, source trust, sensitivity, local vocabulary, and operational doctrine, all of which improve retrieval and personalization in obvious ways.[cite:2][cite:8][cite:9]
-
-They also avoid the most common onboarding failure modes: oversharing prompts, fake warmth, vague “tell me about yourself” questions, and creepy data grabs. That keeps Mimir aligned with its privacy-first and user-controlled architecture.[cite:3][cite:8][file:1]
-
-## Answer format recommendations
-
-Each question should use the least annoying answer mode that still yields structured value.
-
-| Question type | Best UI control | Why |
+| Question type | Control | Why |
 |---|---|---|
-| Naming, place, local vocabulary | Short free text | Natural language is easiest for names and places. |
-| Response preferences | Single-select or ranked options with “custom” | Fast to answer and easy to operationalize. |
-| Trust, sensitivity, memory policy | Multi-select plus short explanation | Captures both policy and nuance. |
-| Priorities and intended use | Ordered list or “pick top 3” | Encourages prioritization instead of rambling. |
-| Routines and local concerns | Checklist plus notes | Balances speed with specificity. |
+| Names, place, local vocabulary | short free text | natural for names/places |
+| Answer style, uncertainty, directness | single-select + "custom" | fast, directly operational |
+| Memory/sensitivity policy | multi-select + short note | captures policy *and* nuance |
+| Priorities / intended jobs | pick-top-3 / ordered | forces prioritization, not rambling |
+| Routines, local concerns | checklist + notes | speed with specificity |
 
-Use free text sparingly. Too much free text makes onboarding feel like homework and produces noisy memory.
+Free text sparingly — too much of it makes onboarding feel like homework and produces noisy memory.
 
-## Storage model
+---
 
-Each answer should be persisted in three layers after the local models are online and available for post-processing.[cite:2]
+## 9. Storage model (grounded in Mimir-0's real schema)
 
-### 1. Canonical raw answer
+Three layers per answer, mapped to the **actual** stores — no invented field names.
 
-Store the exact user answer for auditability and future reinterpretation.
+**1. Canonical raw answer** — stored immediately, before any model is involved (the §2 guarantee).
+Kept verbatim for audit and future re-interpretation. Never overwritten by the derived layers.
 
-### 2. Structured extracted facts
+**2. Structured extracted records** — produced by the parse pass and routed to the right store:
 
-Convert the answer into normalized fields where possible.
+- **`identity` table** (key/value) — the AI's name, the operator's name, the place's name/scope.
+  These are identity, not memories.
+- **`memories`** — durable facts (people, pets, mission, routines, preferences, rules, system map).
+  Each written with:
+  - `evidence_tier = stated_by_primary_user` — the top tier (1.30×). The operator *stating* something
+    at setup is the strongest evidence Mimir ever gets; the framework should treat it that way.
+  - `provenance = "onboarding"` — so it's attributable in the prompt ("you told me at setup") and
+    distinguishable from things learned in conversation.
+  - `kind = memory`, high `confidence`, high `salience` (these are load-bearing, not incidental).
+- **`triples`** (entity graph) — relationships: operator —lives_with→ person, household —has_pet→ name.
+  Also `provenance = "onboarding"`.
+- **`self_model`** (MemoryKind.SELF_MODEL) — the mission/role answers seed Mimir's *first* sense of
+  what it is for, before the reflective self-model loop ever runs.
+- **preferences/config** — answer style, uncertainty mode, warning style, local scope, retention
+  policy. These tune behavior (system prompt, the uncertainty gate, bake's retention), so they live
+  in config, not memory.
 
-Examples:
+**3. Synthesized profile summary** — a compact, human-readable paragraph for prompt injection. It is
+an *optimization layer*, never the source of truth; the structured records remain canonical (so a
+bad synthesis can always be regenerated from the raw answers + structured facts).
 
-- `user.display_name = "Greg"`
-- `assistant.self_name = "Mimir"`
-- `preferences.answer_style_default = "detailed"`
-- `preferences.uncertainty_mode = "best_effort_with_caveats"`
-- `memory.allow_long_term = ["property layout", "tool preferences", "projects"]`
-- `memory.sensitive_default = ["credentials", "health", "financial"]`
-- `context.local_scope = "property_and_nearby_town"`
+**Trust note.** Onboarding answers are first-party and trusted. Anything the *parse* infers but the
+user didn't state (e.g. guessing a relationship) must be tagged lower — `inferred` (0.90×) — and
+shown as a guess in review, never silently promoted to `stated_by_primary_user`. Conflating asserted
+and inferred is exactly the failure the evidence-tier system exists to prevent.
 
-### 3. Synthesized profile summary
+---
 
-Generate a compact, human-readable profile summary for prompt injection and retrieval.
+## 10. The parse pass
 
-Example:
+Runs once a chat model has qualified (tournament finals, or a configured endpoint). For each raw
+answer it: (a) extracts structured fields, (b) routes them to identity/memories/triples/config with
+the tiers above, (c) drafts the profile summary. It uses the same epistemic discipline as the rest of
+the system — it may **not** invent facts, and it marks anything it inferred rather than read.
 
-> The user wants Mimir to behave as a locally grounded, privacy-respecting assistant focused on property operations, technical projects, and practical planning. Default responses should be detailed and analytical, with explicit caveats when uncertain. Information from weak internet sources should be stored only as low-trust source-derived material unless confirmed.
+Then: **review before commit.** The user sees the extracted facts, the proposed memories (with their
+tier and provenance), the profile summary, and what's marked sensitive/temporary — and can edit,
+drop, or confirm before anything becomes trusted memory. The whole interview is re-runnable later.
 
-The synthesized summary should never replace the structured source of truth. It is an optimization layer, not the canonical record.[cite:8]
+---
 
-## Memory tagging
+## 11. Anti-creep safeguards
 
-Each answer should be tagged at creation time with a memory class.
+- **Say why each section exists** — one line, before the questions.
+- **Mark sensitive questions; skipping never breaks setup.**
+- **Preview retention** — show what becomes persistent vs. temporary.
+- **Review before commit** — extracted facts + summary + retention labels, all editable.
+- **Allow later edits and deletions** — memory stays user-governed (it's subject to pruning/decay).
+- **Never infer intimate facts from adjacent context** — store only what's stated or explicitly
+  approved; everything else is a visible `inferred` guess at best.
 
-Recommended classes:
+## 12. UX structure
 
-- `profile.identity`
-- `profile.household`
-- `profile.preferences`
-- `profile.location`
-- `profile.mission`
-- `profile.privacy`
-- `profile.trust_policy`
-- `profile.operations`
-- `profile.routines`
-- `profile.local_vocabulary`
+Four light panels, sitting beside the tournament board:
 
-Recommended trust flags:
+1. **Identity & place** — who this is for, who's around, where Mimir operates.
+2. **Mission & style** — intended jobs, success in the first month, answer/uncertainty style.
+3. **Memory & trust** — what to remember, what's sensitive, what sources to trust.
+4. **Review & confirm** — extracted facts, profile summary, retention labels — then commit.
 
-- `user_asserted`
-- `system_inferred`
-- `source_derived_low_trust`
-- `confirmed`
+One question (or one tight group) per screen; clear progress; defaults and examples everywhere;
+never any false completion pressure.
 
-This aligns with the broader Mimir philosophy that trusted memory and source-derived information should not be conflated.[cite:8][cite:9]
+## 13. Companion: the self-knowledge manifest
 
-## Privacy and anti-creep safeguards
+The interview teaches Mimir about the **user**. A separate, parallel idea teaches Mimir about
+**itself** — how it works, what it can do, where its hook points are — shipped as reference-tier
+records or a doc the system reads, and **generated from the actual code** so it can't drift (the
+doc-drift-is-a-defect doctrine). That's its own feature; it pairs naturally with onboarding because
+the first thing a user asks a new system is often "what can you even do?" Tracked separately.
 
-To keep the interview high-impact without becoming invasive, build these safeguards into the spec:
+---
 
-- **Show why each section exists.** A short one-line explanation reduces suspicion.[cite:2]
-- **Mark sensitive questions clearly.** Let the user skip them without penalty.[cite:3]
-- **Preview retention behavior.** Tell the user what becomes persistent versus temporary.[cite:7][cite:8]
-- **Offer review before commit.** The user should see the profile summary and editable extracted facts before final save.[cite:2][file:1]
-- **Allow later edits and deletions.** Memory should remain user-governed, especially given Mimir's pruning and trust policies.[cite:7][cite:8]
-- **Do not infer intimate facts from adjacent context.** Only store what the user actually states or explicitly approves.[cite:8]
+## 14. Acceptance criteria
 
-## UX structure
+1. A new user finishes the core interview in well under 8 minutes without feeling interrogated.
+2. **Capture is model-free and crash-safe**: every answer is persisted raw the instant it's given;
+   quitting or a model-less fleet loses nothing.
+3. The parse pass runs only after a model qualifies, marks inferred vs. stated, and presents results
+   for review before promotion.
+4. Stored answers land in the **real** stores with the **right tiers** — `stated_by_primary_user` +
+   `provenance="onboarding"` for asserted facts; `inferred` for guesses.
+5. Every stored answer is editable, reviewable, and deletable; sensitive ones are skippable.
+6. The profile summary aids prompting but the structured records remain canonical.
+7. The flow fits beside the tournament on first run and is re-runnable later as "refresh profile."
 
-A strong first-run implementation would use four simple panels:
+## 15. Open decisions
 
-1. **Identity and environment** — who this is for, who is around, where Mimir operates.[cite:2]
-2. **Mission and usefulness** — intended jobs, success criteria, answer style.[cite:2][cite:9]
-3. **Memory and trust** — what to remember, what is sensitive, what sources are trusted.[cite:3][cite:8]
-4. **Review and confirm** — show extracted facts, generated profile summary, and retention labels before commit.[cite:2][file:1]
+- **Question count:** Core 12 vs. a tighter Core 10 (folding pets into household, dropping one of the
+  style questions). Leaning Core 11–12 + Expanded 8.
+- **Where preferences live:** a dedicated `[onboarding]`/`[preferences]` config block vs. seeding them
+  as `self_model` memories. Leaning config for behavior knobs, memories for facts.
+- **Re-run semantics:** does "refresh profile" diff against existing memories (update in place) or
+  append new ones and let sleep/consolidation dedupe? Leaning diff-with-review.
 
-This fits naturally beside the rest of Mimir's first-run setup flow, which already emphasizes guided onboarding, review, override, and persistence.[file:1]
+---
 
-## Questions to avoid
+## One-line description
 
-The following questions are likely to reduce trust or completion rate and should not appear in the first-run interview:
-
-- “Tell me everything about yourself.”
-- “What are your deepest fears?”
-- “Describe your childhood.”
-- “What are your political or religious beliefs?” unless directly relevant and user-initiated.
-- “List all your secrets / vulnerabilities / traumas.”
-- Any open-ended prompt that invites autobiography without a clear operational purpose.
-
-These questions are high-friction, low-signal, and make a sovereign local AI feel nosy instead of useful.[cite:2][cite:3][cite:8]
-
-## Implementation notes for Claude
-
-When generating the feature, optimize for these behaviors:
-
-- Keep the visible interview to one question per screen or one tightly grouped section.
-- Show progress clearly, but do not exaggerate completion pressure.
-- Use defaults, examples, and checkboxes wherever possible.
-- Keep free-text areas short and optional unless the answer truly needs natural language.
-- After models come online, run a post-processing pass that extracts facts, generates the profile summary, and assigns trust/retention tags.[cite:2][cite:8]
-- Present the processed result back to the user before final commit.[cite:2][file:1]
-- Store raw answers, structured fields, and summary separately.[cite:8]
-- Make the entire interview re-runnable later as “refresh profile” rather than a one-time sacred ritual.[file:1]
-
-## Suggested acceptance criteria
-
-A good implementation should satisfy these checks:
-
-1. A new user can complete the core interview in under 8 minutes without feeling interrogated.[cite:2]
-2. The resulting profile materially improves local relevance and personalization on day one.[cite:2][cite:9]
-3. Every stored answer is editable, reviewable, and deletable after setup.[cite:7][cite:8]
-4. Sensitive answers can be skipped without breaking setup.[cite:3]
-5. Weak-source information is not silently promoted into trusted user memory.[cite:8]
-6. The profile summary is useful for prompting, but the structured fields remain the canonical source of truth.[cite:8]
-7. The onboarding flow fits cleanly into Mimir's broader first-run setup and persistence model.[file:1]
-
-## Recommended one-line product description
-
-> A short, practical foundational interview that teaches Mimir who it serves, where it operates, what matters locally, and what boundaries it must respect.
-
-## Final recommendation
-
-For Mimir-0, the strongest version is a **12-question required interview plus a 10-question advanced profile**, with explicit memory labels, trust-tier processing, and a review screen before commit. That gives Mimir the local and user-specific substrate that makes it feel special, while staying aligned with the project's privacy-first, local-first, user-controlled philosophy.[cite:2][cite:3][cite:8][file:1]
+> A short, warm, practical interview — run while the fleet is being qualified — that teaches Mimir who
+> it serves, where it operates, what matters locally, and what boundaries it must respect; captured
+> with no model required, structured by one once it qualifies, and confirmed by the user before it's
+> trusted.
