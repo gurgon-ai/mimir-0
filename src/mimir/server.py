@@ -412,6 +412,19 @@ class _Handler(BaseHTTPRequestHandler):
         """Kick off the final time trial in the background: speed-test acceptable models on the
         enabled nodes they're installed on but not yet timed on. UI polls /api/fleet/matrix/status."""
         srv = self.server
+        # The time trial spins up its OWN concurrent per-node probing, which would fight a running
+        # benchmark/tournament for the same per-node VRAM locks (thrash, bad numbers). Refuse loudly
+        # rather than collide — DESIGN §10. The UI also greys the button out, but this is the real
+        # guard (a stale/forced click can't start it mid-qualification).
+        with srv.bench_lock:
+            bench_busy = bool(srv.bench_state.get("running"))
+        with srv.tourney_lock:
+            tourney_busy = bool(srv.tourney_state.get("active"))
+        if bench_busy or tourney_busy:
+            what = "a benchmark" if bench_busy else "the tournament"
+            return {"started": False, "busy": True,
+                    "reason": f"Can't run the time trial while {what} is running — it shares the "
+                              "same GPUs. Let it finish first."}
         with srv.matrix_lock:
             if srv.matrix_state.get("running"):
                 return {"started": False, **srv.matrix_state}
@@ -1235,6 +1248,7 @@ async function resumeFleetWork() {
     if (bs.running) { _benchBoardClosed = false; pollBenchmark(); return; }
     const ts = await api("GET", "/api/fleet/tournament/status");
     if (!ts.active) return;
+    setMatrixEnabled(false);   // tournament active (running OR awaiting veto) → lock the time trial
     _benchBoardClosed = false;
     if (ts.phase === "running") pollTournament();   // re-attach the live poll
     else renderTourney(ts);                          // awaiting_veto / done / error → re-show it
@@ -1377,11 +1391,11 @@ let _tourneyPolling = false;
 let _tourneyCur = "", _tourneyCurT = 0;   // current model + when it started, for an elapsed timer
 async function pollTournament() {
   if (_tourneyPolling) return;
-  _tourneyPolling = true; $("fleetTourneyBtn").disabled = true; btnState("fleetTourneyBtn", "working");
+  _tourneyPolling = true; $("fleetTourneyBtn").disabled = true; btnState("fleetTourneyBtn", "working"); setMatrixEnabled(false);
   try {
     while (true) {
       const s = await api("GET", "/api/fleet/tournament/status");
-      if (!s.active) break;
+      if (!s.active) { setMatrixEnabled(true); break; }
       renderTourney(s);
       // Reflect the tournament's progress on the manual 1·2·3 buttons (it does scan→score→apply
       // under the hood), so they're not stuck grey while the tournament runs.
@@ -1395,8 +1409,8 @@ async function pollTournament() {
         continue;
       }
       if (s.phase === "awaiting_veto") { $("fleetMsg").textContent = `${s.round_label || ("Round " + s.round)} done — pick who advances, then FIGHT.`; btnState("fleetTourneyBtn", "done"); }
-      else if (s.phase === "done") { $("fleetMsg").textContent = "🏆 Tournament complete — review the finals."; btnState("fleetTourneyBtn", "done"); }
-      else if (s.phase === "error") { $("fleetMsg").textContent = "Tournament error: " + s.error; btnState("fleetTourneyBtn", "failed"); }
+      else if (s.phase === "done") { $("fleetMsg").textContent = "🏆 Tournament complete — review the finals."; btnState("fleetTourneyBtn", "done"); setMatrixEnabled(true); }
+      else if (s.phase === "error") { $("fleetMsg").textContent = "Tournament error: " + s.error; btnState("fleetTourneyBtn", "failed"); setMatrixEnabled(true); }
       break;   // interactive now — stop polling until the user acts
     }
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
@@ -1433,6 +1447,17 @@ function btnState(id, state) {
   if (state) b.classList.add(state);
 }
 
+// The time trial shares GPUs with the benchmark/tournament, so the button is locked out (greyed)
+// while either runs and reappears available after. The backend refuses it too — this is just the
+// visible signal so you never wonder whether a mid-run click did something.
+const _MATRIX_TITLE = ($("fleetMatrixBtn") || {}).title || "";
+function setMatrixEnabled(on) {
+  const b = $("fleetMatrixBtn"); if (!b) return;
+  b.disabled = !on;
+  b.title = on ? _MATRIX_TITLE
+              : "Finish the benchmark / tournament first — the time trial shares the same GPUs and would collide with it.";
+}
+
 $("fleetScanBtn").addEventListener("click", async () => {
   $("fleetMsg").textContent = "Finding models on the fleet…"; $("fleetScanBtn").disabled = true; btnState("fleetScanBtn", "working");
   try {
@@ -1449,7 +1474,7 @@ $("fleetScanBtn").addEventListener("click", async () => {
 let _benchPolling = false;
 async function pollBenchmark() {
   if (_benchPolling) return;
-  _benchPolling = true; $("fleetBenchBtn").disabled = true; btnState("fleetBenchBtn", "working");
+  _benchPolling = true; $("fleetBenchBtn").disabled = true; btnState("fleetBenchBtn", "working"); setMatrixEnabled(false);
   try {
     while (true) {
       const s = await api("GET", "/api/fleet/benchmark/status");
@@ -1477,7 +1502,7 @@ async function pollBenchmark() {
       await new Promise(r => setTimeout(r, 1500));
     }
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
-  _benchPolling = false; $("fleetBenchBtn").disabled = false;
+  _benchPolling = false; $("fleetBenchBtn").disabled = false; setMatrixEnabled(true);
 }
 
 $("fleetBenchBtn").addEventListener("click", async () => {
@@ -1524,7 +1549,11 @@ async function pollMatrix() {
 $("fleetMatrixBtn").addEventListener("click", async () => {
   $("fleetMsg").textContent = "Starting the time trial…"; btnState("fleetMatrixBtn", "working");
   try {
-    await api("POST", "/api/fleet/matrix", {});   // returns immediately; runs in the background
+    const r = await api("POST", "/api/fleet/matrix", {});   // returns immediately; runs in the background
+    if (r.started === false) {   // backend refused (a benchmark/tournament is running) — don't poll
+      $("fleetMsg").textContent = r.reason || "The time trial is busy.";
+      btnState("fleetMatrixBtn", null); setMatrixEnabled(!r.busy); return;
+    }
     pollMatrix();
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; btnState("fleetMatrixBtn", "failed"); }
 });
