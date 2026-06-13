@@ -60,7 +60,15 @@ class BackendConfig:
     refresh_interval_s: float = 60.0  # active health/inventory refresh; 0 disables the prober
     # Only the user knows their hardware + latency tolerance, so these are user knobs (UI fields):
     max_model_size_b: float = 30.0  # don't benchmark/route models bigger than this (params B)
+    min_model_size_b: float = 0.0   # don't benchmark/route models SMALLER than this; 0 = off. On
+                                    # capable hardware, keeps a tiny model that scores 'high enough'
+                                    # and wins on latency from out-competing a bigger, better one.
     max_latency_s: float = 0.0      # routing latency target; 0 = off. Slower models are excluded.
+    # Context window for ALL benchmark calls — set explicitly so Ollama doesn't silently fall back
+    # to its tiny 2048 default and truncate the layered epistemic prompts (which would invalidate
+    # the tier-deference gauntlet: the high-tier fact could be cut off). Held consistent across
+    # every benchmarked model so qualification is fair, and large enough to exercise long context.
+    benchmark_num_ctx: int = 8192
 
 
 @dataclass(slots=True)
@@ -167,7 +175,9 @@ def load_config(path: str | Path) -> Config:
             scan_concurrency=int(backend_raw.get("scan_concurrency", 64)),
             refresh_interval_s=float(backend_raw.get("refresh_interval_s", 60.0)),
             max_model_size_b=float(backend_raw.get("max_model_size_b", 30.0)),
+            min_model_size_b=float(backend_raw.get("min_model_size_b", 0.0)),
             max_latency_s=float(backend_raw.get("max_latency_s", 0.0)),
+            benchmark_num_ctx=int(backend_raw.get("benchmark_num_ctx", 8192)),
         )
 
     provider_raw = raw.get("provider")

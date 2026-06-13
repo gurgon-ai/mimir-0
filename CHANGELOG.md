@@ -7,6 +7,37 @@ Pre-1.0: the API and schema may change between releases.
 
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
+### Added
+- **A `reasoning` dimension in the benchmark (schema v12).** The old battery only tested *format*
+  compliance (say `PONG`, return a weather JSON, write `def add`) — every competent model passed, so
+  `quality` saturated near 1.0 and a fluent model that *couldn't actually solve anything* could sweep
+  every role. The new dimension scores deterministic, regex-checkable **problems** (multi-step
+  arithmetic, letter-counting, sequence completion, a code-trace, an instruction transform) — wrong
+  answers fail however fluent the prose. The `chat`/`reasoning`/`code` roles now **gate** on it.
+- **A chat-LLM epistemic qualifying round.** `score_epistemic_competence` now includes a big
+  **layered, conflicting-tier gauntlet** (high-evidence section says "blue", a lower section says
+  "red", buried in irrelevant filler → defer to the high tier under noise — the structured arm can,
+  a flat blob can't) plus a **grounding floor** (recall a nonce that exists *only* in the provided
+  context). A model that can't follow a layered prompt or won't read context is barred from `chat`.
+- **`backend.min_model_size_b` (a size floor; 0 = off).** The sibling of `max_model_size_b`: on
+  capable hardware, an imperfect test lets a tiny model that scores "high enough" and wins on latency
+  keep beating a bigger, genuinely-better one a second behind at the same score. The floor excludes
+  models below it from scoring (and therefore from recommendations). Exposed as a UI scope field.
+- **`backend.benchmark_num_ctx` (default 8192).** Ollama defaults `num_ctx` to a tiny 2048 unless
+  told otherwise; the benchmark now pins an explicit, consistent context for every model so the
+  layered prompts aren't silently truncated (which would cut off the high-tier fact). Raise to test
+  longer context. The pre-gate warmup uses the same value, so a model loads once and stays warm.
+
+### Changed
+- **Benchmark latency now reflects a real turn, not a 3-token reply.** `return_time` was the mean
+  wall-time of the battery's tiny calls, which can't tell a slow remote 12B from a snappy local 3B —
+  so a big model looked "instant" and won even speed-weighted roles. It's now measured from one
+  real-length generation, normalized to seconds per ~256-token turn. The `chat` role's balanced
+  speed penalty was retuned for the new (real-seconds) scale so quality still leads.
+- **The benchmark scorecard is grouped by node/IP**, so it's obvious which machine each model runs
+  on (LAN-only leftovers cluster under their IP instead of looking local), and gained a `Reason`
+  column.
+
 ### Fixed
 - **Benchmark timed cold model-loads, not warm performance.** With models swapping in and out of
   VRAM, every measurement included a one-time load cost — which inflated `return_time` *and* unfairly

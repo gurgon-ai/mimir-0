@@ -77,6 +77,12 @@ host = "http://localhost:11434"
 # subnet = "192.168.1.0/24"         # CIDR to scan; omit to auto-detect the local /24
 # nodes = ["192.168.1.50:11434"]    # optional explicit nodes (always included)
 # refresh_interval_s = 60           # active health/inventory refresh; 0 disables the prober
+# max_model_size_b = 30             # only YOU know your hardware: benchmark/route up to this many B
+# min_model_size_b = 0              # ...and a floor (0 = off): don't let a tiny model that scores
+#                                   # 'high enough' + wins on latency beat a bigger, better one
+# max_latency_s = 0                 # per-turn latency target in seconds; 0 = off
+# benchmark_num_ctx = 8192          # context window for benchmark calls (Ollama defaults to a tiny
+#                                   # 2048 and would truncate the layered epistemic prompts)
 
 # --- roles: one model per cognitive job. `model` is required; other keys are tuned params. ---
 

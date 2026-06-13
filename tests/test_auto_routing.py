@@ -100,10 +100,12 @@ def test_measured_best_overrides_the_heuristic(db_path: str) -> None:
         update_catalogue_scores(
             sg, "gemma:7b", return_time=0.5, quality=0.9,
             talk=1.0, tools=0.9, code=0.9, coherence=None, discipline=1.0, epistemics=1.0,
+            reasoning=1.0,
         )
         update_catalogue_scores(
             sg, "qwen2.5:14b", return_time=2.0, quality=0.6,
             talk=0.6, tools=0.5, code=0.5, coherence=None, discipline=0.5, epistemics=0.5,
+            reasoning=0.5,
         )
         # Measured-best wins over the larger heuristic pick.
         assert resolve_auto_model(sg, "chat", available={"qwen2.5:14b", "gemma:7b"}) == "gemma:7b"

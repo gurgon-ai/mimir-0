@@ -88,6 +88,28 @@ def _score_uncertainty(out: str) -> bool:
     return any(h in low for h in _HEDGES) or out.strip().endswith("?")
 
 
+def _score_secret_word(out: str) -> bool:
+    """The answer is a nonce ('zephyr-quartz') that exists ONLY in the provided context and nowhere
+    in training data — so producing it proves the model actually READ the context instead of leaning
+    on priors or confabulating. We accept either token (hyphenated or spaced); a hallucinating model
+    won't emit both rare words, and a context-ignoring one can't know them at all.
+    """
+    low = out.lower()
+    return "zephyr" in low and "quartz" in low
+
+
+def _score_bird_color(out: str) -> bool:
+    """Defers to the HIGHEST-tier section under heavy distraction: the high-evidence section says
+    every bird is blue, a lower-evidence section says red, with irrelevant filler between. The
+    prompt asks for ONE word, so a clean model just says 'blue'. We pass iff 'blue' is present and
+    the low-tier 'red' is absent — committing to the high tier. Choosing red, or wishy-washily
+    naming both, fails: the framework's whole job is to make the model PREFER the higher tier.
+    This is the headline promise made binary — a test a Gemma-class model passes and many do not.
+    """
+    low = out.lower()
+    return "blue" in low and "red" not in low
+
+
 # -- probes ---------------------------------------------------------------------------
 
 
@@ -128,6 +150,47 @@ PROBES: list[EpistemicProbe] = [
         ],
         question="What is the operator's spouse's name?",
         scorer=_score_uncertainty,
+    ),
+    EpistemicProbe(
+        name="layered_tier_deference",
+        # The framework's headline test — the chat-LLM gauntlet (the one Gemma-class models pass
+        # and many don't): a BIG layered context where a high-evidence section and a low-evidence
+        # section flatly CONTRADICT, buried in irrelevant filler. Answering 'blue' requires actually
+        # using the evidence tiers under distraction; in the flat arm both claims look equal, so a
+        # model can't tell and the probe produces lift. Position is adversarial — low-tier 'red' is
+        # before the high-tier 'blue', so deferring can't be faked by picking the first/last fact.
+        facts=[
+            ("The quarterly meeting is on Thursday.", EvidenceTier.CONVERSATION, "chat"),
+            ("The floor-2 printer is out of toner.", EvidenceTier.CONVERSATION, "chat"),
+            ("Every bird in this context is red.", EvidenceTier.INFERRED, "an old guess"),
+            ("Sales rose four percent last month.", EvidenceTier.DOCUMENT, "the report"),
+            ("The parking gate closes at 9 pm.", EvidenceTier.DOCUMENT, "the handbook"),
+            ("Every bird in this context is blue.", EvidenceTier.STATED_BY_PRIMARY_USER,
+             "the operator"),
+            ("The new intern is named Dana.", EvidenceTier.CONVERSATION, "chat"),
+        ],
+        question="Based on the information above, what color is the bird? Reply with one word.",
+        scorer=_score_bird_color,
+    ),
+]
+
+
+# Grounding probes feed the qualification score ONLY (not the lift experiment): unlike the probes
+# above, the answer is present in BOTH arms, so they don't measure the *value of structure* — they
+# measure the floor BELOW it, namely whether the model reads the provided context at all. A model
+# that fails these is unusable for retrieval, however fluent, so it is barred from the chat role.
+GROUNDING_PROBES: list[EpistemicProbe] = [
+    EpistemicProbe(
+        name="secret_word",
+        facts=[
+            ("The quarterly review is on the 14th.", EvidenceTier.CONVERSATION, "chat"),
+            ("The supply-closet code is 4471.", EvidenceTier.DOCUMENT, "the facilities sheet"),
+            ("The secret command word is 'zephyr-quartz'.", EvidenceTier.DOCUMENT, "the runbook"),
+            ("The office mascot is a fox named Pixel.", EvidenceTier.CONVERSATION, "chat"),
+            ("The backup server is in rack B7.", EvidenceTier.DOCUMENT, "the ops handbook"),
+        ],
+        question="What is the secret command word? Reply with only the word.",
+        scorer=_score_secret_word,
     ),
 ]
 
@@ -218,12 +281,16 @@ def evaluate_epistemics(chat_fn: ChatFn, *, model: str = "", samples: int = 1) -
 
 def score_epistemic_competence(chat_fn: ChatFn, *, samples: int = 2) -> float:
     """How well a model exploits the epistemic framework — the structured arm only (no flat
-    baseline). This is the qualification signal (DESIGN §4): the fraction of probes passed when the
-    model is given the real tiered/provenance/gated context. A model that ignores evidence tiers or
-    confabulates on thin evidence scores low here and is barred from the identity roles.
+    baseline). This is the chat-LLM qualification signal (DESIGN §4): the fraction of probes passed
+    when the model is given the real tiered/provenance/gated context. It spans the lift PROBES
+    (including the big layered conflicting-tier gauntlet — defer to high-tier 'blue' under noise)
+    AND the GROUNDING_PROBES (read a nonce that's ONLY in context). A model that ignores evidence
+    tiers, can't follow a layered prompt, or confabulates instead of reading the context scores low
+    here and is barred from the identity roles — this is the qualifying round for the chat model.
     """
     samples = max(1, samples)
-    scores = [_run_arm(chat_fn, structured_prompt(p), p, samples) for p in PROBES]
+    probes = PROBES + GROUNDING_PROBES
+    scores = [_run_arm(chat_fn, structured_prompt(p), p, samples) for p in probes]
     return sum(scores) / len(scores)
 
 

@@ -64,11 +64,11 @@ def scan_fleet(
 # ignores evidence tiers can't clear the floor for these roles (§4). Each role lists every
 # capability it requires; a candidate must clear the floor on all of them.
 ROLE_NEEDS: dict[str, tuple[tuple[str, ...], str]] = {
-    "chat": (("discipline", "epistemics"), "balanced"),
+    "chat": (("discipline", "epistemics", "reasoning"), "balanced"),
     "bake": (("talk",), "quality"),
-    "reasoning": (("discipline", "epistemics"), "quality"),
+    "reasoning": (("discipline", "epistemics", "reasoning"), "quality"),
     "tools": (("tools",), "quality"),
-    "code": (("code",), "quality"),
+    "code": (("code", "reasoning"), "quality"),
 }
 _CAPABILITY_FLOOR = 0.5
 
@@ -98,6 +98,7 @@ def recommend_roles(
                 "coherence": entry.coherence,
                 "discipline": entry.discipline,
                 "epistemics": entry.epistemics,
+                "reasoning": entry.reasoning,
                 "return_time": entry.return_time,
                 "node": entry.node,  # the fastest node for this model (speed is per-node)
                 "nodes": [],
@@ -128,9 +129,12 @@ def recommend_roles(
             name, data = max(
                 candidates, key=lambda c: (c[1]["quality"], -(c[1]["return_time"] or 1e9))
             )
-        else:  # balanced: favour quality, lightly penalise slowness
+        else:  # balanced: quality is primary, slowness a secondary penalty. return_time is now real
+            # seconds per ~256-token turn (~1-15s), so the coefficient is small: a ~3s/turn edge is
+            # worth ~0.1 quality — enough to break ties and modest gaps without letting speed lead
+            # (the rule: speed can't be the only metric; quality leads). Tunable.
             name, data = max(
-                candidates, key=lambda c: c[1]["quality"] - 0.1 * (c[1]["return_time"] or 0.0)
+                candidates, key=lambda c: c[1]["quality"] - 0.03 * (c[1]["return_time"] or 0.0)
             )
         recommendations[role] = {
             "model": name,
@@ -236,6 +240,7 @@ def fleet_model_pool(
                 "quality": e.quality,
                 "discipline": e.discipline,
                 "epistemics": e.epistemics,
+                "reasoning": e.reasoning,
                 "return_time": e.return_time,
                 "approved": is_approved(e.family),
                 "benchmarked": e.quality is not None,
