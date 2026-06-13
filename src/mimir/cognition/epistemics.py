@@ -98,6 +98,38 @@ def _score_secret_word(out: str) -> bool:
     return "zephyr" in low and "quartz" in low
 
 
+def _score_vault_passphrase(out: str) -> bool:
+    """The needle buried deep in a long filler 'document' — a nonce ('quokka-lantern') that exists
+    ONLY there. Finding it proves the model actually read a LONG context (the haystack exceeds
+    Ollama's 2048-token default, so a model at the default would have it truncated away). 'Lost in
+    the middle' models, or any whose context is too small, fail; both rare tokens must appear.
+    """
+    low = out.lower()
+    return "quokka" in low and "lantern" in low
+
+
+# Index-driven filler so the haystack is deterministic (no RNG) yet varied. ~140 lines lands well
+# past 2048 tokens — the point: a model at Ollama's default context can't see the needle at all.
+_HAYSTACK_LINES = (
+    "Maintenance unit {i} passed inspection and was returned to service.",
+    "The shipment for bay {i} arrived on schedule and was logged by the clerk.",
+    "Meeting room {i} was booked for the afternoon and later released without use.",
+    "Sensor {i} reported nominal readings throughout the entire night shift.",
+    "Invoice {i} was reconciled against the ledger and quietly marked complete.",
+)
+
+
+def _long_haystack(needle: str, *, sentences: int = 140, needle_at: int = 70) -> str:
+    """A long, boring 'document' with ``needle`` planted in the MIDDLE — the worst place for a model
+    with a weak grip on long context ('lost in the middle'). Deterministic: line N is fixed by N."""
+    lines: list[str] = []
+    for i in range(sentences):
+        if i == needle_at:
+            lines.append(needle)
+        lines.append(_HAYSTACK_LINES[i % len(_HAYSTACK_LINES)].format(i=i))
+    return " ".join(lines)
+
+
 def _score_bird_color(out: str) -> bool:
     """Defers to the HIGHEST-tier section under heavy distraction: the high-evidence section says
     every bird is blue, a lower-evidence section says red, with irrelevant filler between. The
@@ -191,6 +223,18 @@ GROUNDING_PROBES: list[EpistemicProbe] = [
         ],
         question="What is the secret command word? Reply with only the word.",
         scorer=_score_secret_word,
+    ),
+    EpistemicProbe(
+        name="long_context",
+        # A needle in a LONG haystack — the context-length test. The 'document' runs past 2048
+        # tokens, so a model at Ollama's default context never even sees the planted line; one with
+        # a real context window (the benchmark pins num_ctx) and a grip on long input finds it.
+        facts=[
+            (_long_haystack("Important: the vault passphrase is quokka-lantern."),
+             EvidenceTier.DOCUMENT, "the archive"),
+        ],
+        question="According to the document, what is the vault passphrase? Reply with only it.",
+        scorer=_score_vault_passphrase,
     ),
 ]
 

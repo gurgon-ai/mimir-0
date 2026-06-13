@@ -17,8 +17,10 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
 - **A chat-LLM epistemic qualifying round.** `score_epistemic_competence` now includes a big
   **layered, conflicting-tier gauntlet** (high-evidence section says "blue", a lower section says
   "red", buried in irrelevant filler → defer to the high tier under noise — the structured arm can,
-  a flat blob can't) plus a **grounding floor** (recall a nonce that exists *only* in the provided
-  context). A model that can't follow a layered prompt or won't read context is barred from `chat`.
+  a flat blob can't), a **grounding floor** (recall a nonce that exists *only* in the provided
+  context), and a **long-context needle** (a nonce planted in the middle of a ~2k+-token document —
+  past Ollama's 2048 default, so it doubles as proof the `num_ctx` pin works). A model that can't
+  follow a layered prompt, won't read context, or can't handle long input is barred from `chat`.
 - **`backend.min_model_size_b` (a size floor; 0 = off).** The sibling of `max_model_size_b`: on
   capable hardware, an imperfect test lets a tiny model that scores "high enough" and wins on latency
   keep beating a bigger, genuinely-better one a second behind at the same score. The floor excludes
@@ -32,8 +34,13 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
 - **Benchmark latency now reflects a real turn, not a 3-token reply.** `return_time` was the mean
   wall-time of the battery's tiny calls, which can't tell a slow remote 12B from a snappy local 3B —
   so a big model looked "instant" and won even speed-weighted roles. It's now measured from one
-  real-length generation, normalized to seconds per ~256-token turn. The `chat` role's balanced
-  speed penalty was retuned for the new (real-seconds) scale so quality still leads.
+  real-length generation, normalized to seconds per ~256-token turn.
+- **Routing objective made explicit: the best-scoring model *for this system* that you're willing to
+  wait for.** Latency is now a hard **cap** (`max_latency_s` excludes too-slow models before
+  scoring), not a soft penalty. The `chat` role dropped its quality-minus-speed "balanced" formula
+  for pure **quality-under-the-cap** (every role now ranks this way): within the cap a dominant model
+  wins outright and speed only breaks ties — so a 26B that's a second behind a 4B at a higher score
+  wins, because under the cap you've already decided the wait is worth it.
 - **The benchmark scorecard is grouped by node/IP**, so it's obvious which machine each model runs
   on (LAN-only leftovers cluster under their IP instead of looking local), and gained a `Reason`
   column.
