@@ -53,21 +53,28 @@ _LATENCY_MIN_TOKENS: int = 32     # floor so a terse/refusing model can't divide
 _GATE_PREDICT: int = 64           # tokens the pre-gate generates to measure real per-turn latency
 
 
-def _measure_turn_latency(chat_fn: Callable[[list[Message]], str]) -> float:
+def _measure_turn_latency(chat_fn: Callable[[list[Message]], str]) -> float | None:
     """Time one substantial generation and normalize to seconds per ~256-token turn.
 
     The capability battery emits only a handful of tokens per call, so its round-trip is dominated
     by prompt-eval/overhead and barely moves between a 3B and a 12B. A real turn generates hundreds
     of tokens, where per-token throughput is what the user actually feels. We time one real
     generation and divide by its (estimated) token count, scaled to a fixed turn length — robust to
-    how verbose a model happens to be. Returns 0.0 if the call fails (the gate handles unreachable).
+    how verbose a model happens to be.
+
+    Returns **None** if the probe fails (timeout/transport error) — NEVER 0.0. A failed probe is the
+    opposite of instant: recording 0.0 made a timing-out model sort as the *fastest* and pass any
+    latency cap (observed: a model that aced the short capability probes but timed out on this
+    longer generation showing 0.0s/turn and winning 'fastest node'). None means 'unmeasured'; every
+    consumer treats it as not-fast / not-viable (``return_time or 1e9``) and the matrix re-times it.
     """
     started = time.monotonic()
     try:
         out = chat_fn(_LATENCY_PROMPT)
     except Exception as exc:
-        log.warning("benchmark: latency probe failed: %s", exc)
-        return 0.0
+        log.warning("benchmark: latency probe failed after %.1fs (recorded as unmeasured): %s",
+                    time.monotonic() - started, exc)
+        return None
     elapsed = time.monotonic() - started
     approx_tokens = max(_LATENCY_MIN_TOKENS, len(out) // 4)  # ~4 chars/token; no tokenizer dep
     return round(elapsed / approx_tokens * _LATENCY_NORM_TOKENS, 3)
@@ -354,7 +361,7 @@ class ModelBenchmark:
     epistemics: float
     reasoning: float
     coherence: float | None
-    return_time: float
+    return_time: float | None   # None = probe failed/unmeasured (NOT fast — see measurement)
     quality: float
 
 
@@ -464,7 +471,7 @@ def benchmark_model(
         epistemics=round(epistemics, 3),
         reasoning=round(reasoning, 3),
         coherence=coherence,
-        return_time=round(return_time, 3),
+        return_time=round(return_time, 3) if return_time is not None else None,
         quality=round(quality, 3),
     )
 
@@ -505,12 +512,16 @@ def _measure_node_speed(
             return round(WARMUP_TIMEOUT_S, 3)  # couldn't load in time → unusably slow → skip
     # Bound the measurement generously (a model that can't emit 64 tokens in this window is doomed),
     # but always at least 30s so a near-the-cap model isn't cut by the measurement timeout itself.
-    provider = OllamaProvider(node, timeout=max(30.0, timeout_s))
+    bound = max(30.0, timeout_s)
+    provider = OllamaProvider(node, timeout=bound)
     started = time.monotonic()
     try:
         out = provider.chat(model_name, _LATENCY_PROMPT, {**opts, "max_tokens": _GATE_PREDICT})
     except Exception:
-        return round(time.monotonic() - started, 3)  # timed out generating → ranks it slow → skip
+        # Failed generating → ranks it slow → skip. Use the elapsed but FLOOR it at the timeout
+        # bound: a real timeout already ≈ bound, and this stops an *instant* transport failure
+        # (elapsed ≈ 0) being recorded as the fastest model — a failed probe must never sort fast.
+        return round(max(bound, time.monotonic() - started), 3)
     elapsed = time.monotonic() - started
     approx_tokens = max(_LATENCY_MIN_TOKENS, len(out) // 4)   # ~4 chars/token
     return round(elapsed / approx_tokens * _LATENCY_NORM_TOKENS, 3)   # seconds per ~256-token turn
@@ -697,8 +708,10 @@ def benchmark_fleet(
 
         with state_lock:
             done_count += 1
-            log.info("benchmark: [%d/%d] %s done — q=%.2f, %.1fs/turn%s",
-                     done_count, total, model_name, bench.quality, bench.return_time,
+            speed_str = f"{bench.return_time:.1f}s/turn" if bench.return_time is not None \
+                else "speed unmeasured"
+            log.info("benchmark: [%d/%d] %s done — q=%.2f, %s%s",
+                     done_count, total, model_name, bench.quality, speed_str,
                      f" on {chosen}" if chosen else "")
             if persist:
                 # Node-independent scores model-wide; return_time is per-node (NOT set here, or it
@@ -709,7 +722,10 @@ def benchmark_fleet(
                     discipline=bench.discipline, epistemics=bench.epistemics,
                     reasoning=bench.reasoning,
                 )
-                if chosen:   # the chosen node's real battery latency — per-node only
+                # The chosen node's real battery latency — per-node only. A failed probe (None) is
+                # left unwritten so the node row stays untimed and the speed-matrix re-probes it,
+                # rather than stamping a bogus 0.0 that would rank it 'fastest'.
+                if chosen and bench.return_time is not None:
                     update_catalogue_speed(storage, chosen, model_name, bench.return_time)
             results.append(bench)
             if progress is not None:
