@@ -368,6 +368,7 @@ class FleetBenchmarkResult:
 
 def benchmark_model(
     model: ModelGateway, model_name: str, *, judge: bool = True, num_ctx: int = 8192,
+    framework: bool = True,
 ) -> ModelBenchmark:
     """Run the battery against one model. ``judge=False`` skips the coherence pass.
 
@@ -375,6 +376,13 @@ def benchmark_model(
     layered epistemic prompts aren't truncated to Ollama's 2048 default (which would cut off the
     high-tier fact and silently break the tier-deference test). One value, used for warmup too, so
     the model loads once at that context and stays warm (DESIGN: num_ctx consistent across callers).
+
+    ``framework=False`` is the tournament's **triage** mode: it runs only the cheap capability
+    dimensions (talk/tools/code/discipline/reasoning + latency) and SKIPS the expensive
+    identity-qualification work — the multi-sample 8k-ctx epistemic gauntlet and the judge panel —
+    so a model about to be vetoed isn't dragged through the gauntlet. The survivors then get the
+    full benchmark in a later round. ``quality`` is the mean of whatever dimensions actually ran, so
+    a triage score is comparable only to other triage scores (not to a full score).
     """
     def chat_fn(messages: list[Message]) -> str:
         return model.chat_with_model(model_name, messages, params={"num_ctx": num_ctx})
@@ -390,9 +398,6 @@ def benchmark_model(
     tools = score_capability(chat_fn, "tools")
     code = score_capability(chat_fn, "code")
     discipline = score_capability(chat_fn, "discipline")
-    # Epistemics: does the model exploit Mimir's tiered/provenance/gated context (DESIGN §3)?
-    # The structured-arm competence — the qualification signal for the identity-bearing roles.
-    epistemics = score_epistemic_competence(chat_fn, samples=2)
     # Reasoning: can it actually solve problems with verifiable answers (not just follow a format)?
     # This is what keeps quality from saturating near 1.0 for any fluent model (DESIGN §4).
     reasoning = score_capability(chat_fn, "reasoning")
@@ -403,17 +408,23 @@ def benchmark_model(
     # is what the user feels (DESIGN §4: latency must reflect an actual turn).
     return_time = _measure_turn_latency(chat_fn)
 
+    # The expensive identity-qualification dimensions — only in the FULL benchmark (not at triage).
+    # Epistemics: does the model exploit Mimir's tiered/provenance/gated context (DESIGN §3)? The
+    # structured-arm competence (layered gauntlet + grounding + long-context) — the chat qualifier.
+    epistemics = score_epistemic_competence(chat_fn, samples=2) if framework else 0.0
     coherence: float | None = None
-    if judge:
+    if framework and judge:
         try:
             answer = chat_fn([{"role": "user", "content": f"Context:\n{_CTX}\n\n{_Q}"}])
             coherence = judge_coherence(model, answer)
         except Exception as exc:
             log.warning("benchmark: coherence pass failed for %s: %s", model_name, exc)
 
-    scores = [talk, tools, code, discipline, epistemics, reasoning] + (
-        [coherence] if coherence is not None else []
-    )
+    scores = [talk, tools, code, discipline, reasoning]
+    if framework:
+        scores.append(epistemics)
+    if coherence is not None:
+        scores.append(coherence)
     quality = sum(scores) / len(scores)
     return ModelBenchmark(
         model=model_name,
@@ -500,6 +511,9 @@ def benchmark_fleet(
     judge: bool = True,
     latency_budget_s: float = 0.0,
     num_ctx: int = 8192,
+    only_models: set[str] | None = None,
+    framework: bool = True,
+    persist: bool = True,
     progress: Callable[[int, int, str, float | None], None] | None = None,
     on_result: Callable[[ModelBenchmark, str], None] | None = None,
 ) -> FleetBenchmarkResult:
@@ -513,6 +527,13 @@ def benchmark_fleet(
     ``progress(index, total, model_name)`` is called before each model — the benchmark is
     multi-minute and otherwise silent, so this (and the per-model log line) is how a UI or a log
     reader can tell it's alive (DESIGN §10 — stay observable).
+
+    Tournament knobs (default to the classic one-pass full benchmark):
+    - ``only_models`` — restrict the run to this set (a later round re-testing the survivors).
+    - ``framework`` — ``False`` runs the cheap **triage** dimensions only (no epistemic gauntlet,
+      no judge), for a fast first-round narrowing.
+    - ``persist`` — ``False`` makes the run **ephemeral**: results stream via ``on_result`` but are
+      NOT written to the catalogue, so a triage/scouting round can't pollute the real scores.
     """
     sizes: dict[str, float] = {}
     nodes_with: dict[str, list[str]] = {}
@@ -525,6 +546,8 @@ def benchmark_fleet(
             continue
         if only_approved and not is_approved(entry.family):
             continue
+        if only_models is not None and entry.model not in only_models:
+            continue  # tournament: a later round only re-tests the survivors the user kept
         eligible.add(entry.model)
         if max_params_b and entry.params_b and entry.params_b > max_params_b:
             too_big.add(entry.model)
@@ -572,37 +595,39 @@ def benchmark_fleet(
                             i, total, model_name, speed, skip_budget)
                 too_slow.add(model_name)
                 continue
-            if speed is not None:
+            if speed is not None and persist:
                 update_catalogue_speed(storage, probe_node, model_name, speed)
         try:
-            bench = benchmark_model(model, model_name, judge=judges_ok, num_ctx=num_ctx)
+            bench = benchmark_model(model, model_name, judge=judges_ok, num_ctx=num_ctx,
+                                    framework=framework)
         except Exception as exc:
             log.warning("benchmark: [%d/%d] %s FAILED: %s", i, total, model_name, exc)
             continue
         log.info("benchmark: [%d/%d] %s done — quality=%.2f in %.1fs",
                  i, total, model_name, bench.quality, bench.return_time)
-        update_catalogue_scores(
-            storage,
-            model_name,
-            return_time=bench.return_time,
-            quality=bench.quality,
-            talk=bench.talk,
-            tools=bench.tools,
-            code=bench.code,
-            coherence=bench.coherence,
-            discipline=bench.discipline,
-            epistemics=bench.epistemics,
-            reasoning=bench.reasoning,
-        )
-        # Per-node speed for the OTHER nodes (the probe node was already measured above). Warm each
-        # before timing — the model isn't loaded on these nodes yet, so a cold time would mislead.
-        for node in nodes_with.get(model_name, []):
-            if node == probe_node:
-                continue
-            elapsed = _measure_node_speed(node, model_name, timeout_s=skip_budget,
-                                          warmup=True, num_ctx=num_ctx)
-            if elapsed is not None:
-                update_catalogue_speed(storage, node, model_name, elapsed)
+        if persist:
+            update_catalogue_scores(
+                storage,
+                model_name,
+                return_time=bench.return_time,
+                quality=bench.quality,
+                talk=bench.talk,
+                tools=bench.tools,
+                code=bench.code,
+                coherence=bench.coherence,
+                discipline=bench.discipline,
+                epistemics=bench.epistemics,
+                reasoning=bench.reasoning,
+            )
+            # Per-node speed for the OTHER nodes (the probe node was already measured above). Warm
+            # each before timing — the model isn't loaded on these nodes yet, so cold would mislead.
+            for node in nodes_with.get(model_name, []):
+                if node == probe_node:
+                    continue
+                elapsed = _measure_node_speed(node, model_name, timeout_s=skip_budget,
+                                              warmup=True, num_ctx=num_ctx)
+                if elapsed is not None:
+                    update_catalogue_speed(storage, node, model_name, elapsed)
         results.append(bench)
         if on_result is not None:
             home = probe_node or (nodes_with.get(model_name) or [""])[0]

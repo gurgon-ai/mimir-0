@@ -102,6 +102,26 @@ def test_size_floor_excludes_tiny_models(brain: Mimir) -> None:
     assert result.skipped_too_small == 1
 
 
+def test_tournament_only_models_restricts_the_round(brain: Mimir) -> None:
+    # A later tournament round re-tests only the survivors the user kept.
+    result = brain.benchmark_fleet(only_approved=False, judge=False, only_models={"mock-b"})
+    assert {b.model for b in result.results} == {"mock-b"}
+    assert result.eligible == 1  # the round's pool is just the survivor
+
+
+def test_tournament_triage_skips_the_framework_and_can_be_ephemeral(brain: Mimir) -> None:
+    from mimir.storage.repo import list_catalogue
+
+    # Triage (framework=False) runs the cheap dimensions only and, ephemeral, writes nothing.
+    result = brain.benchmark_fleet(
+        only_approved=False, judge=True, framework=False, persist=False,
+    )
+    assert result.benchmarked == 3  # all three mock models triaged
+    assert all(b.coherence is None for b in result.results)  # judge skipped in triage
+    # Ephemeral: the catalogue still has no scores (the scouting round didn't pollute it).
+    assert all(e.quality is None for e in list_catalogue(brain._storage))
+
+
 def _craft_scores(brain: Mimir) -> None:
     from mimir.storage.repo import update_catalogue_scores
 
