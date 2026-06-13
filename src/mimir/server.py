@@ -1596,9 +1596,25 @@ async function loadModels() {
       if (m.return_time != null) bits.push(`${m.return_time}s/turn`);
       bits.push(`${(m.nodes || []).length} node(s)`);
       if (m.approved) bits.push("approved");
-      (m.roles || []).forEach(r => bits.push("▶ " + r));
+      const serving = new Set(m.roles || []);
+      (m.roles || []).forEach(r => bits.push("▶ " + r));                                    // serving now
+      (m.eligible_roles || []).forEach(r => { if (!serving.has(r)) bits.push("✓ " + r); });  // qualifies for
       bits.forEach(b => { const sp = document.createElement("span"); sp.className = "tag"; sp.textContent = b; tags.appendChild(sp); });
-      row.appendChild(tags); list.appendChild(row);
+      row.appendChild(tags);
+      // Explain the verdict — never drop a barred role silently (DESIGN §10): show which role the
+      // model is barred from and the floor it missed. Only for benchmarked models (an unbenchmarked
+      // one already reads "·" above; listing "not benchmarked yet" for every role would be noise).
+      if (m.benchmarked && m.barred && Object.keys(m.barred).length) {
+        const bar = document.createElement("div"); bar.className = "tags";
+        Object.entries(m.barred).forEach(([role, why]) => {
+          const sp = document.createElement("span"); sp.className = "tag";
+          sp.style.borderColor = "#7a3b3b"; sp.style.color = "#e0a0a0";
+          sp.textContent = `⊘ ${role}: ${why}`; sp.title = `barred from ${role}: ${why}`;
+          bar.appendChild(sp);
+        });
+        row.appendChild(bar);
+      }
+      list.appendChild(row);
     });
   } catch (e) { $("poolList").innerHTML = "error: " + e.message; }
 }
