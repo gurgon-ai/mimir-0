@@ -177,18 +177,25 @@ different minds. Diversity is emergent from the hardware, not a config chore.
 1. **Deterministic gate** (mechanical, zero judge cost): does output parse as valid JSON against the
    role schema? Required fields, sane types? **Consistency** across K runs (5/5 vs 3/5 is a real
    score). **Latency** against a per-role ceiling — too slow for `chat` may still qualify for a
-   nightly role. A model that fails here never costs a judge call. The gate scores five capability
-   dimensions — *talk*, *tools*, *code*, **discipline**, and **epistemics**. *Discipline* tests
+   nightly role. **Latency** is timed from one *real-length* generation (normalized to seconds per
+   ~256-token turn), so a slow remote model can't masquerade as instant on a 3-token reply. A model
+   that fails here never costs a judge call. The gate scores six capability dimensions — *talk*,
+   *tools*, *code*, **reasoning**, **discipline**, and **epistemics**. *Reasoning* tests whether the
+   model can actually **solve** a problem with one regex-checkable answer (multi-step arithmetic,
+   letter-counting, a code-trace, an instruction transform), not merely follow a format — the
+   dimension that keeps *quality* from saturating near 1.0 for any fluent model. *Discipline* tests
    whether the model honors prohibitions, above all **not reproducing the internal
    `[tier=...; source=...]` scaffolding it is shown** (the failure that forced the §10 output
    sanitizer); its probe replicates the production condition that triggers the leak (a tag-saturated
    recall block under the real soft instruction), sampled across runs since the leak is probabilistic.
    *Epistemics* tests whether the model actually **exploits** the tiered/provenance/gated context
    (§3) — defers to higher-tier facts, attributes to source, hedges on thin evidence — measured by
-   the structured arm of the epistemic-competence experiment. The identity-bearing roles (`chat`,
-   `reasoning`) gate on **both** *discipline* and *epistemics*: a model that leaks the scaffolding, OR
-   one that ignores evidence tiers, is never recommended to speak as the system — both failures are
-   caught in qualification, not discovered in production.
+   the structured arm of the epistemic-competence experiment over a gauntlet: a **layered
+   conflicting-tier** probe (defer to the high tier under noise), a **grounding** floor (recall a
+   context-only nonce), and a **long-context needle**. The identity-bearing roles (`chat`,
+   `reasoning`) gate on **both** *discipline* and *epistemics* (and *reasoning*): a model that leaks
+   the scaffolding, ignores evidence tiers, OR can't solve a problem is never recommended to speak as
+   the system — caught in qualification, not discovered in production.
 2. **Coherence judgment** (judge + human anchor, only on survivors): the candidate answers a fixed
    **golden case** (prompt + fixed context + reference answer); a trusted model judges it against a
    rubric (faithful to context, cites the right memory, refuses to hallucinate). Sample outputs

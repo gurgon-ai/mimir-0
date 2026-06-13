@@ -78,9 +78,12 @@ uncertainty gate — and routes it through two disciplined gateways. On top of t
 - **Sleep / consolidation** — dedup, decay, archival, and contradiction resolution, so memory
   maintains itself.
 - **Inner council** — adversarial deliberation across whatever models are installed.
-- **Distributed fleet** — point it at your LAN and it discovers every `ollama serve` (zero setup
-  on those machines), routes each request to a node that has the model, benchmarks them for speed
-  and quality, and recommends a model per role. Run the brain on a Raspberry Pi and borrow GPUs
+- **Distributed fleet + qualifying tournament** — point it at your LAN and it discovers every
+  `ollama serve` (zero setup on those machines), routes each request to a node that has the model,
+  and **qualifies** them on a measured battery (talk, tools, code, reasoning, discipline, and an
+  epistemic-framework gauntlet — tier-deference under noise, context grounding, long-context recall).
+  Run it as a staged, human-veto **tournament** that narrows the fleet round by round and points each
+  role at the best model *you're willing to wait for*. Run the brain on a Raspberry Pi and borrow GPUs
   over the network.
 - **Reference web UI** — a zero-dependency stdlib server for all of the above.
 

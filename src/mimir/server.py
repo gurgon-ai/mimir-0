@@ -862,15 +862,16 @@ _HTML = """<!doctype html>
 
     <div class="tabpane hidden" id="tab-fleet">
       <div class="row">
+        <button id="fleetTourneyBtn" type="button" title="The recommended path. A staged knock-out: Round 0 qualifying (fast) → you pick survivors → Round 1 the full framework gauntlet → Round 2 finals. You choose who advances between rounds.">🏆 Run qualifying tournament</button>
+      </div>
+      <div class="hint" style="margin-top:6px;">The recommended way to qualify your fleet — narrows it in rounds: <b>Round 0 · Qualifying</b> (fast) → <b>🥊 you keep the survivors</b> → <b>Round 1 · Framework gauntlet</b> (the real test) → <b>Round 2 · Finals</b>. (Round 3 · Vision is reserved.) The scoreboard takes over the chat pane.</div>
+      <div class="hint" style="margin-top:14px; opacity:0.8;">— or do it manually, one step at a time —</div>
+      <div class="row" style="margin-top:6px;">
         <button class="secondary" id="fleetScanBtn" type="button" title="List what models are installed on each node. Fast — runs no models.">1 · Find models</button>
         <button class="secondary" id="fleetBenchBtn" type="button" title="Run each model through the test battery to score it. Slow — this is the expensive step.">2 · Benchmark (score)</button>
         <button class="secondary" id="fleetApplyBtn" type="button" title="Point each role at its top-scoring model from the benchmark.">3 · Apply best</button>
       </div>
-      <div class="hint" style="margin-top:6px;"><b>Find</b> lists installed models (fast, no scoring) → <b>Benchmark</b> scores them by running tests (slow) → <b>Apply</b> routes each role to the best.</div>
-      <div class="row" style="margin-top:10px;">
-        <button id="fleetTourneyBtn" type="button" title="A staged knock-out: Round 0 qualifying (fast) → you pick survivors → Round 1 the full framework gauntlet → Round 2 finals. You choose who advances between rounds.">🏆 Run qualifying tournament</button>
-      </div>
-      <div class="hint" style="margin-top:6px;">The tournament narrows the fleet in rounds — <b>Round 0 · Qualifying</b> (fast) → <b>🥊 you keep the survivors</b> → <b>Round 1 · Framework gauntlet</b> (the real test) → <b>Round 2 · Finals</b>. (Round 3 · Vision is reserved.) The scoreboard takes over the chat pane.</div>
+      <div class="hint" style="margin-top:6px;"><b>Find</b> lists installed models (fast, no scoring) → <b>Benchmark</b> scores them all at once (slow) → <b>Apply</b> routes each role to the best.</div>
       <div class="row" style="margin-top:8px; align-items:center; gap:14px; flex-wrap:wrap;">
         <label class="hint" style="display:flex; align-items:center; gap:6px;">Benchmark — min model size (B)
           <input type="number" id="benchMinSize" min="0" step="1" style="width:70px;"/></label>
