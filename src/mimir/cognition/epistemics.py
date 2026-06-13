@@ -108,20 +108,51 @@ def _score_vault_passphrase(out: str) -> bool:
     return "quokka" in low and "lantern" in low
 
 
-# Index-driven filler so the haystack is deterministic (no RNG) yet varied. ~140 lines lands well
-# past 2048 tokens — the point: a model at Ollama's default context can't see the needle at all.
+# Index-driven filler: deterministic (no RNG), coherent ENGLISH (not gibberish — a model shouldn't
+# treat it specially), and entirely INVENTED + generic (public-clean, nothing proprietary). A wide,
+# varied pool so a long haystack reads like a real document, not the same line repeated (which would
+# make the needle stand out). None of these mention the needle's words (vault/passphrase/quokka).
 _HAYSTACK_LINES = (
-    "Maintenance unit {i} passed inspection and was returned to service.",
-    "The shipment for bay {i} arrived on schedule and was logged by the clerk.",
-    "Meeting room {i} was booked for the afternoon and later released without use.",
-    "Sensor {i} reported nominal readings throughout the entire night shift.",
-    "Invoice {i} was reconciled against the ledger and quietly marked complete.",
+    "Maintenance unit {i} passed its quarterly inspection and was returned to service.",
+    "The shipment for bay {i} arrived on schedule and was logged by the receiving clerk.",
+    "Meeting room {i} was booked for the afternoon session and later released without use.",
+    "Sensor {i} reported nominal readings throughout the entire overnight monitoring window.",
+    "Invoice {i} was reconciled against the ledger and quietly marked complete by accounting.",
+    "The groundskeeping crew cleared the north path near marker {i} before the morning rush.",
+    "Backup job {i} finished within its window and the verification step reported no errors.",
+    "Pallet {i} was re-shelved in the long-term aisle after a routine inventory count.",
+    "The weather station logged a mild, dry afternoon with light winds around reading {i}.",
+    "Ticket {i} was triaged, assigned to the standard queue, and resolved the following day.",
+    "Vehicle {i} completed its scheduled service and returned to the motor pool that evening.",
+    "The filtration loop on circuit {i} held steady pressure across the full test cycle.",
+    "Order {i} shipped from the regional depot and cleared the loading dock without incident.",
+    "Calibration check {i} matched the reference values within the allowed tolerance band.",
+    "The seasonal supply order {i} was approved and queued for delivery the next quarter.",
+    "Patrol log {i} noted a quiet shift with no exceptions worth escalating to the lead.",
+    "The irrigation timer near zone {i} ran its programmed cycle and shut off on schedule.",
+    "Document {i} was filed under the standard retention policy and indexed for later search.",
+    "The night crew rotated the perimeter lamps and replaced the lamp at post {i}.",
+    "Report {i} summarized routine activity and was distributed to the usual recipients.",
+    "The spare-parts bin for line {i} was restocked to its baseline level during the audit.",
+    "Survey point {i} was re-measured and the slight drift fell within the expected margin.",
+    "The conference call for project {i} ran short and adjourned ahead of its booked hour.",
+    "Coolant level {i} was topped off and the gauge settled back into the green band.",
+    "The archive crate labeled {i} was moved to deep storage after its review date passed.",
+    "Workstation {i} received the scheduled update overnight and rebooted without a hitch.",
+    "The loading-ramp gate {i} was inspected, lubricated, and cleared for continued use.",
+    "Soil moisture at plot {i} read within range and no supplemental watering was needed.",
+    "The recycling pickup for route {i} completed on time and the bins were returned empty.",
+    "Badge reader {i} logged the expected entries and flagged nothing during the shift.",
 )
 
 
-def _long_haystack(needle: str, *, sentences: int = 140, needle_at: int = 70) -> str:
-    """A long, boring 'document' with ``needle`` planted in the MIDDLE — the worst place for a model
-    with a weak grip on long context ('lost in the middle'). Deterministic: line N is fixed by N."""
+def _long_haystack(needle: str, *, target_tokens: int = 1700) -> str:
+    """A long, boring 'document' filling roughly ``target_tokens`` of context, with ``needle``
+    in the MIDDLE — the worst place for a model with a weak grip on long context ('lost in the
+    middle'). SIZED to the window we qualify at, so the test scales: a 30k window gets a ~18k-token
+    haystack, not a token gesture. Deterministic: line N is fixed by N."""
+    sentences = max(40, target_tokens // 12)   # ~12 tokens per filler line
+    needle_at = sentences // 2
     lines: list[str] = []
     for i in range(sentences):
         if i == needle_at:
@@ -224,19 +255,23 @@ GROUNDING_PROBES: list[EpistemicProbe] = [
         question="What is the secret command word? Reply with only the word.",
         scorer=_score_secret_word,
     ),
-    EpistemicProbe(
+]
+
+
+def _long_context_probe(num_ctx: int) -> EpistemicProbe:
+    """The context-length test, **sized to the window we qualify at**: a needle in the MIDDLE of a
+    haystack filling ~60% of ``num_ctx``. A fixed 2k haystack only proves "past Ollama's 2048
+    default" — a low bar; this scales, so setting ``benchmark_num_ctx`` to your deployment window
+    (~10–32k for a RAG-heavy system) actually tests it, catching a model that's fine at 8k but gets
+    'lost in the middle' of a real context. Built at runtime since it depends on ``num_ctx``."""
+    haystack = _long_haystack("Important: the vault passphrase is quokka-lantern.",
+                              target_tokens=int(num_ctx * 0.6))
+    return EpistemicProbe(
         name="long_context",
-        # A needle in a LONG haystack — the context-length test. The 'document' runs past 2048
-        # tokens, so a model at Ollama's default context never even sees the planted line; one with
-        # a real context window (the benchmark pins num_ctx) and a grip on long input finds it.
-        facts=[
-            (_long_haystack("Important: the vault passphrase is quokka-lantern."),
-             EvidenceTier.DOCUMENT, "the archive"),
-        ],
+        facts=[(haystack, EvidenceTier.DOCUMENT, "the archive")],
         question="According to the document, what is the vault passphrase? Reply with only it.",
         scorer=_score_vault_passphrase,
-    ),
-]
+    )
 
 
 # -- prompt construction (structured = the real framework; flat = a bare baseline) -----
@@ -251,15 +286,19 @@ def _memory(mem_id: int, text: str, tier: EvidenceTier, provenance: str) -> Memo
     )
 
 
-def structured_prompt(probe: EpistemicProbe) -> str:
-    """The probe's facts through the *real* ``build_context()`` — tiers, provenance, uncertainty."""
+def structured_prompt(probe: EpistemicProbe, *, budget_tokens: int = 4096) -> str:
+    """The probe's facts through the *real* ``build_context()`` — tiers, provenance, uncertainty.
+
+    ``budget_tokens`` caps the assembled context: small probes use the 4k default, but the
+    long-context probe passes the full window so its big haystack isn't truncated below the needle.
+    """
     retrieved = [
         ScoredMemory(memory=_memory(i + 1, t, tier, src), score=1.0, keyword=1.0, vector=1.0)
         for i, (t, tier, src) in enumerate(probe.facts)
     ]
     bundle = build_context(
         query=probe.question, user=None, identity=_IDENTITY, retrieved=retrieved,
-        sentinel_note=None, embed_mode=EmbeddingMode.BOOTSTRAP, budget_tokens=4096,
+        sentinel_note=None, embed_mode=EmbeddingMode.BOOTSTRAP, budget_tokens=budget_tokens,
     )
     return bundle.prompt
 
@@ -323,18 +362,24 @@ def evaluate_epistemics(chat_fn: ChatFn, *, model: str = "", samples: int = 1) -
                            flat_score=round(f, 3), lift=round(s - f, 3))
 
 
-def score_epistemic_competence(chat_fn: ChatFn, *, samples: int = 2) -> float:
+def score_epistemic_competence(chat_fn: ChatFn, *, samples: int = 2, num_ctx: int = 8192) -> float:
     """How well a model exploits the epistemic framework — the structured arm only (no flat
     baseline). This is the chat-LLM qualification signal (DESIGN §4): the fraction of probes passed
     when the model is given the real tiered/provenance/gated context. It spans the lift PROBES
-    (including the big layered conflicting-tier gauntlet — defer to high-tier 'blue' under noise)
-    AND the GROUNDING_PROBES (read a nonce that's ONLY in context). A model that ignores evidence
-    tiers, can't follow a layered prompt, or confabulates instead of reading the context scores low
-    here and is barred from the identity roles — this is the qualifying round for the chat model.
+    (including the big layered conflicting-tier gauntlet — defer to high-tier 'blue' under noise),
+    the GROUNDING_PROBES (read a nonce that's ONLY in context), and a **long-context probe sized to
+    ``num_ctx``** (a needle in the middle of ~60% of the window — set ``benchmark_num_ctx`` to your
+    deployment size and this actually tests it). A model that ignores evidence tiers, can't follow a
+    layered prompt, can't hold long context, or confabulates instead of reading scores low here and
+    is barred from the identity roles — this is the qualifying round for the chat model.
     """
     samples = max(1, samples)
-    probes = PROBES + GROUNDING_PROBES
-    scores = [_run_arm(chat_fn, structured_prompt(p), p, samples) for p in probes]
+    long_probe = _long_context_probe(num_ctx)   # sized to the window, so the budget must allow it
+    probes = PROBES + GROUNDING_PROBES + [long_probe]
+    scores = []
+    for p in probes:
+        budget = num_ctx if p is long_probe else 4096
+        scores.append(_run_arm(chat_fn, structured_prompt(p, budget_tokens=budget), p, samples))
     return sum(scores) / len(scores)
 
 

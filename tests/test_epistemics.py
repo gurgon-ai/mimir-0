@@ -132,16 +132,19 @@ def test_chat_qualifier_scores_grounding_and_layered_deference() -> None:
     assert score_epistemic_competence(context_blind, samples=1) == 0.0  # fails every probe
 
 
-def test_long_context_needle_is_long_and_findable() -> None:
-    # The haystack must be genuinely long (past Ollama's 2048-token default, ~4 chars/token → 8k+
-    # chars) with the needle planted in the middle and survivable through the real build_context.
-    from mimir.cognition.epistemics import GROUNDING_PROBES, _long_haystack
+def test_long_context_needle_scales_with_window_and_survives_assembly() -> None:
+    # The haystack SIZES to num_ctx: a bigger window → a proportionally bigger haystack (so the test
+    # actually stresses the context we qualify at, not a fixed 2k gesture). The needle survives the
+    # assembly when build_context gets a window-sized budget.
+    from mimir.cognition.epistemics import _long_context_probe, _long_haystack
 
-    hay = _long_haystack("the vault passphrase is quokka-lantern")
+    hay = _long_haystack("the vault passphrase is quokka-lantern", target_tokens=2000)
     assert "quokka-lantern" in hay
-    assert len(hay) > 8000  # > ~2048 tokens, so a default-context model truncates it away
+    assert len(hay) > 5000  # ~2000 tokens of real filler
     assert _score_vault_passphrase("The passphrase is quokka-lantern.")
     assert not _score_vault_passphrase("I couldn't find a passphrase.")
-    # The needle survives the real assembly pipeline (build_context didn't budget it out).
-    probe = next(p for p in GROUNDING_PROBES if p.name == "long_context")
-    assert "quokka-lantern" in structured_prompt(probe)
+    # Scales: a 32k window gives a much bigger haystack than an 8k one.
+    small, big = _long_context_probe(8192), _long_context_probe(32768)
+    assert len(big.facts[0][0]) > 3 * len(small.facts[0][0])
+    # The needle survives the real pipeline when the budget matches the window.
+    assert "quokka-lantern" in structured_prompt(small, budget_tokens=8192)
