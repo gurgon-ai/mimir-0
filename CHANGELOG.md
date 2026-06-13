@@ -19,6 +19,13 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   (it still fails *over* to another node that has the model — it just doesn't retry the slow one).
   New plumbing: a reserved `__timeout_s__` param the Ollama provider honours per call, and a
   `max_retries` override on the pool/gateway.
+- **The latency cap's pre-gate measured the wrong thing, so it never skipped slow models.** The gate
+  timed `"reply ok"` — one token, instant for anything — so a model that's snappy on a token but
+  takes ~13s on a real turn sailed through a 7s cap, then crawled through the ~15-call battery
+  (~160s total, none of it skipped). The pre-gate now times a **representative ~64-token generation**
+  and normalizes it to **seconds per ~256-token turn** (the cap's actual units), so a 13s/turn model
+  is skipped *before* the battery under a 7s cap. Per-node speed is now stored in the same normalized
+  units, so routing's fastest-node pick reflects real per-turn latency.
 - **A page refresh lost the whole tournament/benchmark view.** The resume logic only ran on the
   Fleet-tab click, so a fresh load never reconnected — the run kept going server-side but the UI
   forgot it. It now reattaches on page load (and tab-open), and shows a per-model elapsed timer so a
