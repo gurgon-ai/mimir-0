@@ -143,6 +143,10 @@ class ModelGateway:
 
     # -- fleet lifecycle (delegates to the pool) --------------------------------------
 
+    def set_disabled_nodes(self, names: set[str]) -> None:
+        """Veto fleet nodes by name — routing skips them even if reachable (DESIGN §5)."""
+        self._pool.set_disabled_nodes(names)
+
     def refresh_inventory(self) -> None:
         self._pool.refresh()
 

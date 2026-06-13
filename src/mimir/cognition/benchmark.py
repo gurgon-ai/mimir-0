@@ -512,6 +512,7 @@ def benchmark_fleet(
     latency_budget_s: float = 0.0,
     num_ctx: int = 8192,
     only_models: set[str] | None = None,
+    disabled_nodes: set[str] | None = None,
     framework: bool = True,
     persist: bool = True,
     progress: Callable[[int, int, str, float | None], None] | None = None,
@@ -541,6 +542,8 @@ def benchmark_fleet(
     too_big: set[str] = set()    # eligible but over the size cap
     too_small: set[str] = set()  # eligible but under the size floor (user has hardware for more)
     for entry in list_catalogue(storage):
+        if disabled_nodes and entry.node in disabled_nodes:
+            continue  # the user vetoed this node — qualify and time nothing on it (DESIGN §5)
         nodes_with.setdefault(entry.model, []).append(entry.node)
         if "embed" in entry.model.lower():
             continue

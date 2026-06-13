@@ -63,6 +63,19 @@ def test_failover_to_healthy_endpoint() -> None:
     assert pool.get_stats()["failovers"] >= 1
 
 
+def test_disabled_node_is_skipped_with_a_fail_safe() -> None:
+    a = FakeProvider("A", reply="from-a")
+    b = FakeProvider("B", reply="from-b")
+    pool = ProviderPool([("A", a), ("B", b)], max_retries=0, sleep=_noop_sleep)
+    # Veto node A → routing goes to B only.
+    pool.set_disabled_nodes({"A"})
+    assert pool.chat("m", [], {}, priority=Priority.CHAT_CRITICAL) == "from-b"
+    assert a.calls == 0
+    # Veto BOTH → fail-safe: chat must still run rather than hard-block (DESIGN §10), so A is used.
+    pool.set_disabled_nodes({"A", "B"})
+    assert pool.chat("m", [], {}, priority=Priority.CHAT_CRITICAL) in ("from-a", "from-b")
+
+
 def test_all_transient_raises_transient() -> None:
     a = FakeProvider("A", fail_times=10, transient=True)
     pool = ProviderPool([("A", a)], max_retries=1, sleep=_noop_sleep)

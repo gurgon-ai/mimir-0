@@ -41,6 +41,7 @@ from .storage.repo import (
     count_memories,
     count_procedures,
     count_triples,
+    disabled_nodes,
     latest_self_model,
     list_procedures,
 )
@@ -207,6 +208,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"applied": self._apply_recommendations()})
             elif route == "/api/fleet/model":
                 self._send_json(self._set_model_enabled(body))
+            elif route == "/api/fleet/node":
+                self._send_json(self._set_node_enabled(body))
             else:
                 self._send_json({"error": "not found"}, status=404)
         except json.JSONDecodeError:
@@ -320,10 +323,12 @@ class _Handler(BaseHTTPRequestHandler):
             report = self.server.brain.fleet_report()
             stats = self.server.brain._model.get_stats()
             be = self.server.brain.config.backend
+            disabled = disabled_nodes(self.server.brain._storage)
         report["stats"] = stats
         report["max_model_size_b"] = be.max_model_size_b if be else 30.0
         report["min_model_size_b"] = be.min_model_size_b if be else 0.0
         report["max_latency_s"] = be.max_latency_s if be else 0.0
+        report["disabled_nodes"] = sorted(disabled)
         return report
 
     def _scan_fleet(self) -> dict[str, Any]:
@@ -530,6 +535,15 @@ class _Handler(BaseHTTPRequestHandler):
         with self.server.brain_lock:
             moved = self.server.brain.set_model_enabled(model, enabled)
         return {"model": model, "enabled": enabled, "moved": moved}
+
+    def _set_node_enabled(self, body: dict[str, Any]) -> dict[str, Any]:
+        node = str(body.get("node", "")).strip()
+        if not node:
+            raise ValueError("node is required")
+        enabled = bool(body.get("enabled", True))
+        with self.server.brain_lock:
+            moved = self.server.brain.set_node_enabled(node, enabled)
+        return {"node": node, "enabled": enabled, "moved": moved}
 
     def _procedures(self) -> dict[str, Any]:
         with self.server.brain_lock:
@@ -1151,9 +1165,16 @@ async function loadFleet() {
       });
       list.appendChild(box);
     }
+    const offNodes = new Set(data.disabled_nodes || []);
     Object.entries(data.by_node || {}).forEach(([node, models]) => {
-      const d = document.createElement("div"); d.className = "mem";
-      const h = document.createElement("div"); h.className = "text"; h.textContent = `${node}  (${models.length} models)`; d.appendChild(h);
+      const off = offNodes.has(node);
+      const d = document.createElement("div"); d.className = "mem"; if (off) d.style.opacity = "0.5";
+      const head = document.createElement("label"); head.style.display = "flex"; head.style.alignItems = "center"; head.style.gap = "8px"; head.style.cursor = "pointer";
+      const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !off;
+      cb.title = "Use this node in the fleet (qualification + routing). Untick to exclude it even if reachable.";
+      cb.addEventListener("change", () => setNodeEnabled(node, cb.checked));
+      const h = document.createElement("span"); h.className = "text"; h.textContent = `${shortNode(node)}  (${models.length} models)${off ? " — disabled" : ""}`;
+      head.appendChild(cb); head.appendChild(h); d.appendChild(head);
       const tags = document.createElement("div"); tags.className = "tags";
       models.slice(0, 12).forEach(mm => { const sp = document.createElement("span"); sp.className = "tag"; const q = (mm.quality != null) ? ` · q${mm.quality}` : ""; const t = (mm.return_time != null) ? ` · ${mm.return_time}s` : ""; sp.textContent = `${mm.model} ${mm.params_b}B${q}${t}`; tags.appendChild(sp); });
       d.appendChild(tags); list.appendChild(d);
@@ -1469,6 +1490,18 @@ async function setModelEnabled(model, enabled) {
       : `${model} ${enabled ? "enabled" : "disabled"}.`;
     loadModels(); refreshState();
   } catch (e) { $("poolMsg").textContent = "Error: " + e.message; loadModels(); }
+}
+
+async function setNodeEnabled(node, enabled) {
+  $("fleetMsg").textContent = `${enabled ? "Enabling" : "Disabling"} ${node}…`;
+  try {
+    const r = await api("POST", "/api/fleet/node", { node, enabled });
+    const moved = Object.entries(r.moved || {});
+    $("fleetMsg").textContent = moved.length
+      ? `${node} ${enabled ? "enabled" : "disabled"} — re-routed ` + moved.map(([k,v]) => `${k}→${v}`).join(", ")
+      : `${node} ${enabled ? "enabled" : "disabled"} for the fleet.`;
+    loadFleet(); refreshState();
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; loadFleet(); }
 }
 
 $("procBtn").addEventListener("click", async () => {

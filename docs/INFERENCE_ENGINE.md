@@ -338,14 +338,23 @@ Built on three staging primitives on `benchmark_fleet`: `only_models` (a round r
 survivors), `framework=False` (triage — cheap dimensions only), and `persist=False` (ephemeral — a
 scouting round can't pollute the saved scores).
 
-**Agreed, next [proposed]:**
-- **Quality/speed split.** Make the Finals a dedicated **per-node speed round**: time each
-  quality-survivor on *every enabled node* against the cap → a model×node grid → champion = best
-  quality with a node under the cap, routed there. The gauntlet then stops per-node speed-probing
-  (pure quality = faster).
-- **Per-node toggle.** Each discovered edge node can be **toggled off** (a node-level veto, mirroring
-  the per-model one), excluding it from discovery, qualification, the speed finals, and routing —
-  even if reachable.
+**Per-node toggle [built].** Each discovered edge node can be **toggled off** (a node-level veto,
+mirroring the per-model one; `node_prefs` table, schema v13), excluding it from the pool's routing
+(with a fail-safe if *every* node is vetoed, so chat never hard-blocks), from qualification, and from
+recommendations — even if reachable. "All qualified machines" = the enabled nodes.
+
+**The two axes — quality vs. speed [next].** A model needs both to be a candidate:
+- **Eligible?** *Can it do the job* — quality + framework. **Node-independent → tested once.**
+- **Fast enough?** *Can some enabled node run it under the cap* — **per-node.**
+
+The hard speed cut is **early and cheap** (a model no node can run under the cap is skipped before the
+expensive gauntlet — the latency cap as a skip-gate, applied every round). The **Finals is not an
+elimination — it's placement/priority:** for the eligible survivors it measures real per-node
+turn-speed → a model×node registry → and assigns each role its champion (best eligible model). Because
+serving runs off the **pool** (least-loaded/reachable node that has the model, per call), "which box"
+is a runtime decision the pool already makes; the finals just records the speeds and picks the model.
+So the agreed restructure: the gauntlet stops per-node speed-probing (pure quality = faster), and the
+finals becomes the dedicated per-node speed/placement round.
 
 ---
 

@@ -70,12 +70,14 @@ from .storage.models import Memory, MemoryKind, Procedure
 from .storage.repo import (
     bump_procedure_uses,
     disabled_models,
+    disabled_nodes,
     latest_self_model,
     latest_sentinel_note,
     list_catalogue,
     list_memories,
     record_access,
     set_model_enabled,
+    set_node_enabled,
 )
 
 log = logging.getLogger("mimir")
@@ -163,6 +165,9 @@ class Mimir:
         # non-interactive deployment is grounded without running the interactive interview.
         if config.identity_anchors:
             establish_identity(self._storage, config.identity_anchors)
+
+        # Apply any per-node vetoes to the pool up front, so a disabled box is never routed to.
+        self._model.set_disabled_nodes(disabled_nodes(self._storage))
 
         # Resolve `auto` roles now for the local/single-provider path (inventory is ready). The
         # fleet path resolves in _init_fleet once its background inventory lands; until then the
@@ -508,13 +513,19 @@ class Mimir:
 
     def fleet_recommendations(self) -> dict[str, Any]:
         """Best model per role from the benchmarked catalogue (recommend-only; DESIGN §4)."""
-        return recommend_roles(self._storage, disabled=disabled_models(self._storage))
+        return recommend_roles(
+            self._storage, disabled=disabled_models(self._storage),
+            disabled_nodes=disabled_nodes(self._storage),
+        )
 
     def tournament_finals(self, keep: set[str]) -> dict[str, Any]:
         """Per-role champions among the kept finalists only — ``recommend_roles`` with everything
         not carried into the final round vetoed out. The qualifying tournament's last round."""
         others = {e.model for e in list_catalogue(self._storage) if e.model not in keep}
-        return recommend_roles(self._storage, disabled=disabled_models(self._storage) | others)
+        return recommend_roles(
+            self._storage, disabled=disabled_models(self._storage) | others,
+            disabled_nodes=disabled_nodes(self._storage),
+        )
 
     def set_model_enabled(self, model: str, enabled: bool) -> dict[str, str]:
         """Enable or disable a model for `auto` routing (a user's bias veto; DESIGN §4).
@@ -524,6 +535,17 @@ class Mimir:
         the auto roles that moved as a result.
         """
         set_model_enabled(self._storage, model, enabled)
+        return self._resolve_auto_roles()
+
+    def set_node_enabled(self, node: str, enabled: bool) -> dict[str, str]:
+        """Enable or disable a fleet node (a user's per-machine veto; DESIGN §5).
+
+        A disabled node is excluded from routing immediately — even if reachable — and from
+        qualification and recommendations. Re-resolves `auto` roles in case a role's fastest node
+        changed. Returns the auto roles that moved as a result.
+        """
+        set_node_enabled(self._storage, node, enabled)
+        self._model.set_disabled_nodes(disabled_nodes(self._storage))
         return self._resolve_auto_roles()
 
     def model_pool(self) -> dict[str, Any]:
@@ -561,7 +583,10 @@ class Mimir:
         an untested model.
         """
         return self._apply_role_recs(
-            recommend_roles(self._storage, disabled=disabled_models(self._storage))
+            recommend_roles(
+                self._storage, disabled=disabled_models(self._storage),
+                disabled_nodes=disabled_nodes(self._storage),
+            )
         )
 
     def apply_finals(self, keep: set[str]) -> dict[str, str]:
@@ -614,6 +639,7 @@ class Mimir:
             latency_budget_s=budget,
             num_ctx=ctx,
             only_models=only_models,
+            disabled_nodes=disabled_nodes(self._storage),
             framework=framework,
             persist=persist,
             progress=progress,
