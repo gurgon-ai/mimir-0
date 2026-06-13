@@ -55,6 +55,13 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **The model pool explains its verdict — no silent role bars.** `recommend_roles` quietly dropped any
+  model that missed a capability floor; you saw the winners but never *why* a model wasn't one. The
+  pool now shows, per model, the roles it **qualifies for** (✓) alongside the ones it's **barred from**
+  with the reason — e.g. "⊘ chat: discipline 0.00 < 0.50" — never a silent drop (DESIGN §10). The bar
+  reason comes from a single shared gate (`_bar_reason`) that `recommend_roles` *also* uses to pick
+  winners, so the board's explanation can never contradict the actual decision. (`fleet.py`,
+  model-pool tab.)
 - **The long-context probe now scales with the window you qualify at, and the default is the real
   operational window.** It used to plant the needle in a fixed ~2k-token haystack — enough to clear
   Ollama's 2048 default but no real test of the window a deployment actually runs. The haystack now

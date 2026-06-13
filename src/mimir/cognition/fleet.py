@@ -77,6 +77,24 @@ ROLE_NEEDS: dict[str, tuple[tuple[str, ...], str]] = {
 _CAPABILITY_FLOOR = 0.5
 
 
+def _bar_reason(data: dict[str, Any], capabilities: tuple[str, ...]) -> str | None:
+    """Why this model is barred from a role, or ``None`` if it clears every required floor.
+
+    The SINGLE source of truth for the role gate — both ``recommend_roles`` (who wins) and the
+    model-pool board (who's barred, and why) call it, so the leaderboard's explanation can never
+    drift from the actual decision. Returns a human-readable reason naming the first failing
+    capability and the floor it missed (e.g. ``"discipline 0.25 < 0.50"``), or ``"not benchmarked
+    yet"`` when the model hasn't been scored. Never a silent drop (DESIGN §10).
+    """
+    if data.get("quality") is None:
+        return "not benchmarked yet"
+    for cap in capabilities:
+        val = data.get(cap) or 0.0
+        if val < _CAPABILITY_FLOOR:
+            return f"{cap} {val:.2f} < {_CAPABILITY_FLOOR:.2f}"
+    return None
+
+
 def recommend_roles(
     storage: StorageGateway, *, disabled: set[str] | None = None,
     disabled_nodes: set[str] | None = None,
@@ -124,8 +142,7 @@ def recommend_roles(
         candidates = [
             (name, data)
             for name, data in by_model.items()
-            if data["quality"] is not None
-            and all((data.get(cap) or 0.0) >= _CAPABILITY_FLOOR for cap in capabilities)
+            if _bar_reason(data, capabilities) is None
         ]
         if not candidates:
             recommendations[role] = None
@@ -241,6 +258,9 @@ def fleet_model_pool(
                 "family": e.family,
                 "params_b": e.params_b,
                 "quality": e.quality,
+                "talk": e.talk,
+                "tools": e.tools,
+                "code": e.code,
                 "discipline": e.discipline,
                 "epistemics": e.epistemics,
                 "reasoning": e.reasoning,
@@ -260,6 +280,19 @@ def fleet_model_pool(
         slot["enabled"] = model not in disabled
         slot["passed"] = slot["quality"] is not None and slot["quality"] >= _CAPABILITY_FLOOR
         slot["roles"] = sorted(serving.get(model, []))
+        # Explain the verdict per role: which roles it clears the floor for (badge-able), and WHY
+        # it's barred from the rest — never a silent drop (DESIGN §10). Same gate as recommend_roles
+        # via the shared _bar_reason, so the board can't contradict the actual pick.
+        eligible_roles: list[str] = []
+        barred: dict[str, str] = {}
+        for role, (capabilities, _prefer) in ROLE_NEEDS.items():
+            reason = _bar_reason(slot, capabilities)
+            if reason is None:
+                eligible_roles.append(role)
+            else:
+                barred[role] = reason
+        slot["eligible_roles"] = sorted(eligible_roles)
+        slot["barred"] = barred
         models.append(slot)
     # Best first: enabled, then highest quality, then fastest.
     models.sort(key=lambda s: (not s["enabled"], -(s["quality"] or -1.0), s["return_time"] or 1e9))

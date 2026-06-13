@@ -231,7 +231,10 @@ where a **setup page** runs once:
    recommended-present models first** (usable in seconds), and offer to qualify the rest in the
    background. Show a time estimate; respect the machine's capacity (don't melt a Pi — §6).
 4. **Review & override.** Present the proposed role→model assignments with *why* (scores, what was
-   barred and why), and let the user pin, disable, or accept. Surface whether **multi-family
+   barred and why — **[built]** the model pool now shows each model's qualifying roles and, for the
+   rest, the failing floor inline, e.g. "⊘ chat: discipline 0.00 < 0.50"; the bar reason shares the
+   exact gate `recommend_roles` uses, so it can't contradict the pick), and let the user pin, disable,
+   or accept. Surface whether **multi-family
    adversarial reasoning** is available (≥2 families present) and what that buys them.
 5. **Persist.** Write the choices to `mimir.toml` (and DB prefs) so boot is silent thereafter.
 

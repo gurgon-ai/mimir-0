@@ -281,6 +281,38 @@ def test_reasoning_incompetent_model_is_barred_from_thinking_roles(brain: Mimir)
     assert recs["bake"]["model"] == "mock-a"
 
 
+def test_bar_reason_names_the_failing_floor() -> None:
+    # The shared role gate: None when a model clears every floor, else a reason naming the first
+    # failing capability + the floor it missed. This is what the leaderboard renders instead of a
+    # silent drop, and it's the SAME predicate recommend_roles uses to pick winners.
+    from mimir.cognition.fleet import _bar_reason
+
+    needs = ("discipline", "epistemics", "reasoning")
+    assert _bar_reason({"quality": 0.8, "discipline": 0.9, "epistemics": 0.7, "reasoning": 0.8},
+                       needs) is None
+    assert _bar_reason({"quality": 0.6, "discipline": 0.25, "epistemics": 0.9, "reasoning": 0.9},
+                       needs) == "discipline 0.25 < 0.50"
+    assert _bar_reason({"quality": None}, ("talk",)) == "not benchmarked yet"
+
+
+def test_model_pool_explains_why_a_model_is_barred(brain: Mimir) -> None:
+    # The model pool (leaderboard) must EXPLAIN the verdict, not drop barred models silently: a
+    # fluent-but-leaky model (discipline 0) is barred from chat with the reason, yet still eligible
+    # for bake (gated on talk). DESIGN §10 — no silent state.
+    from mimir.storage.repo import update_catalogue_scores
+
+    brain.scan_fleet()
+    update_catalogue_scores(
+        brain._storage, "mock-a", return_time=0.5, quality=0.6, talk=1.0, tools=0.6, code=0.6,
+        coherence=None, discipline=0.0, epistemics=1.0, reasoning=1.0,  # leaks tags
+    )
+    row = next(m for m in brain.model_pool()["models"] if m["model"] == "mock-a")
+    assert row["barred"]["chat"] == "discipline 0.00 < 0.50"   # explained, not hidden
+    assert "reasoning" in row["barred"]                         # identity roles both gate on it
+    assert "bake" in row["eligible_roles"]                      # gated on talk, which it has
+    assert "chat" not in row["eligible_roles"]
+
+
 def test_tournament_finals_restricts_to_kept_finalists(brain: Mimir) -> None:
     # The finals round recommends only among the survivors the user carried in. mock-b is the better
     # model, but if the user keeps ONLY mock-a, the finals must champion mock-a (the veto wins).
