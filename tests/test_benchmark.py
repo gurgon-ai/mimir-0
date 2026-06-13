@@ -297,6 +297,51 @@ def test_failed_latency_probe_is_unmeasured_not_instant() -> None:
     assert _measure_turn_latency(lambda _m: "x" * 400) is not None
 
 
+def test_placement_matrix_shows_each_model_on_every_node_with_a_winner(db_path: str) -> None:
+    # The placement matrix must list a model under EVERY node it runs on (with that node's speed),
+    # unlike the results board (one row per model on its test node), and crown each node's winner.
+    from mimir.cognition.fleet import placement_matrix
+    from mimir.storage.gateway import StorageGateway
+    from mimir.storage.models import CatalogueEntry
+    from mimir.storage.repo import (
+        replace_catalogue,
+        update_catalogue_scores,
+        update_catalogue_speed,
+    )
+
+    beast_node, edge_node = "http://127.0.0.1:11434", "http://192.168.2.60:11434"
+    sg = StorageGateway(db_path)
+    try:
+        # mid:12b on the beast + a slow edge; small:3b on the edge only.
+        def entry(node: str, model: str, b: float) -> CatalogueEntry:
+            return CatalogueEntry(node=node, model=model, family="x", params_b=b, scanned_at=1.0)
+        replace_catalogue(sg, [
+            entry(beast_node, "mid:12b", 12.0),
+            entry(edge_node, "mid:12b", 12.0),
+            entry(edge_node, "small:3b", 3.0),
+        ])
+        sc = dict(talk=1.0, tools=1.0, code=1.0, coherence=None,
+                  discipline=1.0, epistemics=1.0, reasoning=0.9)
+        update_catalogue_scores(sg, "mid:12b", quality=0.86, **sc)
+        update_catalogue_scores(sg, "small:3b", quality=0.6, **sc)
+        update_catalogue_speed(sg, beast_node, "mid:12b", 1.5)    # fast on the beast
+        update_catalogue_speed(sg, edge_node, "mid:12b", 62.0)    # slow on the edge
+        update_catalogue_speed(sg, edge_node, "small:3b", 4.0)
+
+        pm = placement_matrix(sg)
+        beast, edge = pm["by_node"][beast_node], pm["by_node"][edge_node]
+        # mid:12b appears on BOTH nodes, each with its OWN per-node speed.
+        assert next(m for m in beast if m["model"] == "mid:12b")["return_time"] == 1.5
+        assert next(m for m in edge if m["model"] == "mid:12b")["return_time"] == 62.0
+        # The beast's winner is mid:12b; on the edge it's also mid:12b (quality beats speed)...
+        assert next(m for m in beast if m.get("champion"))["model"] == "mid:12b"
+        assert next(m for m in edge if m.get("champion"))["model"] == "mid:12b"
+        # ...but small:3b is the FASTEST on the edge (4s < 62s), so it earns the ⚡ tag.
+        assert next(m for m in edge if m.get("fastest"))["model"] == "small:3b"
+    finally:
+        sg.close()
+
+
 def test_bar_reason_names_the_failing_floor() -> None:
     # The shared role gate: None when a model clears every floor, else a reason naming the first
     # failing capability + the floor it missed. This is what the leaderboard renders instead of a

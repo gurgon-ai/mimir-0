@@ -162,6 +162,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._fleet())
             elif route == "/api/fleet/pool":
                 self._send_json(self._model_pool())
+            elif route == "/api/fleet/placement":
+                with self.server.brain_lock:
+                    self._send_json(self.server.brain.placement_matrix())
             elif route == "/api/fleet/benchmark/status":
                 self._send_json(self._benchmark_status())
             elif route == "/api/fleet/tournament/status":
@@ -1305,7 +1308,7 @@ function renderBenchResults(results, header) {
   benchShow(true);
   const all = (results || []).slice();
   const best = all.slice().sort((a, b) => (b.quality || 0) - (a.quality || 0))[0];
-  let h = `<h2>${header || "🏁 Benchmarking…"} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
+  let h = `<h2>${header || "🏁 Benchmarking…"} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="showPlacement()">📊 Per-node placement</button> <button class="secondary" style="padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
   h += '<div class="legend">✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; ★ = quality &nbsp;|&nbsp; grouped by node</div>';
   if (!all.length) { $("benchBoard").innerHTML = h + '<div class="hint" style="margin-top:12px;">Warming up the first model…</div>'; return; }
   // group by node so it's obvious which machine each model lives on
@@ -1329,6 +1332,44 @@ function renderBenchResults(results, header) {
     });
   });
   $("benchBoard").innerHTML = h + "</table>";
+}
+
+// The per-node placement matrix — every model on EVERY node it runs on, with that node's speed and
+// each node's winner. This is the speed-test's whole output, which the results board (one row per
+// model on its test node) never shows. Reads /api/fleet/placement (the live catalogue).
+async function showPlacement() {
+  try { renderPlacement(await api("GET", "/api/fleet/placement")); }
+  catch (e) { $("fleetMsg").textContent = "Error loading placement: " + e.message; }
+}
+function renderPlacement(data) {
+  _benchBoardClosed = false; benchShow(true);
+  let h = '<h2>📊 Per-node placement — what runs best on each node <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>';
+  h += '<div class="legend">🏆 node winner (best quality, speed breaks ties) · ⚡ fastest here · ✅ ≥0.80 🟡 0.50–0.79 ❌ &lt;0.50 · speed is per-node · roles: green = eligible, ⊘ = barred</div>';
+  const nodes = Object.keys(data.by_node || {}).sort((a, b) => {
+    const la = a.includes("127.0.0.1"), lb = b.includes("127.0.0.1");
+    if (la !== lb) return la ? -1 : 1; return a.localeCompare(b);
+  });
+  if (!nodes.length) { $("benchBoard").innerHTML = h + '<div class="hint" style="margin-top:12px;">No placement data yet — run a benchmark, then the speed-test.</div>'; return; }
+  nodes.forEach(node => {
+    const models = data.by_node[node];
+    const champ = models.find(m => m.champion);
+    h += `<div class="nodehdr" style="margin-top:14px;">${shortNode(node)} · ${models.length} model(s)${champ ? ` · winner 🏆 <b>${champ.model}</b> (q${(champ.quality ?? 0).toFixed(2)} · ${champ.return_time != null ? champ.return_time.toFixed(1) + "s" : "·"})` : ""}</div>`;
+    h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Disc</th><th>Epis</th><th>Coh</th><th>Speed</th><th>Roles</th></tr>";
+    models.forEach(m => {
+      const flag = (m.champion ? "🏆" : "") + (m.fastest ? "⚡" : "");
+      const elig = (m.eligible_roles || []).join(", ");
+      const barEntries = Object.entries(m.barred || {});
+      const bars = barEntries.map(([r]) => "⊘" + r).join(" ");
+      const barTitle = barEntries.map(([r, w]) => `${r}: ${w}`).join("; ");
+      h += `<tr class="${m.champion ? "top" : ""}" style="${m.enabled ? "" : "opacity:0.5;"}"><td>${flag}</td><td>${m.model}</td>`
+        + `<td class="q">${_stars(m.quality)} <span style="color:#8a94a3; font-weight:400;">${(m.quality ?? 0).toFixed(2)}</span></td>`
+        + `<td>${_emoji(m.talk)}</td><td>${_emoji(m.tools)}</td><td>${_emoji(m.code)}</td><td>${_emoji(m.reasoning)}</td><td>${_emoji(m.discipline)}</td><td>${_emoji(m.epistemics)}</td><td>${_emoji(m.coherence)}</td>`
+        + `<td>${m.return_time != null ? m.return_time.toFixed(1) + "s" : "·"}</td>`
+        + `<td style="font-size:11px;"><span style="color:#7fd17f;">${elig}</span> <span style="color:#e0a0a0;" title="${barTitle}">${bars}</span></td></tr>`;
+    });
+    h += "</table>";
+  });
+  $("benchBoard").innerHTML = h;
 }
 
 // -- the qualifying tournament: same board, plus round chrome + keep-checkboxes + the FIGHT button.
@@ -1398,7 +1439,7 @@ function renderTourney(s) {
     h += `<div class="row" style="margin-top:12px; gap:10px; align-items:center;"><button id="tourneyAdvanceBtn" type="button" onclick="advanceTourney()">${next}</button><span class="hint">Untick any model you don't want to advance, then ${round === 1 ? "fight" : "finalize"}.</span></div>`;
   } else if (phase === "done") {
     h += '<div class="hint" style="margin-top:12px;">🏆 Tournament complete. <b>4 · Apply</b> routes your chat / bake / reasoning roles now. <b>3 · Speed-test</b> is optional — it times the remaining edges to fill the placement matrix (which edge can host which model, for future background/council work); slow edges take 30–70s each. You can Apply without it.</div>';
-    h += '<div class="row" style="margin-top:8px; gap:10px;"><button class="secondary" type="button" onclick="speedTestFromTourney()">⏱ 3 · Speed-test remaining nodes</button><button id="tourneyApplyBtn" type="button" onclick="applyTourney()">✅ 4 · Apply finals to roles</button><button class="secondary" type="button" onclick="closeBench()">Done</button></div>';
+    h += '<div class="row" style="margin-top:8px; gap:10px;"><button class="secondary" type="button" onclick="speedTestFromTourney()">⏱ 3 · Speed-test remaining nodes</button><button class="secondary" type="button" onclick="showPlacement()">📊 Per-node placement</button><button id="tourneyApplyBtn" type="button" onclick="applyTourney()">✅ 4 · Apply finals to roles</button><button class="secondary" type="button" onclick="closeBench()">Done</button></div>';
     h += '<div id="tourneyMatrixMsg" class="hint" style="margin-top:6px;"></div>';
   } else if (phase === "error") {
     h += `<div class="hint" style="color:#ff8a8a; margin-top:10px;">Error: ${s.error}</div>`;

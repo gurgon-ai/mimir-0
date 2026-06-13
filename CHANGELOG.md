@@ -65,6 +65,16 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **A per-node placement matrix — every model on every node it runs on, with each node's winner.**
+  The results board shows each model once, under the single node it was capability-tested on — so a
+  strong *multi-node* worker (e.g. a mid-size model installed across the LAN) was collapsed to one
+  row and effectively invisible as a per-node worker, even though the speed-test had timed it on
+  every node. The new **📊 Per-node placement** view (on the tournament-done panel and the
+  benchmark-complete header) groups by node and lists every model installed there with **that node's**
+  speed, the capability scores, and its role eligibility — and crowns each node's **🏆 winner** (best
+  quality, this-node speed breaking ties) and **⚡ fastest**. Reads the live catalogue
+  (`/api/fleet/placement` → `placement_matrix()`), so it reflects exactly what the speed-test
+  measured. This is the display side of the background-worker roster.
 - **A "what these scores mean" banner above the leaderboard.** A one-line, expandable note at the top
   of the Fleet and Models tabs: Mimir ranks models by *operational fitness for its own roles on your
   hardware* — best for **this system as built**, under this battery, on your fleet — **not** "best
