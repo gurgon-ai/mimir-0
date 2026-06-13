@@ -254,16 +254,21 @@ max_latency_s = 0              # latency target in seconds; 0 = off. When set, i
                                # (untimed warmup), then timed WARM — so a model whose *warm* trivial
                                # call exceeds this is skipped. When off, a 30s default applies so one
                                # slow model can't stall the run. (Routing-exclusion: next.)
-benchmark_num_ctx = 8192       # context window for ALL benchmark calls. Ollama defaults to a tiny
-                               # 2048 unless told otherwise — too small for the layered epistemic
-                               # prompts, which it would silently truncate (cutting off the high-tier
-                               # fact and breaking the tier-deference test). Held consistent across
-                               # every model so qualification is fair. The long-context needle probe
-                               # SIZES ITS HAYSTACK to this value (~60%), so raising it doesn't just
-                               # permit longer context — it actively tests it. Set it to your real
-                               # deployment window (~10k–32k for a RAG-heavy system) and the benchmark
-                               # qualifies models at the window you'll actually run, catching ones
-                               # that are fine at 8k but get "lost in the middle" of a big context.
+benchmark_num_ctx = 24576      # OPERATIONAL context window for ALL benchmark calls — qualify at the
+                               # size you deploy at. Ollama defaults to a tiny 2048, too small for the
+                               # layered epistemic prompts (it would silently truncate the high-tier
+                               # fact and break the tier-deference test). Held consistent across every
+                               # model so qualification is fair AND so it matches production — a
+                               # different window in deployment rebuilds the warm KV cache on the first
+                               # real turn, making the benchmark's latencies lies. The long-context
+                               # needle probe SIZES ITS HAYSTACK to ~60% of this, so it tests the window
+                               # you'll actually run, catching models fine at 8k but "lost in the
+                               # middle" of a big context. 24576 (24k) is a proven window for a
+                               # RAG + compression system — a fraction of models' 128k–256k max, which
+                               # you neither need nor want (KV-cache cost + attention degradation).
+                               # Continuity comes from curated RAG memory + compression, not a giant
+                               # raw window. Lower it only if your edge nodes can't hold 24k (then the
+                               # placement matrix records which nodes can serve which models at it).
 ```
 
 On boot Mimir scans the subnet for `:11434`, inventories each node's models (family, weight,

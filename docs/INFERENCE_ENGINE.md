@@ -268,8 +268,9 @@ What the non-obvious dimensions actually test **[built]**:
 **Representative latency [built].** `return_time` is timed from one *real-length* generation,
 normalized to seconds per ~256-token turn — not the round-trip of a 3-token reply, which can't tell a
 slow remote 12B from a snappy local 3B. **Context window [built]:** every benchmark call pins
-`backend.benchmark_num_ctx` (default 8192) so Ollama's 2048 default can't silently truncate the
-layered prompts. **Size bounds [built]:** `max_model_size_b` (ceiling) and `min_model_size_b` (floor —
+`backend.benchmark_num_ctx` (default 24576 — the operational window, qualify at the size you deploy
+at) so Ollama's 2048 default can't silently truncate the layered prompts, and the long-context probe
+sizes its haystack to ~60% of it (testing the real window, not just clearing 2048). **Size bounds [built]:** `max_model_size_b` (ceiling) and `min_model_size_b` (floor —
 on capable hardware, don't let a tiny model that scores "high enough" out-compete a bigger, genuinely
 better one) bound the field; both are UI/config knobs.
 

@@ -627,7 +627,7 @@ class Mimir:
         budget = latency_budget_s if latency_budget_s is not None else (
             self.config.backend.max_latency_s if self.config.backend else 0.0
         )
-        ctx = self.config.backend.benchmark_num_ctx if self.config.backend else 8192
+        ctx = self.config.backend.benchmark_num_ctx if self.config.backend else 24576
         self.scan_fleet()
         return _benchmark_fleet(
             self._model,
@@ -654,7 +654,7 @@ class Mimir:
         """The final time trial: speed-test acceptable models on the enabled nodes they're installed
         on but not yet timed on — completing the per-node placement matrix for the background pool.
         Reads the existing catalogue (does NOT rescan — that would wipe the quality scores)."""
-        ctx = self.config.backend.benchmark_num_ctx if self.config.backend else 8192
+        ctx = self.config.backend.benchmark_num_ctx if self.config.backend else 24576
         return _complete_speed_matrix(
             self._storage, num_ctx=ctx, disabled_nodes=disabled_nodes(self._storage),
             only_models=only_models, progress=progress,

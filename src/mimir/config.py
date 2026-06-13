@@ -66,9 +66,15 @@ class BackendConfig:
     max_latency_s: float = 0.0      # routing latency target; 0 = off. Slower models are excluded.
     # Context window for ALL benchmark calls — set explicitly so Ollama doesn't silently fall back
     # to its tiny 2048 default and truncate the layered epistemic prompts (which would invalidate
-    # the tier-deference gauntlet: the high-tier fact could be cut off). Held consistent across
-    # every benchmarked model so qualification is fair, and large enough to exercise long context.
-    benchmark_num_ctx: int = 8192
+    # the tier-deference gauntlet: the high-tier fact could be cut off). This is the OPERATIONAL
+    # window: qualify at the size you deploy at, or the warm KV cache rebuilds on the first real
+    # turn and the benchmark's latencies become lies. Held consistent across every benchmarked model
+    # so qualification is fair. The long-context probe sizes its haystack to ~60% of this, so it
+    # tests the window you'll actually run. Default 24576 (24k) — a proven operational window for a
+    # RAG + compression system; a fraction of models' 128k–256k theoretical max, which you neither
+    # need nor want (KV-cache cost + "lost in the middle"). Continuity comes from curated RAG memory
+    # and compression, not a giant raw window.
+    benchmark_num_ctx: int = 24576
 
 
 @dataclass(slots=True)
