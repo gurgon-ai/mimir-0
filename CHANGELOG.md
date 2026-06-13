@@ -8,6 +8,11 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **Per-node veto (schema v13).** Each discovered edge node can be toggled off in the Fleet tab —
+  excluded from the pool's routing (with a fail-safe if *every* node is vetoed, so chat never
+  hard-blocks), from qualification, and from recommendations, even if it's reachable. "Don't use that
+  box, even though it's there." Mirrors the per-model enable/disable; `node_prefs` table + a
+  `/api/fleet/node` endpoint.
 - **The qualifying tournament — a staged, human-veto model knock-out** (Fleet tab → "🏆 Run
   qualifying tournament"). Built on the benchmark's new staging primitives (subset / triage /
   ephemeral): **Round 0 · Qualifying** scores the *whole* fleet fast and cheap (capabilities only,

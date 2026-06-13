@@ -7,7 +7,7 @@ vetoed at every level. "As automatic as possible, but configurable."
 from __future__ import annotations
 
 from mimir.brain import Mimir
-from mimir.cognition.fleet import fleet_model_pool, resolve_auto_model
+from mimir.cognition.fleet import fleet_model_pool, recommend_roles, resolve_auto_model
 from mimir.config import AUTO_MODEL, Config, ProviderSpec, RoleSpec, _parse_roles
 from mimir.embed.base import EmbeddingMode
 from mimir.model.gateway import ModelGateway
@@ -16,8 +16,10 @@ from mimir.storage.gateway import StorageGateway
 from mimir.storage.models import CatalogueEntry
 from mimir.storage.repo import (
     disabled_models,
+    disabled_nodes,
     replace_catalogue,
     set_model_enabled,
+    set_node_enabled,
     update_catalogue_scores,
 )
 
@@ -109,6 +111,35 @@ def test_measured_best_overrides_the_heuristic(db_path: str) -> None:
         )
         # Measured-best wins over the larger heuristic pick.
         assert resolve_auto_model(sg, "chat", available={"qwen2.5:14b", "gemma:7b"}) == "gemma:7b"
+    finally:
+        sg.close()
+
+
+def test_disabled_node_drops_its_models_from_recommendations(db_path: str) -> None:
+    sg = StorageGateway(db_path)
+    try:
+        # Same model on two nodes; a LAN-only model on the fast node. Score both.
+        replace_catalogue(sg, [
+            _cat("gemma:7b", "gemma", 7.0, node="http://local:11434"),
+            _cat("gemma:7b", "gemma", 7.0, node="http://edge:11434"),
+            _cat("qwen2.5:14b", "qwen", 14.0, node="http://edge:11434"),  # only on the edge
+        ])
+        for m in ("gemma:7b", "qwen2.5:14b"):
+            update_catalogue_scores(
+                sg, m, return_time=1.0, quality=0.9, talk=1.0, tools=0.9, code=0.9,
+                coherence=None, discipline=1.0, epistemics=1.0, reasoning=1.0,
+            )
+        # With both nodes enabled, the edge-only qwen is a candidate for chat.
+        recs = recommend_roles(sg, disabled_nodes=disabled_nodes(sg))
+        assert any(r and r["model"] == "qwen2.5:14b" for r in recs.values())
+
+        # Veto the edge node: qwen (edge-only) vanishes from every recommendation; gemma survives
+        # (it's also on the local node).
+        set_node_enabled(sg, "http://edge:11434", False)
+        recs2 = recommend_roles(sg, disabled_nodes=disabled_nodes(sg))
+        chosen = {r["model"] for r in recs2.values() if r}
+        assert "qwen2.5:14b" not in chosen
+        assert recs2["chat"] is not None and recs2["chat"]["node"] == "http://local:11434"
     finally:
         sg.close()
 

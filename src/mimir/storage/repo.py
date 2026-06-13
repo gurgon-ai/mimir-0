@@ -493,6 +493,32 @@ def disabled_models(gateway: StorageGateway) -> set[str]:
     return gateway.read(_read)
 
 
+def set_node_enabled(gateway: StorageGateway, node: str, enabled: bool) -> None:
+    """Record a user's enable/disable choice for a fleet node (upsert). Disabled → discovery,
+    qualification, and routing all skip it, even if it's reachable (DESIGN §5)."""
+    now = time.time()
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "INSERT INTO node_prefs (node, enabled, updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(node) DO UPDATE SET "
+            "enabled=excluded.enabled, updated_at=excluded.updated_at",
+            (node, 1 if enabled else 0, now),
+        )
+
+    gateway.submit(_write)
+
+
+def disabled_nodes(gateway: StorageGateway) -> set[str]:
+    """The set of fleet nodes the user has explicitly disabled (everything else is enabled)."""
+
+    def _read(conn: sqlite3.Connection) -> set[str]:
+        rows = conn.execute("SELECT node FROM node_prefs WHERE enabled = 0").fetchall()
+        return {r["node"] for r in rows}
+
+    return gateway.read(_read)
+
+
 def list_catalogue(gateway: StorageGateway) -> list[CatalogueEntry]:
     def _read(conn: sqlite3.Connection) -> list[CatalogueEntry]:
         rows = conn.execute(

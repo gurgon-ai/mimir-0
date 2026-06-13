@@ -193,6 +193,19 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "ALTER TABLE model_catalogue ADD COLUMN reasoning REAL",
         ],
     ),
+    (
+        13,
+        [
+            # Per-node user preference (DESIGN §5): an edge node is part of the fleet by default; a
+            # user who doesn't want a reachable box used disables it here, and discovery, the
+            # qualification, and routing all skip it. Survives the per-scan catalogue rebuild.
+            "CREATE TABLE node_prefs ("
+            " node TEXT PRIMARY KEY,"
+            " enabled INTEGER NOT NULL DEFAULT 1,"
+            " updated_at REAL NOT NULL DEFAULT 0"
+            ")",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -261,4 +274,5 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
         "reasoning",
     },
     "model_prefs": {"model", "enabled", "updated_at"},
+    "node_prefs": {"node", "enabled", "updated_at"},
 }

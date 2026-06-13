@@ -78,18 +78,21 @@ _CAPABILITY_FLOOR = 0.5
 
 
 def recommend_roles(
-    storage: StorageGateway, *, disabled: set[str] | None = None
+    storage: StorageGateway, *, disabled: set[str] | None = None,
+    disabled_nodes: set[str] | None = None,
 ) -> dict[str, dict[str, Any] | None]:
     """From the benchmarked catalogue, recommend the best model for each role (DESIGN §4).
 
     Recommend-only — it does not reassign roles. ``None`` for a role means nothing benchmarked
-    clears the capability floor yet (run a benchmark first). ``disabled`` models (a user's
-    enable/disable choices) are excluded from every recommendation.
+    clears the capability floor yet (run a benchmark first). ``disabled`` models and
+    ``disabled_nodes`` (a user's enable/disable choices) are excluded — a model with no enabled node
+    can't be a champion, and a disabled node never wins the fastest-node pick.
     """
     disabled = disabled or set()
+    disabled_nodes = disabled_nodes or set()
     by_model: dict[str, dict[str, Any]] = {}
     for entry in list_catalogue(storage):
-        if entry.model in disabled:
+        if entry.model in disabled or entry.node in disabled_nodes:
             continue
         slot = by_model.setdefault(
             entry.model,

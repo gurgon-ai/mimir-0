@@ -97,6 +97,7 @@ class ProviderPool:
         self._clock = clock
         self._sleep = sleep
         self._lock = threading.Lock()
+        self._disabled: set[str] = set()   # node names the user vetoed (excluded from routing)
         self._stats = {"calls": 0, "ok": 0, "retries": 0, "failovers": 0, "transient_fails": 0}
         self._stop_prober = threading.Event()
         self._prober: threading.Thread | None = None
@@ -187,6 +188,11 @@ class ProviderPool:
                 if model not in seen:
                     seen.append(model)
         return seen
+
+    def set_disabled_nodes(self, names: set[str]) -> None:
+        """Replace the vetoed node names; routing skips them (fail-safe if every node is vetoed)."""
+        with self._lock:
+            self._disabled = set(names)
 
     def get_stats(self) -> dict[str, object]:
         with self._lock:
@@ -349,9 +355,10 @@ class ProviderPool:
         """
         now = self._clock()
         with self._lock:
-            eps = [e for e in self._endpoints if e.reachable]
-            if not eps:  # active health glitch → fail safe, don't hard-block (DESIGN §10)
-                eps = list(self._endpoints)
+            eps = [e for e in self._endpoints if e.reachable and e.name not in self._disabled]
+            if not eps:  # all unreachable/disabled → fail safe, don't hard-block (DESIGN §10)
+                eps = [e for e in self._endpoints if e.name not in self._disabled] or \
+                    list(self._endpoints)
             if model is not None:
                 known = [e for e in eps if e.models]
                 if known:
