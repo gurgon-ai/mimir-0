@@ -1180,14 +1180,23 @@ async function loadFleet() {
       d.appendChild(tags); list.appendChild(d);
     });
     if (!Object.keys(data.by_node || {}).length) list.innerHTML = '<div class="hint">No models yet — click "1 · Find models".</div>';
-    // If a benchmark is already running (e.g. started from another tab/session), show its progress.
-    const bs = await api("GET", "/api/fleet/benchmark/status");
-    if (bs.running) pollBenchmark();
-    // Likewise resume a tournament in flight — running → keep polling; awaiting/done → re-show it.
-    const ts = await api("GET", "/api/fleet/tournament/status");
-    if (ts.active && ts.phase === "running") pollTournament();
-    else if (ts.active && (ts.phase === "awaiting_veto" || ts.phase === "done")) { _benchBoardClosed = false; renderTourney(ts); }
+    resumeFleetWork();
   } catch (e) { $("fleetList").innerHTML = "error: " + e.message; }
+}
+
+// Re-attach the UI to any benchmark/tournament still running server-side. Called on page load (so a
+// refresh never loses the board) AND when the Fleet tab opens. Background runs survive a refresh —
+// this just reconnects the view, so you always know whether something is still going.
+async function resumeFleetWork() {
+  try {
+    const bs = await api("GET", "/api/fleet/benchmark/status");
+    if (bs.running) { _benchBoardClosed = false; pollBenchmark(); return; }
+    const ts = await api("GET", "/api/fleet/tournament/status");
+    if (!ts.active) return;
+    _benchBoardClosed = false;
+    if (ts.phase === "running") pollTournament();   // re-attach the live poll
+    else renderTourney(ts);                          // awaiting_veto / done / error → re-show it
+  } catch (e) { /* fleet endpoints unavailable (no backend) — nothing to resume */ }
 }
 
 function fmtDuration(sec) {
@@ -1298,8 +1307,11 @@ function renderTourney(s) {
   let h = `<h2>🏆 Tournament — ${label} · ${s.round_name || ""} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
   h += `<div class="legend">${s.blurb || ""} &nbsp;|&nbsp; ✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50</div>`;
   if (phase === "running") {
+    if (s.current !== _tourneyCur) { _tourneyCur = s.current; _tourneyCurT = Date.now(); }
+    const onModel = s.current ? ` · ${Math.round((Date.now() - _tourneyCurT) / 1000)}s on this model` : "";
+    const slow = s.current && (Date.now() - _tourneyCurT) > 90000 ? " ⏳ (slow — a latency cap would skip models like this)" : "";
     const eta = (s.eta != null) ? ` · ~${fmtDuration(s.eta)} left` : "";
-    h += `<div class="hint" style="margin:6px 0;">${s.total ? `Scoring ${s.i}/${s.total}: ${s.current}…${eta}` : (s.current || "Preparing…")}</div>`;
+    h += `<div class="hint" style="margin:6px 0;">${s.total ? `Scoring ${s.i}/${s.total}: ${s.current}…${onModel}${eta}${slow}` : (s.current || "Preparing…")}</div>`;
   }
   if (s.round_key === "finals") h += renderFinals(s.recommendations);
   h += tourneyTable((s.results || []).slice(), phase === "awaiting_veto", round);
@@ -1315,6 +1327,7 @@ function renderTourney(s) {
 }
 
 let _tourneyPolling = false;
+let _tourneyCur = "", _tourneyCurT = 0;   // current model + when it started, for an elapsed timer
 async function pollTournament() {
   if (_tourneyPolling) return;
   _tourneyPolling = true; $("fleetTourneyBtn").disabled = true; btnState("fleetTourneyBtn", "working");
@@ -1534,7 +1547,7 @@ $("councilBtn").addEventListener("click", async () => {
   $("councilBtn").disabled = false;
 });
 
-refreshState(); loadIdentity();
+refreshState(); loadIdentity(); resumeFleetWork();
 </script>
 </body>
 </html>
