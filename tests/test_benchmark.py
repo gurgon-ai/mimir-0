@@ -9,8 +9,11 @@ from mimir.cognition.benchmark import (
     _check_no_brackets,
     _check_no_dog_or_cat,
     _check_pong,
+    _check_reverse_python,
     _check_three_numbered,
     _check_tool_call,
+    _expect_int,
+    _last_int,
     is_approved,
     score_capability,
 )
@@ -41,6 +44,20 @@ def test_discipline_checkers_catch_the_tag_leak() -> None:
     assert _check_no_dog_or_cat("Fish") and _check_no_dog_or_cat("a hamster")
     assert not _check_no_dog_or_cat("A cat")
     assert not _check_no_dog_or_cat("I would suggest perhaps a goldfish or a parakeet")  # too long
+
+
+def test_reasoning_checkers_require_the_right_answer() -> None:
+    # The reasoning dimension grades problem-solving, not formatting: the final integer must match.
+    assert _last_int("after draining and refilling, the answer is 242.") == 242
+    assert _last_int("that's 1,234 widgets total") == 1234
+    assert _last_int("no number here") is None
+    check242 = _expect_int(242)
+    assert check242("242") and check242("So the tank holds 242 liters.")
+    assert not check242("It holds 250 liters.")  # wrong answer fails, however fluent
+    assert _expect_int(3)("3") and not _expect_int(3)("the letter appears 2 times")
+    # An instruction transform: 'PYTHON' reversed + lowercased.
+    assert _check_reverse_python("nohtyp") and _check_reverse_python("The result is NOHTYP.")
+    assert not _check_reverse_python("python")
 
 
 def test_outside_in_ordering() -> None:
@@ -78,6 +95,13 @@ def test_size_cap_and_outside_in_order(brain: Mimir) -> None:
     assert result.results[0].model == "mock-b"
 
 
+def test_size_floor_excludes_tiny_models(brain: Mimir) -> None:
+    # A 5B floor drops mock-a (3B) so it can't out-compete the bigger models on capable hardware.
+    result = brain.benchmark_fleet(only_approved=False, judge=False, min_params_b=5.0)
+    assert {b.model for b in result.results} == {"mock-b", "mock-c"}  # mock-a (3B) under the floor
+    assert result.skipped_too_small == 1
+
+
 def _craft_scores(brain: Mimir) -> None:
     from mimir.storage.repo import update_catalogue_scores
 
@@ -85,10 +109,12 @@ def _craft_scores(brain: Mimir) -> None:
     update_catalogue_scores(
         brain._storage, "mock-a", return_time=0.5, quality=0.7,
         talk=0.9, tools=0.6, code=0.6, coherence=None, discipline=0.9, epistemics=0.9,
+        reasoning=0.8,
     )
     update_catalogue_scores(
         brain._storage, "mock-b", return_time=5.0, quality=0.95,
         talk=1.0, tools=0.9, code=0.9, coherence=None, discipline=0.9, epistemics=0.9,
+        reasoning=0.9,
     )
 
 
@@ -108,11 +134,11 @@ def test_leaky_model_is_barred_from_identity_roles(brain: Mimir) -> None:
     brain.scan_fleet()
     update_catalogue_scores(
         brain._storage, "mock-a", return_time=0.5, quality=0.6, talk=1.0, tools=0.6, code=0.6,
-        coherence=None, discipline=0.0, epistemics=1.0,  # fluent + epistemic but LEAKS tags
+        coherence=None, discipline=0.0, epistemics=1.0, reasoning=1.0,  # capable but LEAKS tags
     )
     update_catalogue_scores(
         brain._storage, "mock-b", return_time=1.0, quality=0.9, talk=1.0, tools=0.9, code=0.9,
-        coherence=None, discipline=1.0, epistemics=1.0,  # disciplined + epistemic
+        coherence=None, discipline=1.0, epistemics=1.0, reasoning=1.0,  # disciplined + epistemic
     )
     recs = brain.fleet_recommendations()
     assert recs["chat"]["model"] == "mock-b"  # only the disciplined model qualifies for chat
@@ -128,16 +154,39 @@ def test_tier_blind_model_is_barred_from_identity_roles(brain: Mimir) -> None:
     brain.scan_fleet()
     update_catalogue_scores(
         brain._storage, "mock-a", return_time=0.5, quality=0.7, talk=1.0, tools=0.7, code=0.7,
-        coherence=None, discipline=1.0, epistemics=0.1,  # clean, but ignores tiers/provenance
+        coherence=None, discipline=1.0, epistemics=0.1, reasoning=1.0,  # ignores tiers/provenance
     )
     update_catalogue_scores(
         brain._storage, "mock-b", return_time=1.0, quality=0.9, talk=1.0, tools=0.9, code=0.9,
-        coherence=None, discipline=1.0, epistemics=1.0,  # uses the framework
+        coherence=None, discipline=1.0, epistemics=1.0, reasoning=1.0,  # uses the framework
     )
     recs = brain.fleet_recommendations()
     assert recs["chat"]["model"] == "mock-b"
     assert recs["reasoning"]["model"] == "mock-b"
     assert recs["bake"] is not None  # bake doesn't require epistemics
+
+
+def test_reasoning_incompetent_model_is_barred_from_thinking_roles(brain: Mimir) -> None:
+    # A model that's fluent + disciplined + epistemic but CAN'T SOLVE PROBLEMS (low reasoning) must
+    # NOT win chat/reasoning/code — those roles need actual problem-solving, not just good manners.
+    # This is the gate that stops a model 'that can't do the job' from sweeping on format alone.
+    from mimir.storage.repo import update_catalogue_scores
+
+    brain.scan_fleet()
+    update_catalogue_scores(
+        brain._storage, "mock-a", return_time=0.5, quality=0.9, talk=1.0, tools=1.0, code=1.0,
+        coherence=None, discipline=1.0, epistemics=1.0, reasoning=0.1,  # polished but can't solve
+    )
+    update_catalogue_scores(
+        brain._storage, "mock-b", return_time=1.0, quality=0.8, talk=1.0, tools=0.9, code=0.9,
+        coherence=None, discipline=1.0, epistemics=1.0, reasoning=0.9,  # actually solves problems
+    )
+    recs = brain.fleet_recommendations()
+    assert recs["chat"]["model"] == "mock-b"  # the solver wins the thinking roles, despite lower q
+    assert recs["reasoning"]["model"] == "mock-b"
+    assert recs["code"]["model"] == "mock-b"
+    # bake gates on talk only (not reasoning) → the higher-quality polished model still wins it.
+    assert recs["bake"]["model"] == "mock-a"
 
 
 def test_apply_recommendations_repoints_roles(brain: Mimir) -> None:
@@ -165,3 +214,4 @@ def test_benchmark_fleet_writes_scores(brain: Mimir) -> None:
     assert all(e.talk is not None for e in entries)  # capability scores written
     assert all(e.discipline is not None for e in entries)  # incl. the discipline dimension
     assert all(e.epistemics is not None for e in entries)  # ...and the epistemics dimension
+    assert all(e.reasoning is not None for e in entries)  # ...and the reasoning dimension

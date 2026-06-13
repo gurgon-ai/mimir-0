@@ -557,10 +557,11 @@ class Mimir:
         only_approved: bool = True,
         limit: int = 64,
         max_params_b: float | None = None,
+        min_params_b: float | None = None,
         latency_budget_s: float | None = None,
         judge: bool = True,
         progress: Callable[[int, int, str, float | None], None] | None = None,
-        on_result: Callable[[ModelBenchmark], None] | None = None,
+        on_result: Callable[[ModelBenchmark, str], None] | None = None,
     ) -> FleetBenchmarkResult:
         """Scan + benchmark the fleet's models (speed + capability + coherence) (DESIGN §4).
 
@@ -574,9 +575,13 @@ class Mimir:
         cap = max_params_b if max_params_b is not None else (
             self.config.backend.max_model_size_b if self.config.backend else 30.0
         )
+        floor = min_params_b if min_params_b is not None else (
+            self.config.backend.min_model_size_b if self.config.backend else 0.0
+        )
         budget = latency_budget_s if latency_budget_s is not None else (
             self.config.backend.max_latency_s if self.config.backend else 0.0
         )
+        ctx = self.config.backend.benchmark_num_ctx if self.config.backend else 8192
         self.scan_fleet()
         return _benchmark_fleet(
             self._model,
@@ -584,8 +589,10 @@ class Mimir:
             only_approved=only_approved,
             limit=limit,
             max_params_b=cap,
+            min_params_b=floor,
             judge=judge,
             latency_budget_s=budget,
+            num_ctx=ctx,
             progress=progress,
             on_result=on_result,
         )

@@ -181,6 +181,18 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "ALTER TABLE model_catalogue ADD COLUMN epistemics REAL",
         ],
     ),
+    (
+        12,
+        [
+            # The 'reasoning' dimension (DESIGN §4): can the model actually SOLVE a problem, not
+            # just follow a format? The rest of the battery (PONG, a weather JSON, def add) measures
+            # format compliance — every competent model passes, so quality saturates and can't
+            # separate a capable model from one that merely complies. This dimension scores
+            # deterministic, regex-checkable problems (arithmetic, counting, pattern, code-trace,
+            # transforms) so a model that 'can't do the job' scores low even when well-behaved.
+            "ALTER TABLE model_catalogue ADD COLUMN reasoning REAL",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -246,6 +258,7 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
         "coherence",
         "discipline",
         "epistemics",
+        "reasoning",
     },
     "model_prefs": {"model", "enabled", "updated_at"},
 }

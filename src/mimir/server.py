@@ -295,6 +295,7 @@ class _Handler(BaseHTTPRequestHandler):
             be = self.server.brain.config.backend
         report["stats"] = stats
         report["max_model_size_b"] = be.max_model_size_b if be else 30.0
+        report["min_model_size_b"] = be.min_model_size_b if be else 0.0
         report["max_latency_s"] = be.max_latency_s if be else 0.0
         return report
 
@@ -309,10 +310,11 @@ class _Handler(BaseHTTPRequestHandler):
         worker thread) preserves serialization against turns, but the status + state reads are
         lock-free, so the page never freezes (the bug this fixes).
 
-        Optional body fields ``max_model_size_b`` / ``max_latency_s`` (the UI scope fields) override
-        the configured cap/latency for this run."""
+        Optional body fields ``max_model_size_b`` / ``min_model_size_b`` / ``max_latency_s`` (the UI
+        scope fields) override the configured cap/floor/latency for this run."""
         srv = self.server
         cap = float(body["max_model_size_b"]) if body.get("max_model_size_b") not in (None, "") else None
+        floor = float(body["min_model_size_b"]) if body.get("min_model_size_b") not in (None, "") else None
         latency = float(body["max_latency_s"]) if body.get("max_latency_s") not in (None, "") else None
         with srv.bench_lock:
             if srv.bench_state.get("running"):
@@ -324,19 +326,20 @@ class _Handler(BaseHTTPRequestHandler):
             with srv.bench_lock:
                 srv.bench_state.update(i=i, total=total, current=model, eta=eta)
 
-        def _on_result(b: Any) -> None:
+        def _on_result(b: Any, node: str) -> None:
             with srv.bench_lock:
                 srv.bench_state.setdefault("results", []).append({
                     "model": b.model, "quality": b.quality, "talk": b.talk, "tools": b.tools,
                     "code": b.code, "discipline": b.discipline, "epistemics": b.epistemics,
-                    "coherence": b.coherence, "return_time": b.return_time,
+                    "reasoning": b.reasoning, "coherence": b.coherence,
+                    "return_time": b.return_time, "node": node,
                 })
 
         def _run() -> None:
             try:
                 with srv.brain_lock:
                     result = srv.brain.benchmark_fleet(
-                        max_params_b=cap, latency_budget_s=latency,
+                        max_params_b=cap, min_params_b=floor, latency_budget_s=latency,
                         progress=_progress, on_result=_on_result,
                     )
                 with srv.bench_lock:
@@ -344,6 +347,7 @@ class _Handler(BaseHTTPRequestHandler):
                         running=False, done=True, current="",
                         benchmarked=result.benchmarked, judges_ok=result.judges_ok,
                         eligible=result.eligible, skipped_too_big=result.skipped_too_big,
+                        skipped_too_small=result.skipped_too_small,
                         skipped_too_slow=result.skipped_too_slow,
                     )
             except Exception as exc:  # surfaced via status, never a silent death (DESIGN §10)
@@ -370,6 +374,7 @@ class _Handler(BaseHTTPRequestHandler):
             pool["nodes_up"] = brain._model.get_stats().get("nodes_up", 0)
             be = brain.config.backend
             pool["max_model_size_b"] = be.max_model_size_b if be else 30.0
+            pool["min_model_size_b"] = be.min_model_size_b if be else 0.0
             pool["max_latency_s"] = be.max_latency_s if be else 0.0
         return pool
 
@@ -719,11 +724,13 @@ _HTML = """<!doctype html>
       </div>
       <div class="hint" style="margin-top:6px;"><b>Find</b> lists installed models (fast, no scoring) → <b>Benchmark</b> scores them by running tests (slow) → <b>Apply</b> routes each role to the best.</div>
       <div class="row" style="margin-top:8px; align-items:center; gap:14px; flex-wrap:wrap;">
-        <label class="hint" style="display:flex; align-items:center; gap:6px;">Benchmark — max model size (B)
+        <label class="hint" style="display:flex; align-items:center; gap:6px;">Benchmark — min model size (B)
+          <input type="number" id="benchMinSize" min="0" step="1" style="width:70px;"/></label>
+        <label class="hint" style="display:flex; align-items:center; gap:6px;">max model size (B)
           <input type="number" id="benchMaxSize" min="0" step="1" style="width:70px;"/></label>
         <label class="hint" style="display:flex; align-items:center; gap:6px;">max latency (s)
           <input type="number" id="benchMaxLatency" min="0" step="0.5" style="width:70px;"/></label>
-        <span class="hint">skips models bigger than the size, or slower than the latency (0 = 30s default)</span>
+        <span class="hint">skips models smaller than the min (0 = off), bigger than the max, or slower than the latency (0 = 30s default)</span>
       </div>
       <div id="fleetMsg" class="hint">Press <b>1 · Find models</b> to inventory the fleet, then <b>2 · Benchmark</b> to score them.</div>
       <div id="fleetList"></div>
@@ -976,6 +983,7 @@ async function loadFleet() {
     const data = await api("GET", "/api/fleet");
     const up = (data.stats && data.stats.nodes_up) || 0;
     // Pre-fill the benchmark scope fields from the current config (only fill if untouched).
+    if ($("benchMinSize") && document.activeElement !== $("benchMinSize") && !$("benchMinSize").value) $("benchMinSize").value = data.min_model_size_b ?? 0;
     if ($("benchMaxSize") && document.activeElement !== $("benchMaxSize") && !$("benchMaxSize").value) $("benchMaxSize").value = data.max_model_size_b ?? 30;
     if ($("benchMaxLatency") && document.activeElement !== $("benchMaxLatency") && !$("benchMaxLatency").value) $("benchMaxLatency").value = data.max_latency_s ?? 0;
     $("fleetMsg").textContent = `${data.nodes} node(s), ${up} up, ${data.models} models found. "2 · Benchmark" to score them.`;
@@ -1030,19 +1038,39 @@ function _emoji(v) { return v == null ? "·" : v >= 0.8 ? "✅" : v >= 0.5 ? "�
 function _medal(i) { return i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : (i + 1) + "."; }
 function _stars(q) { const n = Math.max(0, Math.min(5, Math.round((q || 0) * 5))); return "★".repeat(n) + "☆".repeat(5 - n); }
 
+function shortNode(n) {
+  if (!n) return "❓ unknown node";
+  const m = n.replace("http://", "").replace(":11434", "");
+  return (m === "127.0.0.1" || m === "localhost") ? "🖥️ localhost (this machine)" : "🌐 " + m;
+}
+
 function renderBenchResults(results, header) {
   if (_benchBoardClosed) return;
   benchShow(true);
-  const sorted = (results || []).slice().sort((a, b) => (b.quality || 0) - (a.quality || 0));
+  const all = (results || []).slice();
+  const best = all.slice().sort((a, b) => (b.quality || 0) - (a.quality || 0))[0];
   let h = `<h2>${header || "🏁 Benchmarking…"} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
-  h += '<div class="legend">✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; ★ = quality</div>';
-  if (!sorted.length) { $("benchBoard").innerHTML = h + '<div class="hint" style="margin-top:12px;">Warming up the first model…</div>'; return; }
-  h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Discipline</th><th>Epistemics</th><th>Coherence</th><th>Speed</th></tr>";
-  sorted.forEach((r, i) => {
-    h += `<tr class="${i === 0 ? "top" : ""}"><td>${_medal(i)}</td><td>${r.model}</td>`
-      + `<td class="q">${_stars(r.quality)} <span style="color:#8a94a3; font-weight:400;">${(r.quality ?? 0).toFixed(2)}</span></td>`
-      + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.discipline)}</td><td>${_emoji(r.epistemics)}</td><td>${_emoji(r.coherence)}</td>`
-      + `<td>${r.return_time != null ? r.return_time.toFixed(2) + "s" : "·"}</td></tr>`;
+  h += '<div class="legend">✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; ★ = quality &nbsp;|&nbsp; grouped by node</div>';
+  if (!all.length) { $("benchBoard").innerHTML = h + '<div class="hint" style="margin-top:12px;">Warming up the first model…</div>'; return; }
+  // group by node so it's obvious which machine each model lives on
+  const groups = {};
+  all.forEach(r => { (groups[r.node || ""] = groups[r.node || ""] || []).push(r); });
+  const order = Object.keys(groups).sort((a, b) => {
+    const la = a.includes("127.0.0.1"), lb = b.includes("127.0.0.1");
+    if (la !== lb) return la ? -1 : 1;   // localhost group first
+    return a.localeCompare(b);
+  });
+  h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th><th>Epistemics</th><th>Coherence</th><th>Speed/turn</th></tr>";
+  order.forEach(node => {
+    const rows = groups[node].sort((a, b) => (b.quality || 0) - (a.quality || 0));
+    h += `<tr><td colspan="11" class="nodehdr">${shortNode(node)} · ${rows.length} model(s)</td></tr>`;
+    rows.forEach((r, i) => {
+      const rank = (best && r.model === best.model) ? "🏆" : _medal(i);
+      h += `<tr class="${i === 0 ? "top" : ""}"><td>${rank}</td><td>${r.model}</td>`
+        + `<td class="q">${_stars(r.quality)} <span style="color:#8a94a3; font-weight:400;">${(r.quality ?? 0).toFixed(2)}</span></td>`
+        + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td><td>${_emoji(r.epistemics)}</td><td>${_emoji(r.coherence)}</td>`
+        + `<td>${r.return_time != null ? r.return_time.toFixed(1) + "s" : "·"}</td></tr>`;
+    });
   });
   $("benchBoard").innerHTML = h + "</table>";
 }
@@ -1080,6 +1108,7 @@ async function pollBenchmark() {
         if (s.benchmarked !== undefined) {   // a finished run (not just the idle initial state)
           const skips = [];
           if (s.skipped_too_big) skips.push(`${s.skipped_too_big} too large`);
+          if (s.skipped_too_small) skips.push(`${s.skipped_too_small} too small`);
           if (s.skipped_too_slow) skips.push(`${s.skipped_too_slow} too slow`);
           const skipped = skips.length ? ` (${skips.join(", ")} skipped)` : "";
           $("fleetMsg").textContent = `Benchmarked ${s.benchmarked || 0} of ${s.eligible || 0} eligible model(s)${skipped}` + (s.judges_ok ? "" : " — coherence judges untrusted") + ".";
@@ -1104,7 +1133,7 @@ $("fleetBenchBtn").addEventListener("click", async () => {
   $("fleetMsg").textContent = "Starting benchmark…"; btnState("fleetBenchBtn", "working");
   _benchBoardClosed = false;   // a fresh run re-opens the scoreboard even if you closed the last one
   try {
-    const scope = { max_model_size_b: $("benchMaxSize").value, max_latency_s: $("benchMaxLatency").value };
+    const scope = { min_model_size_b: $("benchMinSize").value, max_model_size_b: $("benchMaxSize").value, max_latency_s: $("benchMaxLatency").value };
     await api("POST", "/api/fleet/benchmark", scope);   // returns immediately; runs in the background
     pollBenchmark();
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; btnState("fleetBenchBtn", "failed"); }
@@ -1143,8 +1172,9 @@ async function loadModels() {
       const bits = [];
       if (m.params_b) bits.push(`${m.params_b}B`);
       if (m.quality != null) bits.push(`q${m.quality}`);
+      if (m.reasoning != null) bits.push(`reason ${m.reasoning}`);
       if (m.discipline != null) bits.push(`disc ${m.discipline}`);
-      if (m.return_time != null) bits.push(`${m.return_time}s`);
+      if (m.return_time != null) bits.push(`${m.return_time}s/turn`);
       bits.push(`${(m.nodes || []).length} node(s)`);
       if (m.approved) bits.push("approved");
       (m.roles || []).forEach(r => bits.push("▶ " + r));

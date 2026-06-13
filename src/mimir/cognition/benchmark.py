@@ -40,6 +40,35 @@ ChatFn = Callable[[list[Message]], str]
 SPEED_TIMEOUT_S = 20.0
 _SPEED_PROMPT: list[Message] = [{"role": "user", "content": "Reply with the single word: ok"}]
 
+# A prompt that forces a real-length generation, so the timed call reflects throughput, not just
+# round-trip on a 3-token reply. We normalize the result to seconds-per-256-token turn.
+_LATENCY_PROMPT: list[Message] = [
+    {"role": "user",
+     "content": "Explain in three short paragraphs how a city treats its drinking water."},
+]
+_LATENCY_NORM_TOKENS: int = 256   # report seconds per ~256-token turn (verbosity-independent)
+_LATENCY_MIN_TOKENS: int = 32     # floor so a terse/refusing model can't divide-by-tiny to nonsense
+
+
+def _measure_turn_latency(chat_fn: Callable[[list[Message]], str]) -> float:
+    """Time one substantial generation and normalize to seconds per ~256-token turn.
+
+    The capability battery emits only a handful of tokens per call, so its round-trip is dominated
+    by prompt-eval/overhead and barely moves between a 3B and a 12B. A real turn generates hundreds
+    of tokens, where per-token throughput is what the user actually feels. We time one real
+    generation and divide by its (estimated) token count, scaled to a fixed turn length — robust to
+    how verbose a model happens to be. Returns 0.0 if the call fails (the gate handles unreachable).
+    """
+    started = time.monotonic()
+    try:
+        out = chat_fn(_LATENCY_PROMPT)
+    except Exception as exc:
+        log.warning("benchmark: latency probe failed: %s", exc)
+        return 0.0
+    elapsed = time.monotonic() - started
+    approx_tokens = max(_LATENCY_MIN_TOKENS, len(out) // 4)  # ~4 chars/token; no tokenizer dep
+    return round(elapsed / approx_tokens * _LATENCY_NORM_TOKENS, 3)
+
 # Families known to follow instructions well — the recommended floor (README curates this).
 APPROVED_FAMILIES = ("llama", "qwen", "gemma", "mistral", "phi", "command-r", "deepseek")
 
@@ -140,6 +169,25 @@ def _check_no_dog_or_cat(out: str) -> bool:
     return bool(low.strip()) and "dog" not in low and "cat" not in low and len(low.split()) <= 4
 
 
+_ANSWER_INT_RE = re.compile(r"-?\d+")
+
+
+def _last_int(out: str) -> int | None:
+    """The last integer in the reply — models put the final answer last ('… the answer is 242')."""
+    nums = _ANSWER_INT_RE.findall(out.replace(",", ""))
+    return int(nums[-1]) if nums else None
+
+
+def _expect_int(target: int) -> Callable[[str], bool]:
+    """A reasoning checker that passes iff the model's final integer equals ``target``."""
+    return lambda out: _last_int(out) == target
+
+
+def _check_reverse_python(out: str) -> bool:
+    """'PYTHON' reversed + lowercased is 'nohtyp' — an instruction-following transform."""
+    return "nohtyp" in out.lower()
+
+
 # The production-faithful discipline probe: a tag-saturated recall block under the REAL soft
 # instruction. Validated to reproduce the leak on gemma3:4b while gemma4:e2b/e4b stay clean.
 _DISCIPLINE_RECALL = (
@@ -201,6 +249,28 @@ CAPABILITY_TESTS: dict[str, list[tuple[str, Callable[[str], bool]]]] = {
             "word, and do not use the words 'dog' or 'cat'.",
             _check_no_dog_or_cat,
         ),
+    ],
+    # Reasoning = can it actually SOLVE a problem with one verifiable answer, not just comply with a
+    # format? The rest of the battery (PONG, a weather JSON, def add) is passed by any competent
+    # model, so quality saturates and can't separate a capable model from a merely fluent one. These
+    # are deterministic regex/exact checks — no code execution, no judge — spanning arithmetic, char
+    # counting (a classic small-model failure), pattern completion, a code-trace, proportional
+    # reasoning, and an instruction transform. This is the dimension that stops quality from
+    # rubber-stamping a model that 'can't do the job' (DESIGN §4).
+    "reasoning": [
+        ("A tank holds 240 liters. It drains at 8 liters per minute for 6 minutes, then 50 liters "
+         "are added. How many liters are in the tank now? Reply with only the final number.",
+         _expect_int(242)),
+        ("How many times does the letter 'r' appear in the word 'strawberry'? Reply with only the "
+         "number.", _expect_int(3)),
+        ("What is the next number in this sequence: 2, 6, 12, 20, 30, ? Reply with only the "
+         "number.", _expect_int(42)),
+        ("What does this Python print: print(len(set([1, 2, 2, 3, 3, 3]))) — reply with only the "
+         "number.", _expect_int(3)),
+        ("If 3 pens cost 6 dollars, how much do 5 pens cost in dollars? Reply with only the "
+         "number.", _expect_int(10)),
+        ("Take the word PYTHON, reverse it, and write it in lowercase. Reply with only the result.",
+         _check_reverse_python),
     ],
 }
 
@@ -279,6 +349,7 @@ class ModelBenchmark:
     code: float
     discipline: float
     epistemics: float
+    reasoning: float
     coherence: float | None
     return_time: float
     quality: float
@@ -291,13 +362,22 @@ class FleetBenchmarkResult:
     results: list[ModelBenchmark]
     eligible: int = 0          # approved, non-embedding models in the catalogue (any size)
     skipped_too_big: int = 0   # eligible models skipped because they exceed max_params_b
+    skipped_too_small: int = 0  # eligible models skipped because they're under min_params_b
     skipped_too_slow: int = 0  # eligible models skipped because a trivial call exceeded the budget
 
 
-def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True) -> ModelBenchmark:
-    """Run the battery against one model. ``judge=False`` skips the coherence pass."""
+def benchmark_model(
+    model: ModelGateway, model_name: str, *, judge: bool = True, num_ctx: int = 8192,
+) -> ModelBenchmark:
+    """Run the battery against one model. ``judge=False`` skips the coherence pass.
+
+    Every battery/epistemics/latency call routes through ``chat_fn``, which pins ``num_ctx`` so the
+    layered epistemic prompts aren't truncated to Ollama's 2048 default (which would cut off the
+    high-tier fact and silently break the tier-deference test). One value, used for warmup too, so
+    the model loads once at that context and stays warm (DESIGN: num_ctx consistent across callers).
+    """
     def chat_fn(messages: list[Message]) -> str:
-        return model.chat_with_model(model_name, messages)
+        return model.chat_with_model(model_name, messages, params={"num_ctx": num_ctx})
 
     # Warm the model into VRAM before timing, so return_time reflects warm steady-state generation,
     # not the one-time cold load (models get evicted between benchmarks). Untimed and tolerant.
@@ -306,7 +386,6 @@ def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True)
     except Exception as exc:
         log.warning("benchmark: warmup call failed for %s: %s", model_name, exc)
 
-    started = time.monotonic()
     talk = score_capability(chat_fn, "talk")
     tools = score_capability(chat_fn, "tools")
     code = score_capability(chat_fn, "code")
@@ -314,8 +393,15 @@ def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True)
     # Epistemics: does the model exploit Mimir's tiered/provenance/gated context (DESIGN §3)?
     # The structured-arm competence — the qualification signal for the identity-bearing roles.
     epistemics = score_epistemic_competence(chat_fn, samples=2)
-    n_calls = sum(len(CAPABILITY_TESTS[c]) for c in ("talk", "tools", "code", "discipline")) + 6
-    return_time = (time.monotonic() - started) / max(1, n_calls)
+    # Reasoning: can it actually solve problems with verifiable answers (not just follow a format)?
+    # This is what keeps quality from saturating near 1.0 for any fluent model (DESIGN §4).
+    reasoning = score_capability(chat_fn, "reasoning")
+    # Representative latency from one real-length generation (NOT the battery average): the battery
+    # calls emit only a few tokens, so their round-trip is dominated by overhead and can't tell a
+    # slow remote 12B from a snappy local 3B — which lets a big model look 'instant' and sweep even
+    # the speed-weighted roles it should lose. A real turn generates hundreds of tokens, throughput
+    # is what the user feels (DESIGN §4: latency must reflect an actual turn).
+    return_time = _measure_turn_latency(chat_fn)
 
     coherence: float | None = None
     if judge:
@@ -325,7 +411,7 @@ def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True)
         except Exception as exc:
             log.warning("benchmark: coherence pass failed for %s: %s", model_name, exc)
 
-    scores = [talk, tools, code, discipline, epistemics] + (
+    scores = [talk, tools, code, discipline, epistemics, reasoning] + (
         [coherence] if coherence is not None else []
     )
     quality = sum(scores) / len(scores)
@@ -336,6 +422,7 @@ def benchmark_model(model: ModelGateway, model_name: str, *, judge: bool = True)
         code=code,
         discipline=discipline,
         epistemics=round(epistemics, 3),
+        reasoning=round(reasoning, 3),
         coherence=coherence,
         return_time=round(return_time, 3),
         quality=round(quality, 3),
@@ -347,7 +434,8 @@ WARMUP_TIMEOUT_S: float = 120.0
 
 
 def _measure_node_speed(
-    node: str, model_name: str, *, timeout_s: float = SPEED_TIMEOUT_S, warmup: bool = False
+    node: str, model_name: str, *, timeout_s: float = SPEED_TIMEOUT_S, warmup: bool = False,
+    num_ctx: int = 8192,
 ) -> float | None:
     """Time a trivial call to a *specific* node directly (no pool/retry); None for non-URL nodes.
 
@@ -357,19 +445,23 @@ def _measure_node_speed(
     unfairly trip the latency gate (e.g. skipping a 26B that's fast warm but slow to load). A model
     that can't even load within ``WARMUP_TIMEOUT_S`` is reported as that-slow (so it's skipped).
 
+    ``num_ctx`` matches the battery's context so the model loads ONCE at that size and stays warm —
+    otherwise the pre-gate would load it at one context and the battery reload it at another.
+
     Returns elapsed seconds — even on timeout/failure, the elapsed time is the 'too slow' signal.
     """
     if not node.startswith("http"):
         return None  # mock/non-URL node — nothing real to time
+    opts = {"num_ctx": num_ctx}
     if warmup:
         try:
-            OllamaProvider(node, timeout=WARMUP_TIMEOUT_S).chat(model_name, _SPEED_PROMPT, {})
+            OllamaProvider(node, timeout=WARMUP_TIMEOUT_S).chat(model_name, _SPEED_PROMPT, opts)
         except Exception:
             return round(WARMUP_TIMEOUT_S, 3)  # couldn't load in time → unusably slow → skip
     provider = OllamaProvider(node, timeout=timeout_s)
     started = time.monotonic()
     try:
-        provider.chat(model_name, _SPEED_PROMPT, {})
+        provider.chat(model_name, _SPEED_PROMPT, opts)
     except Exception:
         return round(time.monotonic() - started, 3)  # the (timed-out) duration ranks it slow
     return round(time.monotonic() - started, 3)
@@ -404,10 +496,12 @@ def benchmark_fleet(
     only_approved: bool = True,
     limit: int = 8,
     max_params_b: float = 30.0,
+    min_params_b: float = 0.0,
     judge: bool = True,
     latency_budget_s: float = 0.0,
+    num_ctx: int = 8192,
     progress: Callable[[int, int, str, float | None], None] | None = None,
-    on_result: Callable[[ModelBenchmark], None] | None = None,
+    on_result: Callable[[ModelBenchmark, str], None] | None = None,
 ) -> FleetBenchmarkResult:
     """Benchmark the distinct models in the catalogue and write their scores back.
 
@@ -424,6 +518,7 @@ def benchmark_fleet(
     nodes_with: dict[str, list[str]] = {}
     eligible: set[str] = set()   # approved, non-embedding (any size) — for coverage reporting
     too_big: set[str] = set()    # eligible but over the size cap
+    too_small: set[str] = set()  # eligible but under the size floor (user has hardware for more)
     for entry in list_catalogue(storage):
         nodes_with.setdefault(entry.model, []).append(entry.node)
         if "embed" in entry.model.lower():
@@ -433,6 +528,13 @@ def benchmark_fleet(
         eligible.add(entry.model)
         if max_params_b and entry.params_b and entry.params_b > max_params_b:
             too_big.add(entry.model)
+            continue
+        # A size FLOOR (opt-in): on capable hardware a tiny model that scores 'high enough' and wins
+        # on latency keeps beating a bigger, genuinely-better one the test can't separate. Excluding
+        # it from scoring keeps it out of recommendations entirely (DESIGN §4 — the rig is the one
+        # fact only the user knows). The any-reachable fallback still uses it if it's all there is.
+        if min_params_b and entry.params_b and entry.params_b < min_params_b:
+            too_small.add(entry.model)
             continue
         sizes.setdefault(entry.model, entry.params_b)
     # Outside-in order (biggest, smallest, biggest, smallest …): the running-average ETA samples
@@ -463,7 +565,8 @@ def benchmark_fleet(
         probe_node = next((n for n in nodes_with.get(model_name, []) if n.startswith("http")), None)
         if probe_node is not None:
             # Warm the model into VRAM, THEN time it — so the gate sees warm latency, not cold load.
-            speed = _measure_node_speed(probe_node, model_name, timeout_s=skip_budget, warmup=True)
+            speed = _measure_node_speed(probe_node, model_name, timeout_s=skip_budget,
+                                        warmup=True, num_ctx=num_ctx)
             if speed is not None and speed >= skip_budget:
                 log.warning("benchmark: [%d/%d] %s SKIPPED — %.1fs >= %.0fs latency budget",
                             i, total, model_name, speed, skip_budget)
@@ -472,7 +575,7 @@ def benchmark_fleet(
             if speed is not None:
                 update_catalogue_speed(storage, probe_node, model_name, speed)
         try:
-            bench = benchmark_model(model, model_name, judge=judges_ok)
+            bench = benchmark_model(model, model_name, judge=judges_ok, num_ctx=num_ctx)
         except Exception as exc:
             log.warning("benchmark: [%d/%d] %s FAILED: %s", i, total, model_name, exc)
             continue
@@ -489,23 +592,27 @@ def benchmark_fleet(
             coherence=bench.coherence,
             discipline=bench.discipline,
             epistemics=bench.epistemics,
+            reasoning=bench.reasoning,
         )
         # Per-node speed for the OTHER nodes (the probe node was already measured above). Warm each
         # before timing — the model isn't loaded on these nodes yet, so a cold time would mislead.
         for node in nodes_with.get(model_name, []):
             if node == probe_node:
                 continue
-            elapsed = _measure_node_speed(node, model_name, timeout_s=skip_budget, warmup=True)
+            elapsed = _measure_node_speed(node, model_name, timeout_s=skip_budget,
+                                          warmup=True, num_ctx=num_ctx)
             if elapsed is not None:
                 update_catalogue_speed(storage, node, model_name, elapsed)
         results.append(bench)
         if on_result is not None:
-            on_result(bench)   # stream each score to the caller (live UI scoreboard)
+            home = probe_node or (nodes_with.get(model_name) or [""])[0]
+            on_result(bench, home)   # stream each score + its node (grouped by IP in the UI)
     log.info(
-        "benchmark: scored %d of %d eligible; %d too big, %d too slow; judges_ok=%s",
-        len(results), len(eligible), len(too_big), len(too_slow), judges_ok,
+        "benchmark: scored %d of %d eligible; %d too big, %d too small, %d too slow; judges_ok=%s",
+        len(results), len(eligible), len(too_big), len(too_small), len(too_slow), judges_ok,
     )
     return FleetBenchmarkResult(
         benchmarked=len(results), judges_ok=judges_ok, results=results,
-        eligible=len(eligible), skipped_too_big=len(too_big), skipped_too_slow=len(too_slow),
+        eligible=len(eligible), skipped_too_big=len(too_big),
+        skipped_too_small=len(too_small), skipped_too_slow=len(too_slow),
     )

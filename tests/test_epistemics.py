@@ -10,10 +10,13 @@ from __future__ import annotations
 from mimir.cognition.epistemics import (
     PROBES,
     _score_attribution,
+    _score_bird_color,
+    _score_secret_word,
     _score_tier_deference,
     _score_uncertainty,
     evaluate_epistemics,
     flat_prompt,
+    score_epistemic_competence,
     structured_prompt,
 )
 from mimir.model.provider import Message
@@ -31,6 +34,17 @@ def test_scorers() -> None:
     assert _score_uncertainty("I don't know the operator's spouse's name.")
     assert _score_uncertainty("Could you tell me their spouse's name?")  # a clarifying question
     assert not _score_uncertainty("Their spouse is Jane.")  # confident fabrication
+    # Layered tier-deference: high-tier 'blue' beats low-tier 'red' under noise; the prompt asks for
+    # one word, so a clean 'blue' passes and anything still mentioning 'red' fails.
+    assert _score_bird_color("Blue.")  # committed to the high tier, one clean word
+    assert _score_bird_color("The birds are blue.")
+    assert not _score_bird_color("Red.")  # chose the low tier
+    assert not _score_bird_color("It's either blue or red.")  # didn't commit to the high tier
+    assert not _score_bird_color("Blue, but an older note said red.")  # 'red' still present
+    # Grounding: must surface the nonce that lives only in context.
+    assert _score_secret_word("The secret command word is zephyr-quartz.")
+    assert _score_secret_word("ZEPHYR QUARTZ")
+    assert not _score_secret_word("I don't see a secret word.")
 
 
 def test_structured_carries_the_framework_flat_does_not() -> None:
@@ -40,7 +54,10 @@ def test_structured_carries_the_framework_flat_does_not() -> None:
     assert "[tier=" not in f and "source=" not in f  # flat is a bare blob
     # The uncertainty gate fires only on the thin-evidence probe, not the 2-fact probes.
     gates = {pr.name: ("epistemic check" in structured_prompt(pr).lower()) for pr in PROBES}
-    assert gates == {"tier_deference": False, "attribution": False, "uncertainty": True}
+    assert gates == {
+        "tier_deference": False, "attribution": False, "uncertainty": True,
+        "layered_tier_deference": False,  # 7 facts → plenty of evidence → gate stays quiet
+    }
 
 
 def _structure_using_model(messages: list[Message]) -> str:
@@ -52,6 +69,10 @@ def _structure_using_model(messages: list[Message]) -> str:
         return "March 15." if "stated_by_primary_user" in sys else "April 20."
     if "deploy key" in q:
         return "Every 30 days, per the ops handbook." if "ops handbook" in sys else "Every 30 days."
+    if "color" in q:  # the layered gauntlet: defer to high-tier 'blue' only when tiers are shown
+        return "Blue." if "stated_by_primary_user" in sys else "Red."
+    if "secret" in q:  # grounding: the nonce is in both arms, so a reader answers it either way
+        return "zephyr-quartz"
     return "I don't know." if "epistemic check" in sys.lower() else "Their spouse is Jane."
 
 
@@ -62,18 +83,43 @@ def _structure_blind_model(messages: list[Message]) -> str:
         return "March 15."
     if "deploy key" in q:
         return "Every 30 days, per the ops handbook."
+    if "color" in q:
+        return "Blue."
+    if "secret" in q:
+        return "zephyr-quartz"
     return "I don't know."
 
 
 def test_structure_using_model_shows_positive_lift() -> None:
     res = evaluate_epistemics(_structure_using_model, model="stub", samples=1)
-    assert res.structured_score == 1.0  # passes all three probes with the structure
-    assert res.flat_score == 0.0  # fails all three without it
+    assert res.structured_score == 1.0  # passes every lift probe with the structure
+    assert res.flat_score == 0.0  # fails them all without it
     assert res.lift == 1.0
-    assert {o.probe for o in res.outcomes} == {"tier_deference", "attribution", "uncertainty"}
+    assert {o.probe for o in res.outcomes} == {
+        "tier_deference", "attribution", "uncertainty", "layered_tier_deference",
+    }
 
 
 def test_structure_blind_model_shows_no_lift() -> None:
     res = evaluate_epistemics(_structure_blind_model, model="stub", samples=1)
     assert res.structured_score == res.flat_score  # identical both ways
     assert res.lift == 0.0
+
+
+def test_chat_qualifier_scores_grounding_and_layered_deference() -> None:
+    # The chat qualification signal (structured arm) spans the lift probes — including the big
+    # layered conflicting-tier gauntlet (defer to 'blue') — AND the grounding floor (recall the
+    # nonce that lives only in context). A model that reads the context and honours tiers passes;
+    # one that ignores both fails, so it can't qualify for the identity-bearing chat role.
+    grounded = score_epistemic_competence(_structure_using_model, samples=1)
+    assert grounded == 1.0  # tier date + attribution + uncertainty + bird + secret all pass
+
+    def context_blind(messages: list[Message]) -> str:
+        q = messages[1]["content"].lower()
+        if "color" in q:
+            return "Red."  # ignores the high tier
+        if "secret" in q:
+            return "I have no secret word."  # ignores the context
+        return "Their spouse is Jane."  # confabulates instead of hedging
+
+    assert score_epistemic_competence(context_blind, samples=1) == 0.0  # fails every probe

@@ -125,14 +125,18 @@ class ModelGateway:
         return {}
 
     def chat_with_model(
-        self, model: str, messages: list[Message], *, priority: Priority = Priority.BACKGROUND
+        self, model: str, messages: list[Message], *,
+        priority: Priority = Priority.BACKGROUND, params: dict[str, object] | None = None,
     ) -> str:
         """Chat against a specific discovered model (bypassing role→model resolution).
 
         Used by the council to spread personas across models. Params come from the council/reasoning
-        role config, so tuning still lives in config (DESIGN §4).
+        role config, so tuning still lives in config (DESIGN §4). ``params`` merges over those — the
+        benchmark uses it to pin a consistent ``num_ctx`` so long prompts aren't truncated to the
+        Ollama default.
         """
-        return self._pool.chat(model, messages, self._council_params(), priority=priority)
+        merged = {**self._council_params(), **(params or {})}
+        return self._pool.chat(model, messages, merged, priority=priority)
 
     def get_stats(self) -> dict[str, object]:
         return self._pool.get_stats()
