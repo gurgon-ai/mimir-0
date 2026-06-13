@@ -596,6 +596,13 @@ def benchmark_fleet(
     - ``persist`` — ``False`` makes the run **ephemeral**: results stream via ``on_result`` but are
       NOT written to the catalogue, so a triage/scouting round can't pollute the real scores.
     """
+    # An inverted size band (floor above ceiling) is always a transposed pair of fields — it would
+    # otherwise silently qualify NOTHING (min ≤ size ≤ max is unsatisfiable). Swap it, loudly,
+    # rather than dead-end with an empty, unexplained round (DESIGN §10 — no silent empty state).
+    if min_params_b and max_params_b and min_params_b > max_params_b:
+        log.warning("benchmark: inverted size band — min %.1fB > max %.1fB; swapping (it would "
+                    "qualify nothing). Set min ≤ max to silence.", min_params_b, max_params_b)
+        min_params_b, max_params_b = max_params_b, min_params_b
     sizes: dict[str, float] = {}
     nodes_with: dict[str, list[str]] = {}
     eligible: set[str] = set()   # approved, non-embedding (any size) — for coverage reporting

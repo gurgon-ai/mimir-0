@@ -8,6 +8,12 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Fixed
+- **An inverted size band silently qualified nothing.** If the size fields were transposed
+  (`min_model_size_b` > `max_model_size_b` — e.g. min 28, max 7), `min ≤ size ≤ max` is unsatisfiable,
+  so the benchmark found **0 eligible models** and parked an empty, unexplained round that looked
+  broken. An inverted band is always a transposition, so it's now **swapped, with a loud log**; and
+  any empty round (whatever the cause) now says *why* in the UI ("nothing matched your size band
+  min X / max Y — widen it") instead of rendering blank.
 - **Per-node speed was clobbered model-wide, wrecking the placement matrix.** `update_catalogue_scores`
   wrote `return_time` with `WHERE model=?`, so the *one* node a model was tested on had its latency
   stamped onto **every** node's row — making a 12B look like 1.5s/turn on a Pi *and* the beast. Speed
