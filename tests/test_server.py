@@ -239,6 +239,54 @@ def test_council_endpoint_returns_positions_and_verdict(base_url: str) -> None:
     assert all({"persona", "model", "text"} <= set(p) for p in data["positions"])
 
 
+def _poll_tourney(base_url: str, want: str = "awaiting_veto") -> dict:
+    import time
+    st: dict = {}
+    for _ in range(150):
+        _, st = _json("GET", base_url + "/api/fleet/tournament/status")
+        if st.get("phase") in (want, "error", "done") or not st.get("active"):
+            break
+        time.sleep(0.1)
+    return st
+
+
+def test_tournament_runs_rounds_with_human_veto(base_url: str) -> None:
+    _json("POST", base_url + "/api/fleet/scan", {})  # catalogue the mock models
+
+    # Round 1: triage — starts in the background, narrows the field, parks for the user's veto.
+    status, started = _json("POST", base_url + "/api/fleet/tournament/start", {})
+    assert status == 200 and started.get("started") is True
+    st = _poll_tourney(base_url)
+    assert st["round"] == 1 and st["phase"] == "awaiting_veto"
+    triaged = {r["model"] for r in st["results"]}
+    assert {"mock-a", "mock-b", "mock-c"} <= triaged  # the whole fleet triaged (approved-blind)
+
+    # FIGHT → Round 2 (gauntlet) on the survivors the user kept; mock-c is vetoed out.
+    s2, adv = _json("POST", base_url + "/api/fleet/tournament/advance",
+                    {"keep": ["mock-a", "mock-b"]})
+    assert s2 == 200 and adv["advanced"] is True
+    st2 = _poll_tourney(base_url)
+    assert st2["round"] == 2 and st2["phase"] == "awaiting_veto"
+    assert {r["model"] for r in st2["results"]} == {"mock-a", "mock-b"}  # only the survivors
+
+    # FIGHT → Round 3 (finals): compute champions among the finalists; the tournament is done.
+    s3, adv3 = _json("POST", base_url + "/api/fleet/tournament/advance", {"keep": ["mock-a"]})
+    assert s3 == 200 and adv3["advanced"] is True
+    _, st3 = _json("GET", base_url + "/api/fleet/tournament/status")
+    assert st3["round"] == 3 and st3["phase"] == "done"
+    assert st3["finalists"] == ["mock-a"]
+
+    # Apply is idempotent and returns the (possibly empty) role→model map without erroring.
+    s4, applied = _json("POST", base_url + "/api/fleet/tournament/apply", {})
+    assert s4 == 200 and "applied" in applied
+
+    # Advancing with no kept models is a clean 200 with a reason, not a crash.
+    _json("POST", base_url + "/api/fleet/tournament/start", {})
+    _poll_tourney(base_url)
+    s5, none_kept = _json("POST", base_url + "/api/fleet/tournament/advance", {"keep": []})
+    assert s5 == 200 and none_kept["advanced"] is False
+
+
 def test_memories_bad_kind_is_4xx(base_url: str) -> None:
     status, data = _json("GET", base_url + "/api/memories?kind=bogus")
     assert status == 400

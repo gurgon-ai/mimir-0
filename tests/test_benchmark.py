@@ -209,6 +209,16 @@ def test_reasoning_incompetent_model_is_barred_from_thinking_roles(brain: Mimir)
     assert recs["bake"]["model"] == "mock-a"
 
 
+def test_tournament_finals_restricts_to_kept_finalists(brain: Mimir) -> None:
+    # The finals round recommends only among the survivors the user carried in. mock-b is the better
+    # model, but if the user keeps ONLY mock-a, the finals must champion mock-a (the veto wins).
+    _craft_scores(brain)  # mock-a + mock-b benchmarked; mock-b higher quality
+    full = brain.fleet_recommendations()
+    assert full["bake"]["model"] == "mock-b"  # unrestricted, the better model wins
+    finals = brain.tournament_finals({"mock-a"})
+    assert finals["bake"]["model"] == "mock-a"  # restricted to the kept finalist
+
+
 def test_apply_recommendations_repoints_roles(brain: Mimir) -> None:
     _craft_scores(brain)
     applied = brain.apply_recommendations()
