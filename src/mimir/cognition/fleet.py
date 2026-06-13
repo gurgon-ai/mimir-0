@@ -358,6 +358,79 @@ def placement_matrix(
     }
 
 
+def council_roster(
+    storage: StorageGateway, *, size: int = 5, min_quality: float = _CAPABILITY_FLOOR,
+    disabled: set[str] | None = None, disabled_nodes: set[str] | None = None,
+) -> dict[str, Any]:
+    """A diverse adversarial-council roster — a SPREAD of model families, not the top-N ranking.
+
+    This is the "second lineup": the non-user-facing pool for council / inner-dialogue / background
+    reasoning. Its value is **diversity** — different model families fail in different ways, so a
+    council of five qwen variants is worth far less than five different families (the parent runs a
+    16-persona council across 7 families for exactly this). So we rank models *within* each family
+    by quality, then **round-robin across families** — each family's best first, then seconds — so
+    the roster pulls from as many distinct families as possible before doubling up.
+
+    Capacity-bound, **not latency-gated** (DESIGN §5a, BENCHMARK_SCHEDULER §7): any model clearing a
+    quality floor on an enabled node qualifies — the big-and-slow models a chat cap excludes are
+    prime council members, so no size/latency cap applies here. (They must still be *graded* to
+    appear: benchmark with the size cap off to pull the big pool in.) Returns the seated roster, the
+    families represented, and the bench (qualified but not seated — the next-up).
+    """
+    disabled = disabled or set()
+    disabled_nodes = disabled_nodes or set()
+    # Collapse to one entry per model (capability is model-wide); track its fastest enabled node.
+    by_model: dict[str, dict[str, Any]] = {}
+    for e in list_catalogue(storage):
+        if "embed" in e.model.lower() or e.model in disabled:
+            continue
+        if e.quality is None or e.quality < min_quality:
+            continue
+        slot = by_model.setdefault(e.model, {
+            "model": e.model, "family": e.family or "?", "quality": e.quality,
+            "reasoning": e.reasoning, "params_b": e.params_b,
+            "node": None, "return_time": None, "nodes": [],
+        })
+        if e.node not in disabled_nodes:
+            slot["nodes"].append(e.node)
+            if e.return_time is not None and (
+                slot["return_time"] is None or e.return_time < slot["return_time"]
+            ):
+                slot["return_time"] = e.return_time
+                slot["node"] = e.node
+    candidates = [s for s in by_model.values() if s["nodes"]]  # must run on ≥1 enabled node
+
+    families: dict[str, list[dict[str, Any]]] = {}
+    for s in candidates:
+        families.setdefault(s["family"], []).append(s)
+    for members in families.values():  # within a family: best quality first (reasoning breaks ties)
+        members.sort(key=lambda s: (-(s["quality"] or 0.0), -(s["reasoning"] or 0.0)))
+    fam_order = sorted(families, key=lambda f: -(families[f][0]["quality"] or 0.0))
+
+    roster: list[dict[str, Any]] = []
+    rank = 0
+    while len(roster) < size and any(rank < len(families[f]) for f in fam_order):
+        for fam in fam_order:
+            if rank < len(families[fam]):
+                roster.append(families[fam][rank])
+                if len(roster) >= size:
+                    break
+        rank += 1
+
+    seated = {s["model"] for s in roster}
+    bench = sorted((s for s in candidates if s["model"] not in seated),
+                   key=lambda s: -(s["quality"] or 0.0))
+    return {
+        "roster": roster,
+        "families": sorted({s["family"] for s in roster}),
+        "size": len(roster),
+        "requested": size,
+        "pool": len(candidates),
+        "pool_families": len(families),
+        "bench": bench,
+    }
+
+
 def fleet_report(storage: StorageGateway) -> dict[str, Any]:
     """The catalogue as a per-node summary (the 'report' the operator sees)."""
     entries = list_catalogue(storage)
