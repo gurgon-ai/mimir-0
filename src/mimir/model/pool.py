@@ -105,9 +105,13 @@ class ProviderPool:
     # -- public API -------------------------------------------------------------------
 
     def chat(
-        self, model: str, messages: list[Message], params: dict[str, object], *, priority: Priority
+        self, model: str, messages: list[Message], params: dict[str, object], *, priority: Priority,
+        max_retries: int | None = None,
     ) -> str:
-        return self._route(priority, lambda p: p.chat(model, messages, params), "chat", model)
+        return self._route(
+            priority, lambda p: p.chat(model, messages, params), "chat", model,
+            max_retries=max_retries,
+        )
 
     def embed(
         self, model: str, texts: list[str], *, priority: Priority
@@ -265,7 +269,8 @@ class ProviderPool:
     # -- routing ----------------------------------------------------------------------
 
     def _route(
-        self, priority: Priority, fn: Callable[[Provider], R], kind: str, model: str | None = None
+        self, priority: Priority, fn: Callable[[Provider], R], kind: str,
+        model: str | None = None, *, max_retries: int | None = None,
     ) -> R:
         with self._lock:
             self._stats["calls"] += 1
@@ -279,16 +284,17 @@ class ProviderPool:
                 transient=True,
             )
 
+        base_retries = self._max_retries if max_retries is None else max_retries
         last_exc: ProviderError | None = None
         for index, (endpoint, clamp) in enumerate(candidates):
             if index > 0:
                 with self._lock:
                     self._stats["failovers"] += 1
-            max_retries = 0 if clamp else self._max_retries
+            attempt_retries = 0 if clamp else base_retries
             with self._lock:
                 endpoint.inflight += 1
             try:
-                result = self._attempt(endpoint, fn, max_retries)
+                result = self._attempt(endpoint, fn, attempt_retries)
             except ProviderError as exc:
                 self._record_failure(endpoint)
                 last_exc = exc

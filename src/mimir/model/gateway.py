@@ -127,16 +127,18 @@ class ModelGateway:
     def chat_with_model(
         self, model: str, messages: list[Message], *,
         priority: Priority = Priority.BACKGROUND, params: dict[str, object] | None = None,
+        max_retries: int | None = None,
     ) -> str:
         """Chat against a specific discovered model (bypassing role→model resolution).
 
         Used by the council to spread personas across models. Params come from the council/reasoning
         role config, so tuning still lives in config (DESIGN §4). ``params`` merges over those — the
-        benchmark uses it to pin a consistent ``num_ctx`` so long prompts aren't truncated to the
-        Ollama default.
+        benchmark uses it to pin a consistent ``num_ctx`` (and a tight per-call timeout) so long
+        prompts aren't truncated and a slow model fails fast. ``max_retries`` overrides the pool
+        default — the benchmark passes 0 so one slow call isn't retried into a multi-minute stall.
         """
         merged = {**self._council_params(), **(params or {})}
-        return self._pool.chat(model, messages, merged, priority=priority)
+        return self._pool.chat(model, messages, merged, priority=priority, max_retries=max_retries)
 
     def get_stats(self) -> dict[str, object]:
         return self._pool.get_stats()

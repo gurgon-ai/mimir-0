@@ -32,6 +32,7 @@ class OllamaProvider:
         self._timeout = timeout
 
     def chat(self, model: str, messages: list[Message], params: dict[str, Any]) -> str:
+        timeout, params = _split_timeout(params)
         think, opts = _split_think(params)
         payload = {
             "model": model,
@@ -40,7 +41,7 @@ class OllamaProvider:
             "think": think,
             "options": _to_options(opts),
         }
-        data = self._post("/api/chat", payload)
+        data = self._post("/api/chat", payload, timeout=timeout)
         try:
             return str(data["message"]["content"])
         except (KeyError, TypeError) as exc:
@@ -86,6 +87,7 @@ class OllamaProvider:
         self, model: str, messages: list[Message], params: dict[str, Any]
     ) -> Iterator[str]:
         """Stream a chat completion: Ollama's ``stream=true`` newline-delimited JSON deltas."""
+        _timeout, params = _split_timeout(params)   # streaming uses the provider timeout; strip it
         think, opts = _split_think(params)
         payload = {
             "model": model,
@@ -141,14 +143,17 @@ class OllamaProvider:
 
     # -- transport --------------------------------------------------------------------
 
-    def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post(
+        self, path: str, payload: dict[str, Any], *, timeout: float | None = None
+    ) -> dict[str, Any]:
         url = f"{self._host}{path}"
         body = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             url, data=body, headers={"Content-Type": "application/json"}, method="POST"
         )
+        deadline = timeout or self._timeout
         try:
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+            with urllib.request.urlopen(req, timeout=deadline) as resp:
                 raw = resp.read()
         except urllib.error.HTTPError as exc:
             # The server answered with an error status. 5xx and 404/422 (Ollama returns these
@@ -170,13 +175,25 @@ class OllamaProvider:
         except TimeoutError as exc:
             # Socket timeout — the backend is slow/busy, not broken. Transient.
             raise ProviderError(
-                f"Ollama request to {path} timed out after {self._timeout}s", transient=True
+                f"Ollama request to {path} timed out after {deadline}s", transient=True
             ) from exc
         try:
             parsed: dict[str, Any] = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise ProviderError(f"Ollama returned non-JSON for {path}: {raw!r}") from exc
         return parsed
+
+
+_TIMEOUT_KEY = "__timeout_s__"
+
+
+def _split_timeout(params: dict[str, Any]) -> tuple[float | None, dict[str, Any]]:
+    """Pull a per-call timeout out of the params (a reserved key, not an Ollama option). Lets the
+    benchmark bound a single call far tighter than the provider's production ceiling, so a slow
+    model fails fast instead of stalling the run; ``None`` falls back to the provider's timeout."""
+    opts = dict(params)
+    raw = opts.pop(_TIMEOUT_KEY, None)
+    return (float(raw) if raw else None), opts
 
 
 def _split_think(params: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
