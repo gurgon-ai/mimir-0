@@ -342,6 +342,44 @@ def test_placement_matrix_shows_each_model_on_every_node_with_a_winner(db_path: 
         sg.close()
 
 
+def test_council_roster_favors_family_diversity_over_raw_ranking(db_path: str) -> None:
+    # The second lineup's whole point: a SPREAD of families, not the top-N. Given three high-quality
+    # qwen models plus one good gemma and one good mistral, a 3-seat council must take one from EACH
+    # family (qwen, gemma, mistral) — not the three qwens — though the qwens rank 1/2/3 overall.
+    from mimir.cognition.fleet import council_roster
+    from mimir.storage.gateway import StorageGateway
+    from mimir.storage.models import CatalogueEntry
+    from mimir.storage.repo import (
+        replace_catalogue,
+        update_catalogue_scores,
+        update_catalogue_speed,
+    )
+
+    node = "http://127.0.0.1:11434"
+    sg = StorageGateway(db_path)
+    try:
+        models = [("qwen-a", "qwen", 0.95), ("qwen-b", "qwen", 0.93), ("qwen-c", "qwen", 0.91),
+                  ("gemma-x", "gemma", 0.90), ("mistral-y", "mistral", 0.88)]
+        replace_catalogue(sg, [
+            CatalogueEntry(node=node, model=m, family=f, params_b=8.0, scanned_at=1.0)
+            for m, f, _q in models
+        ])
+        for m, _f, q in models:
+            update_catalogue_scores(sg, m, quality=q, talk=1.0, tools=1.0, code=1.0, coherence=None,
+                                    discipline=1.0, epistemics=1.0, reasoning=0.9)
+            update_catalogue_speed(sg, node, m, 1.0)
+
+        council = council_roster(sg, size=3)
+        fams = {s["family"] for s in council["roster"]}
+        assert fams == {"qwen", "gemma", "mistral"}      # one per family — diversity, not 3 qwens
+        assert council["roster"][0]["model"] == "qwen-a"  # but the strongest family leads
+        # The other two qwens are on the bench (qualified, not seated).
+        bench_models = {b["model"] for b in council["bench"]}
+        assert {"qwen-b", "qwen-c"} <= bench_models
+    finally:
+        sg.close()
+
+
 def test_bar_reason_names_the_failing_floor() -> None:
     # The shared role gate: None when a model clears every floor, else a reason naming the first
     # failing capability + the floor it missed. This is what the leaderboard renders instead of a

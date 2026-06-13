@@ -65,6 +65,17 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **The second lineup — a diversity-first adversarial council roster.** Adversarial / council /
+  background reasoning gets its value from **family diversity** (different model families fail in
+  different ways — a council of five qwen variants is worth far less than five different families),
+  not from the top-N ranking. `council_roster()` ranks models *within* each family, then round-robins
+  *across* families — each family's best first — so a 5-seat council pulls from 5 distinct families
+  before it ever doubles up. It's **capacity-bound, not latency-gated**: any model clearing the
+  quality floor on an enabled node qualifies, big-and-slow included (those are prime council members
+  a chat cap would wrongly exclude). New **🏟️ Council roster** view (tournament-done panel + benchmark
+  header) with a 3/5/7-seat toggle, the families represented, and the bench (qualified but not seated).
+  `/api/fleet/council` → `council_roster()`. (The big ≥30B/122B models still need grading with the
+  size cap off to enter the pool — benchmark with max size = 0.)
 - **A per-node placement matrix — every model on every node it runs on, with each node's winner.**
   The results board shows each model once, under the single node it was capability-tested on — so a
   strong *multi-node* worker (e.g. a mid-size model installed across the LAN) was collapsed to one

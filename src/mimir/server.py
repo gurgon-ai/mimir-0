@@ -165,6 +165,13 @@ class _Handler(BaseHTTPRequestHandler):
             elif route == "/api/fleet/placement":
                 with self.server.brain_lock:
                     self._send_json(self.server.brain.placement_matrix())
+            elif route == "/api/fleet/council":
+                try:
+                    size = int((params.get("size") or ["5"])[0])
+                except ValueError:
+                    size = 5
+                with self.server.brain_lock:
+                    self._send_json(self.server.brain.council_roster(size=max(1, min(12, size))))
             elif route == "/api/fleet/benchmark/status":
                 self._send_json(self._benchmark_status())
             elif route == "/api/fleet/tournament/status":
@@ -1308,7 +1315,7 @@ function renderBenchResults(results, header) {
   benchShow(true);
   const all = (results || []).slice();
   const best = all.slice().sort((a, b) => (b.quality || 0) - (a.quality || 0))[0];
-  let h = `<h2>${header || "🏁 Benchmarking…"} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="showPlacement()">📊 Per-node placement</button> <button class="secondary" style="padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
+  let h = `<h2>${header || "🏁 Benchmarking…"} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="showPlacement()">📊 Per-node placement</button> <button class="secondary" style="padding:4px 10px;" onclick="showCouncil()">🏟️ Council</button> <button class="secondary" style="padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
   h += '<div class="legend">✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; ★ = quality &nbsp;|&nbsp; grouped by node</div>';
   if (!all.length) { $("benchBoard").innerHTML = h + '<div class="hint" style="margin-top:12px;">Warming up the first model…</div>'; return; }
   // group by node so it's obvious which machine each model lives on
@@ -1369,6 +1376,38 @@ function renderPlacement(data) {
     });
     h += "</table>";
   });
+  $("benchBoard").innerHTML = h;
+}
+
+// The adversarial-council roster (the "second lineup") — a SPREAD of model families, not the top-N.
+// Diversity is the point: different families fail differently, so a family-spread panel beats five
+// variants of the best model. Reads /api/fleet/council.
+let _councilSize = 5;
+async function showCouncil(size) {
+  if (size) _councilSize = size;
+  try { renderCouncil(await api("GET", "/api/fleet/council?size=" + _councilSize)); }
+  catch (e) { $("fleetMsg").textContent = "Error loading council: " + e.message; }
+}
+function renderCouncil(data) {
+  _benchBoardClosed = false; benchShow(true);
+  const r = data.roster || [];
+  let h = '<h2>🏟️ Adversarial council — the diverse second lineup <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>';
+  h += `<div class="legend">A <b>spread of ${data.families.length} families</b> across ${data.size} seat(s) — diversity beats ranking for adversarial reasoning. Not latency-gated (big-and-slow welcome). Pool: ${data.pool} models in ${data.pool_families} families.</div>`;
+  h += '<div class="row" style="margin:8px 0; gap:6px; align-items:center;"><span class="hint">Seats:</span>'
+    + [3, 5, 7].map(n => `<button class="secondary" style="padding:3px 10px;${n === _councilSize ? "border-color:#2d8;" : ""}" onclick="showCouncil(${n})">${n}</button>`).join("") + '</div>';
+  if (!r.length) { $("benchBoard").innerHTML = h + '<div class="hint" style="margin-top:12px;">No qualified models yet — run a benchmark first (and the speed-test). For the big council models, benchmark with the size cap off.</div>'; return; }
+  h += '<table><tr><th>Seat</th><th>Family</th><th>Model</th><th>Quality</th><th>Reason</th><th>Runs on</th></tr>';
+  r.forEach((m, i) => {
+    const t = m.return_time != null ? ` · ${m.return_time.toFixed(1)}s` : "";
+    h += `<tr class="${i === 0 ? "top" : ""}"><td>${i + 1}</td><td><b>${m.family}</b></td><td>${m.model}</td>`
+      + `<td class="q">${_stars(m.quality)} <span style="color:#8a94a3; font-weight:400;">${(m.quality ?? 0).toFixed(2)}</span></td>`
+      + `<td>${_emoji(m.reasoning)}</td><td>${shortNode(m.node || "")}${t}</td></tr>`;
+  });
+  h += "</table>";
+  const bench = data.bench || [];
+  if (bench.length) {
+    h += `<div class="hint" style="margin-top:10px;"><b>Bench</b> (qualified, next-up): ` + bench.slice(0, 10).map(b => `${b.model} <span style="opacity:.6;">(${b.family})</span>`).join(", ") + (bench.length > 10 ? ` +${bench.length - 10} more` : "") + "</div>";
+  }
   $("benchBoard").innerHTML = h;
 }
 
@@ -1439,7 +1478,7 @@ function renderTourney(s) {
     h += `<div class="row" style="margin-top:12px; gap:10px; align-items:center;"><button id="tourneyAdvanceBtn" type="button" onclick="advanceTourney()">${next}</button><span class="hint">Untick any model you don't want to advance, then ${round === 1 ? "fight" : "finalize"}.</span></div>`;
   } else if (phase === "done") {
     h += '<div class="hint" style="margin-top:12px;">🏆 Tournament complete. <b>4 · Apply</b> routes your chat / bake / reasoning roles now. <b>3 · Speed-test</b> is optional — it times the remaining edges to fill the placement matrix (which edge can host which model, for future background/council work); slow edges take 30–70s each. You can Apply without it.</div>';
-    h += '<div class="row" style="margin-top:8px; gap:10px;"><button class="secondary" type="button" onclick="speedTestFromTourney()">⏱ 3 · Speed-test remaining nodes</button><button class="secondary" type="button" onclick="showPlacement()">📊 Per-node placement</button><button id="tourneyApplyBtn" type="button" onclick="applyTourney()">✅ 4 · Apply finals to roles</button><button class="secondary" type="button" onclick="closeBench()">Done</button></div>';
+    h += '<div class="row" style="margin-top:8px; gap:10px;"><button class="secondary" type="button" onclick="speedTestFromTourney()">⏱ 3 · Speed-test remaining nodes</button><button class="secondary" type="button" onclick="showPlacement()">📊 Per-node placement</button><button class="secondary" type="button" onclick="showCouncil()">🏟️ Council roster</button><button id="tourneyApplyBtn" type="button" onclick="applyTourney()">✅ 4 · Apply finals to roles</button><button class="secondary" type="button" onclick="closeBench()">Done</button></div>';
     h += '<div id="tourneyMatrixMsg" class="hint" style="margin-top:6px;"></div>';
   } else if (phase === "error") {
     h += `<div class="hint" style="color:#ff8a8a; margin-top:10px;">Error: ${s.error}</div>`;

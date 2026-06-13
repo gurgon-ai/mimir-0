@@ -29,6 +29,7 @@ from .cognition.council import CouncilResult, deliberate
 from .cognition.epistemics import EpistemicResult, run_epistemics
 from .cognition.fleet import (
     FleetScanResult,
+    council_roster,
     fleet_model_pool,
     fleet_report,
     placement_matrix,
@@ -518,6 +519,14 @@ class Mimir:
         eligibility, and each node's champion/fastest. The display side of the speed-test matrix."""
         return placement_matrix(
             self._storage, disabled=disabled_models(self._storage),
+            disabled_nodes=disabled_nodes(self._storage),
+        )
+
+    def council_roster(self, *, size: int = 5) -> dict[str, Any]:
+        """The diverse adversarial-council roster (the 'second lineup') — a spread of model families
+        for council / background reasoning, not the top-N ranking. Not latency-gated."""
+        return council_roster(
+            self._storage, size=size, disabled=disabled_models(self._storage),
             disabled_nodes=disabled_nodes(self._storage),
         )
 
