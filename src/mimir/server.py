@@ -419,11 +419,16 @@ class _Handler(BaseHTTPRequestHandler):
         with srv.bench_lock:
             bench_busy = bool(srv.bench_state.get("running"))
         with srv.tourney_lock:
-            tourney_busy = bool(srv.tourney_state.get("active"))
+            # A tournament is 'busy' for the matrix only while a round is actually running, or paused
+            # for a veto (FIGHT will resume the next round → it would collide). At phase 'done' the
+            # tournament is terminal and nothing runs on the nodes — that's exactly when the speed-test
+            # is the intended next step, so allow it.
+            tourney_busy = (bool(srv.tourney_state.get("active"))
+                            and srv.tourney_state.get("phase") in ("running", "awaiting_veto"))
         if bench_busy or tourney_busy:
             what = "a benchmark" if bench_busy else "the tournament"
             return {"started": False, "busy": True,
-                    "reason": f"Can't run the time trial while {what} is running — it shares the "
+                    "reason": f"Can't run the time trial while {what} is in progress — it shares the "
                               "same GPUs. Let it finish first."}
         with srv.matrix_lock:
             if srv.matrix_state.get("running"):
@@ -1257,7 +1262,10 @@ async function resumeFleetWork() {
     if (bs.running) { _benchBoardClosed = false; pollBenchmark(); return; }
     const ts = await api("GET", "/api/fleet/tournament/status");
     if (!ts.active) return;
-    setMatrixEnabled(false);   // tournament active (running OR awaiting veto) → lock the time trial
+    // Lock the time trial only mid-tournament (a round running, or a veto pending that FIGHT resumes).
+    // At 'done' the tournament is terminal and the speed-test is the next step → leave it enabled.
+    const midTourney = ts.phase === "running" || ts.phase === "awaiting_veto";
+    setMatrixEnabled(!midTourney);
     _benchBoardClosed = false;
     if (ts.phase === "running") pollTournament();   // re-attach the live poll
     else renderTourney(ts);                          // awaiting_veto / done / error → re-show it
@@ -1389,7 +1397,8 @@ function renderTourney(s) {
     const next = round === 1 ? "🥊 FIGHT → Round 1 (gauntlet)" : "🏁 Compute finals (Round 2)";
     h += `<div class="row" style="margin-top:12px; gap:10px; align-items:center;"><button id="tourneyAdvanceBtn" type="button" onclick="advanceTourney()">${next}</button><span class="hint">Untick any model you don't want to advance, then ${round === 1 ? "fight" : "finalize"}.</span></div>`;
   } else if (phase === "done") {
-    h += '<div class="row" style="margin-top:12px; gap:10px;"><button id="tourneyApplyBtn" type="button" onclick="applyTourney()">✅ Apply finals to roles</button><button class="secondary" type="button" onclick="closeBench()">Done</button></div>';
+    h += '<div class="hint" style="margin-top:12px;">🏆 Tournament complete. Next: <b>3 · Speed-test</b> the remaining nodes (fills the placement matrix — which edges can host which models), <i>then</i> <b>4 · Apply</b> the finals to your roles.</div>';
+    h += '<div class="row" style="margin-top:8px; gap:10px;"><button class="secondary" type="button" onclick="speedTestFromTourney()">⏱ 3 · Speed-test remaining nodes</button><button id="tourneyApplyBtn" type="button" onclick="applyTourney()">✅ 4 · Apply finals to roles</button><button class="secondary" type="button" onclick="closeBench()">Done</button></div>';
   } else if (phase === "error") {
     h += `<div class="hint" style="color:#ff8a8a; margin-top:10px;">Error: ${s.error}</div>`;
   }
@@ -1555,7 +1564,7 @@ async function pollMatrix() {
   _matrixPolling = false; $("fleetMatrixBtn").disabled = false;
 }
 
-$("fleetMatrixBtn").addEventListener("click", async () => {
+async function startMatrix() {
   $("fleetMsg").textContent = "Starting the time trial…"; btnState("fleetMatrixBtn", "working");
   try {
     const r = await api("POST", "/api/fleet/matrix", {});   // returns immediately; runs in the background
@@ -1565,7 +1574,16 @@ $("fleetMatrixBtn").addEventListener("click", async () => {
     }
     pollMatrix();
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; btnState("fleetMatrixBtn", "failed"); }
-});
+}
+$("fleetMatrixBtn").addEventListener("click", startMatrix);
+
+// Programmatically activate a side-panel tab (reuses the tab button's own handler).
+function switchTab(name) { const b = document.querySelector(`.tabs button[data-tab="${name}"]`); if (b) b.click(); }
+
+// Run the speed-test from the tournament board (step 3 before step 4): the matrix progress lives on
+// the Fleet tab (right panel), so switch there to show it; the tournament board (left/chat pane)
+// stays put with its Apply button, so the user can apply finals once the matrix finishes.
+function speedTestFromTourney() { switchTab("fleet"); startMatrix(); }
 
 $("fleetApplyBtn").addEventListener("click", async () => {
   btnState("fleetApplyBtn", "working");
