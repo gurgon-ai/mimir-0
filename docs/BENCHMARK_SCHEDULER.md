@@ -224,6 +224,32 @@ models** (a real trusted panel — never a model judging itself). Three wins: fa
 better-calibrated (qualified judges), and the qualification ranking stops carrying judge noise. This
 is capacity-bound, latency-irrelevant work — a natural fit for the finals or for idle/nightly time.
 
+**The scoring redesign — a criteria rubric, not a vibe number [decided 2026-06-13].** Relocating the
+pass isn't enough; the *scoring* is the deeper bug. Observed live: **every** model lands yellow
+(~0.65). That's not the models — it's three compounding measurement faults: (1) **LLM central
+tendency** — asked to "rate faithfulness 0.0–1.0," judges cluster at 0.6–0.8 almost regardless of
+input; (2) **mean-of-N compresses** further toward the center; (3) the **probe is trivial** (one
+simple fact every model gets right), so there's no real spread and the only variance left *is* judge
+noise. The tell that it's the judge: the `judges_trustworthy` canary **passes** (good ranked above
+garbled) while real answers all compress to ~0.65 — judges separate extremes but flatten the
+realistic middle. So the redesign:
+
+- **Stop asking for a number — ask for discrete checks.** The judge returns a small structured
+  verdict (JSON), e.g. `{"used_required_facts": bool, "invented_detail": bool, "contradicted": bool}`.
+  Score = fraction of criteria passed. Discrete groundedness checks escape vibe-compression, and
+  parsing the JSON sidesteps the `_parse_score` first-number bug ("on a scale of 0 to 1 …" → `0`).
+- **A probe with room to fail.** A short context with **≥2 facts that must be used**, a **trap**
+  (a plausible-but-absent detail a sloppy model invents), and something that **must be grounded**.
+  Now answers genuinely differ, so the dimension can discriminate.
+- **Fixes the terseness bias for free.** Criteria grade *groundedness* (used the facts, invented
+  nothing, contradicted nothing) — a model that elaborates with *grounded* detail isn't penalized;
+  only invented/contradictory detail counts against it. (Today's "free of invented details" rubric
+  dinged the helpful 24–27B models and crowned a terse 2B.)
+- **Qualified judges, self excluded** (per the peer-review relocation above).
+
+One structured criteria verdict thus fixes central tendency, the parse bug, and the terseness bias in
+a single move — and gives a *checkable* sub-score instead of a number pulled from the judge's vibe.
+
 ## 8. Failure modes (fail-loud)
 
 - **Node dies mid-battery** → the attempt raises → that (model, node) is marked tried and the model
