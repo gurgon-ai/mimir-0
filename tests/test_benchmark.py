@@ -281,6 +281,22 @@ def test_reasoning_incompetent_model_is_barred_from_thinking_roles(brain: Mimir)
     assert recs["bake"]["model"] == "mock-a"
 
 
+def test_failed_latency_probe_is_unmeasured_not_instant() -> None:
+    # A latency probe that raises (timeout/transport) must record None, NEVER 0.0 — else a
+    # timing-out model sorts as the FASTEST and sails under any latency cap. (Regression: a model
+    # aced the short capability probes but timed out on the longer latency generation and showed
+    # 0.0s/turn, winning 'fastest node'.)
+    from mimir.cognition.benchmark import _measure_turn_latency
+
+    def boom(_messages: list) -> str:
+        raise TimeoutError("generation timed out")
+
+    assert _measure_turn_latency(boom) is None
+    # A successful probe yields a measured number, not None (the instant mock rounds to ~0.0, but
+    # the point is it's measured — distinct from the None 'unmeasured/failed' signal).
+    assert _measure_turn_latency(lambda _m: "x" * 400) is not None
+
+
 def test_bar_reason_names_the_failing_floor() -> None:
     # The shared role gate: None when a model clears every floor, else a reason naming the first
     # failing capability + the floor it missed. This is what the leaderboard renders instead of a

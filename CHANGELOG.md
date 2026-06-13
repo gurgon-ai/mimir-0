@@ -8,6 +8,16 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Fixed
+- **A failed latency probe was recorded as 0.0s — making a timing-out model rank as the *fastest*.**
+  `_measure_turn_latency` caught a probe failure (timeout/transport error) and returned `0.0`, the
+  best possible sort key — so a model that aced the short capability probes but timed out on the
+  longer latency generation showed `0.0s/turn`, won "fastest node," and sailed under any `max_latency_s`
+  cap (observed live: `phuzzy/darknemo:latest` passing every dimension at 0.0s). It now returns
+  **None** ("unmeasured"); every consumer already treats None as not-fast / not-viable
+  (`return_time or 1e9`), the per-node speed is left unwritten so the matrix re-times it, and the
+  board shows `·` instead of a bogus 0.0. The sibling `_measure_node_speed` got the same hardening so
+  an *instant* transport failure (elapsed ≈ 0) can't be recorded as fastest either — a failed probe
+  must never sort fast.
 - **An inverted size band silently qualified nothing.** If the size fields were transposed
   (`min_model_size_b` > `max_model_size_b` — e.g. min 28, max 7), `min ≤ size ≤ max` is unsatisfiable,
   so the benchmark found **0 eligible models** and parked an empty, unexplained round that looked
