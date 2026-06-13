@@ -159,6 +159,14 @@ def test_size_cap_and_outside_in_order(brain: Mimir) -> None:
     assert result.results[0].model == "mock-b"
 
 
+def test_inverted_size_band_is_swapped_not_left_empty(brain: Mimir) -> None:
+    # min > max is always a transposed pair — it must SWAP (to [3, 10]) and qualify the models in
+    # that band, never dead-end with an empty run (the "0 eligible / empty round" bug).
+    result = brain.benchmark_fleet(only_approved=False, judge=False,
+                                   max_params_b=3.0, min_params_b=10.0)
+    assert {b.model for b in result.results} == {"mock-a", "mock-b"}  # 3B + 8B in [3,10]; 27B out
+
+
 def test_size_floor_excludes_tiny_models(brain: Mimir) -> None:
     # A 5B floor drops mock-a (3B) so it can't out-compete the bigger models on capable hardware.
     result = brain.benchmark_fleet(only_approved=False, judge=False, min_params_b=5.0)

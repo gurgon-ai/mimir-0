@@ -1356,6 +1356,11 @@ function renderTourney(s) {
     h += `<div class="hint" style="margin:6px 0;">${s.total ? `Scoring ${s.i}/${s.total}: ${s.current}…${onModel}${eta}${slow}` : (s.current || "Preparing…")}</div>`;
   }
   if (s.round_key === "finals") h += renderFinals(s.recommendations);
+  // An empty round that's NOT still running means nothing qualified — explain why (don't look broken).
+  if (phase !== "running" && !(s.results || []).length) {
+    const sc = s.scope || {};
+    h += `<div class="hint" style="margin:10px 0; color:#ff8a8a;">No models qualified this round. Your scope may exclude everything — size band min <b>${sc.min_model_size_b ?? 0}</b>B / max <b>${sc.max_model_size_b ?? "∞"}</b>B (an inverted band excludes all). Widen the size fields and re-run.</div>`;
+  }
   h += tourneyTable((s.results || []).slice(), phase === "awaiting_veto", round);
   if (phase === "awaiting_veto") {
     const next = round === 1 ? "🥊 FIGHT → Round 1 (gauntlet)" : "🏁 Compute finals (Round 2)";
