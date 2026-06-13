@@ -155,6 +155,29 @@ idle roles where it's the best choice — it just drops off the user-facing shor
 "never fail capability on speed" invariant (§1) is what makes this possible: capacity is preserved
 for every model, and the cap is a final, user-facing-only filter.
 
+### Distribution's payoff is parallelism, not "best model faster" — the placement matrix [next]
+
+The beast almost always wins user-facing (best model, fastest). An edge earns its keep a *different*
+way: by running **background cognition concurrently** — council, sentinel, the nightly backlog — so
+the beast stays free for the user. For that work latency barely matters (idle/capacity-bound), so the
+bar for an edge is **"can it run a qualified-enough model and return before the next idle tick,"** not
+"is it fast." A runner-up like gemma4:e4b returning in 4s on the macbook is useless for chat but a
+perfect **background worker**.
+
+So the finals produce a **placement matrix**, not a single champion:
+
+- **The column we were missing:** the scheduler tests each model's capability *once* (on whatever node
+  ran it — usually the beast). The finals must then probe each qualified model's speed on the **other
+  nodes it's installed on**, so we know *where each model can actually run*.
+- **User-facing roles** → best model on its fastest viable node (cap applies). Usually the beast.
+- **Idle/background roles** → **offload to an edge** when a capable-enough model runs there within a
+  *generous* background tolerance — freeing the beast. The edges become the background-cognition fleet
+  (the council/sentinel/nightly work runs *off* the interactive box, in parallel).
+- **Provisioning gap, surfaced loudly:** if a capable runner-up is installed **only on the beast**,
+  the finals say so — *"qualified, but on no edge; pull it to an edge to use it as a background
+  worker."* This is the bridge to auto-distributing models across the LAN fleet (the discover →
+  qualify → distribute vision): qualification reveals *which* runner-ups are worth pushing to edges.
+
 ### Coherence is a post-qualification peer-review pass, not a qualification gate [next]
 
 Coherence is the one **judge-based** dimension — a panel of *other* models rates a candidate's answer
