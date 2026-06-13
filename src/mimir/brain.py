@@ -560,6 +560,9 @@ class Mimir:
         min_params_b: float | None = None,
         latency_budget_s: float | None = None,
         judge: bool = True,
+        only_models: set[str] | None = None,
+        framework: bool = True,
+        persist: bool = True,
         progress: Callable[[int, int, str, float | None], None] | None = None,
         on_result: Callable[[ModelBenchmark, str], None] | None = None,
     ) -> FleetBenchmarkResult:
@@ -593,6 +596,9 @@ class Mimir:
             judge=judge,
             latency_budget_s=budget,
             num_ctx=ctx,
+            only_models=only_models,
+            framework=framework,
+            persist=persist,
             progress=progress,
             on_result=on_result,
         )
