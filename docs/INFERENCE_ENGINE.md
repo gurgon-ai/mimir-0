@@ -384,10 +384,18 @@ heuristic > any reachable model** — re-resolved on every rescan, with user dis
 level. **[built]**
 
 **The objective [built].** *The best-scoring model for this system that you're willing to wait for.*
-Latency is a **hard cap, not a penalty**: `max_latency_s` excludes too-slow models before scoring, and
-within the cap every role ranks on **pure quality** — a dominant model wins outright and speed only
-breaks ties. So a 26B a second behind a 4B at a higher score wins, because under the cap the wait is
-already deemed worth it. (This replaced an earlier quality-minus-speed "balanced" formula for `chat`.)
+Within the cap every role ranks on **pure quality** — a dominant model wins outright and speed only
+breaks ties. So a 26B a second behind a 4B at a higher score wins. (This replaced an earlier
+quality-minus-speed "balanced" formula for `chat`.)
+
+**Latency is a USER-FACING concern only [next].** Most of Mimir's cognition is idle/between-turns
+(council, the async sentinel, sleep, the burst worker reclaiming idle GPU) — for that work nobody is
+waiting, so latency is irrelevant and **absolute capacity wins** (run the biggest, slowest, most
+capable model). So `max_latency_s` applies **only to user-facing roles** (`chat`, tools-in-a-turn);
+**idle roles** (`council`, `sentinel`, `reasoning`, `bake`, sleep, burst-worker) route to **best
+quality, no cap**. A slow-but-brilliant model that fails the chat cap everywhere is **kept** and
+routed to the idle roles where it's the best choice — never discarded for being slow. This is why the
+qualification never fails capability on speed, and the cap is applied *last*, only where it matters.
 
 **Identity roles** — `chat`, `reasoning`, `judge`, `sentinel` — are the roles that *speak or reason
 as the system*. They have a hard rule: **never route to an unqualified model** (one without a
