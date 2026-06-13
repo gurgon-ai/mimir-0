@@ -52,6 +52,19 @@ log = logging.getLogger("mimir.server")
 # never a server fault, so it must not log a stack trace.
 _CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
+# The qualifying tournament's rounds. Round 4 (vision) is reserved until the vision dimension ships,
+# so the live total is 3. Each round narrows the field; the user vetoes between rounds (DESIGN §4).
+_TOURNEY_ROUNDS: tuple[dict[str, Any], ...] = (
+    {"n": 1, "key": "triage", "name": "Triage",
+     "blurb": "Fast scoring to narrow the field — the cheap battery only, no gauntlet, nothing saved."},
+    {"n": 2, "key": "gauntlet", "name": "Framework gauntlet",
+     "blurb": "The real qualification on the survivors: reasoning + the epistemic framework "
+              "(layered tiers, grounding, long-context). Scores are saved."},
+    {"n": 3, "key": "finals", "name": "Finals",
+     "blurb": "The per-role champions among your finalists — confirm, then Apply."},
+)
+_TOURNEY_TOTAL = 3
+
 
 class MimirHTTPServer(ThreadingHTTPServer):
     """A threading HTTP server that holds the shared brain and serializes access to it."""
@@ -66,6 +79,10 @@ class MimirHTTPServer(ThreadingHTTPServer):
         # frozen). Guarded by its own small lock so status reads never block on the benchmark.
         self.bench_lock = threading.Lock()
         self.bench_state: dict[str, Any] = {"running": False}
+        # The qualifying tournament: a multi-round, human-veto narrowing built on the same
+        # background-run + poll pattern as the benchmark. Its own lock so status reads never block.
+        self.tourney_lock = threading.Lock()
+        self.tourney_state: dict[str, Any] = {"active": False}
 
 
 def create_server(brain: Mimir, host: str = "127.0.0.1", port: int = 8765) -> MimirHTTPServer:
@@ -141,6 +158,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._model_pool())
             elif route == "/api/fleet/benchmark/status":
                 self._send_json(self._benchmark_status())
+            elif route == "/api/fleet/tournament/status":
+                self._send_json(self._tournament_status())
             elif route == "/favicon.ico":
                 self._send(204, b"", "image/x-icon")
             else:
@@ -176,6 +195,12 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._scan_fleet())
             elif route == "/api/fleet/benchmark":
                 self._send_json(self._benchmark_fleet(body))
+            elif route == "/api/fleet/tournament/start":
+                self._send_json(self._tournament_start(body))
+            elif route == "/api/fleet/tournament/advance":
+                self._send_json(self._tournament_advance(body))
+            elif route == "/api/fleet/tournament/apply":
+                self._send_json(self._tournament_apply())
             elif route == "/api/fleet/apply":
                 self._send_json({"applied": self._apply_recommendations()})
             elif route == "/api/fleet/model":
@@ -361,6 +386,122 @@ class _Handler(BaseHTTPRequestHandler):
     def _benchmark_status(self) -> dict[str, Any]:
         with self.server.bench_lock:
             return dict(self.server.bench_state)
+
+    # -- qualifying tournament (multi-round, human-veto) ------------------------------
+
+    def _tournament_status(self) -> dict[str, Any]:
+        with self.server.tourney_lock:
+            return dict(self.server.tourney_state)
+
+    def _tournament_start(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Begin the tournament at Round 1 (triage). Scope caps (size floor/ceiling, latency) are
+        captured once here and reused for every round. Runs in the background; the UI polls status."""
+        srv = self.server
+
+        def _f(v: Any) -> float | None:
+            return float(v) if v not in (None, "") else None
+
+        with srv.tourney_lock:
+            if srv.tourney_state.get("active") and srv.tourney_state.get("phase") == "running":
+                return {"started": False, **srv.tourney_state}  # a round is already running
+            srv.tourney_state = {"active": True, "scope": {
+                "max_model_size_b": _f(body.get("max_model_size_b")),
+                "min_model_size_b": _f(body.get("min_model_size_b")),
+                "max_latency_s": _f(body.get("max_latency_s")),
+            }}
+        self._start_round(1, None)
+        return {"started": True}
+
+    def _tournament_advance(self, body: dict[str, Any]) -> dict[str, Any]:
+        """The 'FIGHT' button: record the survivors the user kept and start the next round. Round 1→2
+        re-benchmarks the survivors through the full gauntlet; Round 2→3 computes the finals."""
+        srv = self.server
+        keep = {m for m in (body.get("keep") or []) if isinstance(m, str)}
+        with srv.tourney_lock:
+            st = srv.tourney_state
+            if not st.get("active") or st.get("phase") != "awaiting_veto":
+                return {"advanced": False, "error": "no round is awaiting a decision"}
+            cur = int(st.get("round", 0))
+        if not keep:
+            return {"advanced": False, "error": "keep at least one model to continue"}
+        if cur == 1:
+            self._start_round(2, keep)
+            return {"advanced": True}
+        if cur == 2:
+            with srv.brain_lock:
+                recs = srv.brain.tournament_finals(keep)
+            with srv.tourney_lock:
+                prev = [r for r in srv.tourney_state.get("results", []) if r["model"] in keep]
+                meta = _TOURNEY_ROUNDS[2]
+                srv.tourney_state.update(
+                    round=3, round_name=meta["name"], round_key="finals", blurb=meta["blurb"],
+                    phase="done", current="", recommendations=recs, results=prev,
+                    finalists=sorted(keep),
+                )
+            return {"advanced": True}
+        return {"advanced": False, "error": "the tournament is already at the finals"}
+
+    def _tournament_apply(self) -> dict[str, Any]:
+        """Apply the finals: re-point roles to the champions among the kept finalists."""
+        srv = self.server
+        with srv.tourney_lock:
+            finalists = {m for m in (srv.tourney_state.get("finalists") or []) if isinstance(m, str)}
+        if not finalists:
+            return {"applied": {}}
+        with srv.brain_lock:
+            return {"applied": srv.brain.apply_finals(finalists)}
+
+    def _start_round(self, round_num: int, keep: set[str] | None) -> None:
+        """Run one tournament round in a background thread (mirrors the benchmark worker exactly).
+        Round 1 is triage (cheap + ephemeral); later rounds run the full gauntlet on the survivors
+        and persist. On completion the round parks in ``awaiting_veto`` for the user's decision."""
+        srv = self.server
+        meta = _TOURNEY_ROUNDS[round_num - 1]
+        triage = round_num == 1
+        with srv.tourney_lock:
+            scope = dict(srv.tourney_state.get("scope", {}))
+            srv.tourney_state.update(
+                active=True, round=round_num, round_name=meta["name"], round_key=meta["key"],
+                blurb=meta["blurb"], total_rounds=_TOURNEY_TOTAL, phase="running",
+                i=0, total=0, current="scanning the fleet…", eta=None, results=[],
+                error=None, recommendations=None,
+            )
+
+        def _progress(i: int, total: int, model: str, eta: float | None) -> None:
+            with srv.tourney_lock:
+                srv.tourney_state.update(i=i, total=total, current=model, eta=eta)
+
+        def _on_result(b: Any, node: str) -> None:
+            with srv.tourney_lock:
+                srv.tourney_state.setdefault("results", []).append({
+                    "model": b.model, "quality": b.quality, "talk": b.talk, "tools": b.tools,
+                    "code": b.code, "discipline": b.discipline, "epistemics": b.epistemics,
+                    "reasoning": b.reasoning, "coherence": b.coherence,
+                    "return_time": b.return_time, "node": node,
+                })
+
+        def _run() -> None:
+            try:
+                with srv.brain_lock:
+                    srv.brain.benchmark_fleet(
+                        # The tournament IS the qualification, so it considers EVERY reachable model
+                        # (not just approved families — that heuristic is for the pre-benchmark guess);
+                        # the user prunes by veto between rounds.
+                        only_approved=False,
+                        max_params_b=scope.get("max_model_size_b"),
+                        min_params_b=scope.get("min_model_size_b"),
+                        latency_budget_s=scope.get("max_latency_s"),
+                        only_models=keep, framework=not triage, persist=not triage,
+                        judge=not triage, progress=_progress, on_result=_on_result,
+                    )
+                with srv.tourney_lock:
+                    srv.tourney_state.update(phase="awaiting_veto", current="")
+            except Exception as exc:  # surfaced via status, never a silent death (DESIGN §10)
+                log.exception("tournament round %d failed", round_num)
+                with srv.tourney_lock:
+                    srv.tourney_state.update(phase="error", error=str(exc))
+
+        threading.Thread(target=_run, name=f"mimir-tourney-r{round_num}", daemon=True).start()
 
     def _apply_recommendations(self) -> dict[str, str]:
         with self.server.brain_lock:
@@ -723,6 +864,10 @@ _HTML = """<!doctype html>
         <button class="secondary" id="fleetApplyBtn" type="button" title="Point each role at its top-scoring model from the benchmark.">3 · Apply best</button>
       </div>
       <div class="hint" style="margin-top:6px;"><b>Find</b> lists installed models (fast, no scoring) → <b>Benchmark</b> scores them by running tests (slow) → <b>Apply</b> routes each role to the best.</div>
+      <div class="row" style="margin-top:10px;">
+        <button id="fleetTourneyBtn" type="button" title="A staged, knock-out qualifier: fast triage → you pick survivors → the full framework gauntlet → finals. You choose who advances between rounds.">🏆 Run qualifying tournament</button>
+      </div>
+      <div class="hint" style="margin-top:6px;">The tournament narrows the fleet in rounds — <b>triage</b> (fast) → <b>🥊 you keep the survivors</b> → <b>framework gauntlet</b> (the real test) → <b>finals</b>. The scoreboard takes over the chat pane.</div>
       <div class="row" style="margin-top:8px; align-items:center; gap:14px; flex-wrap:wrap;">
         <label class="hint" style="display:flex; align-items:center; gap:6px;">Benchmark — min model size (B)
           <input type="number" id="benchMinSize" min="0" step="1" style="width:70px;"/></label>
@@ -1013,6 +1158,10 @@ async function loadFleet() {
     // If a benchmark is already running (e.g. started from another tab/session), show its progress.
     const bs = await api("GET", "/api/fleet/benchmark/status");
     if (bs.running) pollBenchmark();
+    // Likewise resume a tournament in flight — running → keep polling; awaiting/done → re-show it.
+    const ts = await api("GET", "/api/fleet/tournament/status");
+    if (ts.active && ts.phase === "running") pollTournament();
+    else if (ts.active && (ts.phase === "awaiting_veto" || ts.phase === "done")) { _benchBoardClosed = false; renderTourney(ts); }
   } catch (e) { $("fleetList").innerHTML = "error: " + e.message; }
 }
 
@@ -1073,6 +1222,117 @@ function renderBenchResults(results, header) {
     });
   });
   $("benchBoard").innerHTML = h + "</table>";
+}
+
+// -- the qualifying tournament: same board, plus round chrome + keep-checkboxes + the FIGHT button.
+function renderFinals(recs) {
+  let h = '<div class="selfmodel" style="margin:8px 0;"><b>🏆 Finals — your champions</b>';
+  const roles = Object.entries(recs || {}).filter(([_r, v]) => v);
+  if (!roles.length) h += '<div class="hint" style="margin-top:6px;">No finalist cleared a role\\'s gate — keep more models or re-run.</div>';
+  roles.forEach(([role, r]) => {
+    const q = (r.quality != null) ? `q${r.quality}` : "";
+    const t = (r.return_time != null) ? ` · ${r.return_time}s` : "";
+    h += `<div style="margin-top:5px;">${role} → <b>${r.model}</b> (${q}${t}) on ${shortNode(r.node)}</div>`;
+  });
+  return h + "</div>";
+}
+
+function tourneyTable(results, showChecks, round) {
+  if (!results.length) return '<div class="hint" style="margin-top:12px;">Warming up the first model…</div>';
+  const best = results.slice().sort((a, b) => (b.quality || 0) - (a.quality || 0))[0];
+  const groups = {};
+  results.forEach(r => { (groups[r.node || ""] = groups[r.node || ""] || []).push(r); });
+  const order = Object.keys(groups).sort((a, b) => { const la = a.includes("127.0.0.1"), lb = b.includes("127.0.0.1"); if (la !== lb) return la ? -1 : 1; return a.localeCompare(b); });
+  const full = round >= 2;   // triage (round 1) didn't measure epistemics/coherence — hide those columns
+  const span = 9 + (full ? 2 : 0) + (showChecks ? 1 : 0);
+  let cols = `<th></th>${showChecks ? "<th>Keep</th>" : ""}<th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th>`;
+  if (full) cols += "<th>Epistemics</th><th>Coherence</th>";
+  cols += "<th>Speed/turn</th>";
+  let h = `<table><tr>${cols}</tr>`;
+  order.forEach(node => {
+    const rows = groups[node].sort((a, b) => (b.quality || 0) - (a.quality || 0));
+    h += `<tr><td colspan="${span}" class="nodehdr">${shortNode(node)} · ${rows.length} model(s)</td></tr>`;
+    rows.forEach((r, i) => {
+      const rank = (best && r.model === best.model) ? "🏆" : _medal(i);
+      h += `<tr class="${i === 0 ? "top" : ""}"><td>${rank}</td>`;
+      if (showChecks) h += `<td style="text-align:center;"><input type="checkbox" class="tkeep" data-model="${r.model}" checked></td>`;
+      h += `<td>${r.model}</td>`
+        + `<td class="q">${_stars(r.quality)} <span style="color:#8a94a3; font-weight:400;">${(r.quality ?? 0).toFixed(2)}</span></td>`
+        + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td>`;
+      if (full) h += `<td>${_emoji(r.epistemics)}</td><td>${_emoji(r.coherence)}</td>`;
+      h += `<td>${r.return_time != null ? r.return_time.toFixed(1) + "s" : "·"}</td></tr>`;
+    });
+  });
+  return h + "</table>";
+}
+
+function renderTourney(s) {
+  if (_benchBoardClosed) return;
+  benchShow(true);
+  const round = s.round || 1, total = s.total_rounds || 3, phase = s.phase;
+  let h = `<h2>🏆 Tournament — Round ${round}/${total}: ${s.round_name || ""} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
+  h += `<div class="legend">${s.blurb || ""} &nbsp;|&nbsp; ✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50</div>`;
+  if (phase === "running") {
+    const eta = (s.eta != null) ? ` · ~${fmtDuration(s.eta)} left` : "";
+    h += `<div class="hint" style="margin:6px 0;">${s.total ? `Scoring ${s.i}/${s.total}: ${s.current}…${eta}` : (s.current || "Preparing…")}</div>`;
+  }
+  if (s.round_key === "finals") h += renderFinals(s.recommendations);
+  h += tourneyTable((s.results || []).slice(), phase === "awaiting_veto", round);
+  if (phase === "awaiting_veto") {
+    const next = round === 1 ? "🥊 FIGHT → Round 2 (gauntlet)" : "🏁 Compute finals";
+    h += `<div class="row" style="margin-top:12px; gap:10px; align-items:center;"><button id="tourneyAdvanceBtn" type="button" onclick="advanceTourney()">${next}</button><span class="hint">Untick any model you don't want to advance, then ${round === 1 ? "fight" : "finalize"}.</span></div>`;
+  } else if (phase === "done") {
+    h += '<div class="row" style="margin-top:12px; gap:10px;"><button id="tourneyApplyBtn" type="button" onclick="applyTourney()">✅ Apply finals to roles</button><button class="secondary" type="button" onclick="closeBench()">Done</button></div>';
+  } else if (phase === "error") {
+    h += `<div class="hint" style="color:#ff8a8a; margin-top:10px;">Error: ${s.error}</div>`;
+  }
+  $("benchBoard").innerHTML = h;
+}
+
+let _tourneyPolling = false;
+async function pollTournament() {
+  if (_tourneyPolling) return;
+  _tourneyPolling = true; $("fleetTourneyBtn").disabled = true; btnState("fleetTourneyBtn", "working");
+  try {
+    while (true) {
+      const s = await api("GET", "/api/fleet/tournament/status");
+      if (!s.active) break;
+      renderTourney(s);
+      if (s.phase === "running") {
+        const eta = (s.eta != null) ? ` · ~${fmtDuration(s.eta)} left` : "";
+        $("fleetMsg").textContent = s.total ? `Round ${s.round}: ${s.i}/${s.total} ${s.current}…${eta}` : `Round ${s.round}: ${s.current || "preparing"}…`;
+        await new Promise(r => setTimeout(r, 1500));
+        continue;
+      }
+      if (s.phase === "awaiting_veto") { $("fleetMsg").textContent = `Round ${s.round} done — pick who advances, then FIGHT.`; btnState("fleetTourneyBtn", "done"); }
+      else if (s.phase === "done") { $("fleetMsg").textContent = "🏆 Tournament complete — review the finals."; btnState("fleetTourneyBtn", "done"); }
+      else if (s.phase === "error") { $("fleetMsg").textContent = "Tournament error: " + s.error; btnState("fleetTourneyBtn", "failed"); }
+      break;   // interactive now — stop polling until the user acts
+    }
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
+  _tourneyPolling = false; $("fleetTourneyBtn").disabled = false;
+}
+
+async function advanceTourney() {
+  const keep = Array.from(document.querySelectorAll(".tkeep")).filter(c => c.checked).map(c => c.dataset.model);
+  if (!keep.length) { $("fleetMsg").textContent = "Keep at least one model to continue."; return; }
+  const btn = $("tourneyAdvanceBtn"); if (btn) { btn.disabled = true; btn.textContent = "Working…"; }
+  try {
+    const r = await api("POST", "/api/fleet/tournament/advance", { keep });
+    if (!r.advanced) { $("fleetMsg").textContent = "Tournament: " + (r.error || "could not advance"); if (btn) { btn.disabled = false; } return; }
+    pollTournament();
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; if (btn) btn.disabled = false; }
+}
+
+async function applyTourney() {
+  const btn = $("tourneyApplyBtn"); if (btn) { btn.disabled = true; btn.textContent = "Applying…"; }
+  try {
+    const r = await api("POST", "/api/fleet/tournament/apply", {});
+    const n = Object.keys(r.applied || {}).length;
+    $("fleetMsg").textContent = n ? `Applied finals to ${n} role(s): ` + Object.entries(r.applied).map(([k, v]) => `${k}=${v}`).join(", ") : "Nothing to apply.";
+    if (btn) btn.textContent = n ? "✅ Applied" : "Nothing to apply";
+    refreshState();
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; if (btn) { btn.disabled = false; btn.textContent = "✅ Apply finals to roles"; } }
 }
 
 // Workflow buttons light up by state: amber (working) → green (done) → red (failed).
@@ -1137,6 +1397,16 @@ $("fleetBenchBtn").addEventListener("click", async () => {
     await api("POST", "/api/fleet/benchmark", scope);   // returns immediately; runs in the background
     pollBenchmark();
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; btnState("fleetBenchBtn", "failed"); }
+});
+
+$("fleetTourneyBtn").addEventListener("click", async () => {
+  _benchBoardClosed = false;   // a fresh tournament re-opens the board even if you closed the last one
+  $("fleetMsg").textContent = "Starting the tournament…"; btnState("fleetTourneyBtn", "working");
+  try {
+    const scope = { min_model_size_b: $("benchMinSize").value, max_model_size_b: $("benchMaxSize").value, max_latency_s: $("benchMaxLatency").value };
+    await api("POST", "/api/fleet/tournament/start", scope);   // returns immediately; runs in the background
+    pollTournament();
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; btnState("fleetTourneyBtn", "failed"); }
 });
 
 $("fleetApplyBtn").addEventListener("click", async () => {

@@ -72,6 +72,7 @@ from .storage.repo import (
     disabled_models,
     latest_self_model,
     latest_sentinel_note,
+    list_catalogue,
     list_memories,
     record_access,
     set_model_enabled,
@@ -509,6 +510,12 @@ class Mimir:
         """Best model per role from the benchmarked catalogue (recommend-only; DESIGN §4)."""
         return recommend_roles(self._storage, disabled=disabled_models(self._storage))
 
+    def tournament_finals(self, keep: set[str]) -> dict[str, Any]:
+        """Per-role champions among the kept finalists only — ``recommend_roles`` with everything
+        not carried into the final round vetoed out. The qualifying tournament's last round."""
+        others = {e.model for e in list_catalogue(self._storage) if e.model not in keep}
+        return recommend_roles(self._storage, disabled=disabled_models(self._storage) | others)
+
     def set_model_enabled(self, model: str, enabled: bool) -> dict[str, str]:
         """Enable or disable a model for `auto` routing (a user's bias veto; DESIGN §4).
 
@@ -532,14 +539,9 @@ class Mimir:
             auto_roles=self._auto_roles,
         )
 
-    def apply_recommendations(self) -> dict[str, str]:
-        """Re-point the live roles at their recommended models. Returns what changed.
-
-        Only the real roles (chat/bake/reasoning) are applied; tools/code are advisory until those
-        features exist. Recommendations come only from benchmarked models, so this never routes to
-        an untested model. Updates routing in memory — persist by editing your ``mimir.toml``.
-        """
-        recs = recommend_roles(self._storage, disabled=disabled_models(self._storage))
+    def _apply_role_recs(self, recs: dict[str, Any]) -> dict[str, str]:
+        """Re-point the real roles (chat/bake/reasoning) at the given recommendations. Shared by
+        'Apply best' and the tournament finals. Updates routing in memory — persist via toml."""
         applied: dict[str, str] = {}
         for role in ("chat", "bake", "reasoning"):
             rec = recs.get(role)
@@ -550,6 +552,21 @@ class Mimir:
         if applied:
             log.info("fleet: applied role recommendations %s", applied)
         return applied
+
+    def apply_recommendations(self) -> dict[str, str]:
+        """Re-point the live roles at their recommended models. Returns what changed.
+
+        Only the real roles (chat/bake/reasoning) are applied; tools/code are advisory until those
+        features exist. Recommendations come only from benchmarked models, so this never routes to
+        an untested model.
+        """
+        return self._apply_role_recs(
+            recommend_roles(self._storage, disabled=disabled_models(self._storage))
+        )
+
+    def apply_finals(self, keep: set[str]) -> dict[str, str]:
+        """Apply the tournament finals: re-point roles to the champions among the kept finalists."""
+        return self._apply_role_recs(self.tournament_finals(keep))
 
     def benchmark_fleet(
         self,

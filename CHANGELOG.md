@@ -8,6 +8,15 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **The qualifying tournament — a staged, human-veto model knock-out** (Fleet tab → "🏆 Run
+  qualifying tournament"). Built on the benchmark's new staging primitives (subset / triage /
+  ephemeral): **Round 1 Triage** scores the *whole* fleet fast and cheap (capabilities only, nothing
+  saved) → you **untick** who shouldn't advance → **🥊 FIGHT → Round 2 Gauntlet** re-tests only the
+  survivors through the full framework qualification (reasoning + the epistemic layered/grounding/
+  long-context probes, scores saved) → veto again → **Round 3 Finals** champions each role *among
+  your finalists only* (the veto wins over the global best), then Apply. Round 4 (vision) is reserved.
+  The board takes over the chat pane; rounds run in the background with live progress and resume on
+  tab-switch. New endpoints under `/api/fleet/tournament/{start,advance,apply,status}`.
 - **A `reasoning` dimension in the benchmark (schema v12).** The old battery only tested *format*
   compliance (say `PONG`, return a weather JSON, write `def add`) — every competent model passed, so
   `quality` saturated near 1.0 and a fluent model that *couldn't actually solve anything* could sweep
