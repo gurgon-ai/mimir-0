@@ -60,6 +60,35 @@ def test_reasoning_checkers_require_the_right_answer() -> None:
     assert not _check_reverse_python("python")
 
 
+def test_choose_test_node_picks_fast_enough_else_fastest_never_fails() -> None:
+    from mimir.cognition.benchmark import _choose_test_node
+
+    def probe(speeds: dict[str, float | None]):
+        seen: list[str] = []
+        def p(n: str) -> float | None:
+            seen.append(n)
+            return speeds.get(n)
+        p.seen = seen  # type: ignore[attr-defined]
+        return p
+
+    # First node under budget → chosen, and probing STOPS there (B, C never probed).
+    p = probe({"A": 5.0, "B": 1.0, "C": 1.0})
+    node, sp = _choose_test_node(["A", "B", "C"], p, test_budget=10.0)
+    assert node == "A" and sp == {"A": 5.0} and p.seen == ["A"]  # type: ignore[attr-defined]
+
+    # None under budget → the FASTEST that ran wins (capability never failed on speed); all probed.
+    node, sp = _choose_test_node(["A", "B", "C"], probe({"A": 40.0, "B": 20.0, "C": 30.0}), 10.0)
+    assert node == "B" and sp == {"A": 40.0, "B": 20.0, "C": 30.0}
+
+    # A node that can't run it (probe → None) is skipped; the next viable one is chosen.
+    node, sp = _choose_test_node(["A", "B"], probe({"A": None, "B": 3.0}), 10.0)
+    assert node == "B" and sp == {"B": 3.0}
+
+    # Installed only on nodes that all fail → no viable node (caller records it, not a quality cut).
+    node, sp = _choose_test_node(["A", "B"], probe({"A": None, "B": None}), 10.0)
+    assert node is None and sp == {}
+
+
 def test_outside_in_ordering() -> None:
     from mimir.cognition.benchmark import _outside_in
 

@@ -39,6 +39,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **Concurrent, distributed qualification.** The benchmark now runs **one worker per enabled node**
+  (the worker is the node's VRAM lock — one model at a time), with each model's candidate nodes
+  **rotated** so different models start on different boxes (spread → real parallelism). Each model
+  **falls back across its nodes** — pick the fastest that's quick enough to test on, skip a node
+  that's down, and if none is quick, test on the fastest that *ran* — so **capability is never
+  failed for being slow** (a model great on the beast but slow on a Pi still qualifies). Per-node
+  speed is recorded as it goes (the start of the placement matrix). `benchmark_model(node=…)` pins a
+  model's whole battery to one warm node (direct provider, no pool thrash). Mock/single-local stays
+  **sequential and order-deterministic**, so concurrency engages only on a real multi-node fleet.
 - **Per-node veto (schema v13).** Each discovered edge node can be toggled off in the Fleet tab —
   excluded from the pool's routing (with a fail-safe if *every* node is vetoed, so chat never
   hard-blocks), from qualification, and from recommendations, even if it's reachable. "Don't use that

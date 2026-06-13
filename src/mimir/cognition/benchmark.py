@@ -20,8 +20,10 @@ import ast
 import json
 import logging
 import re
+import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from ..model.gateway import ModelGateway
@@ -369,7 +371,7 @@ class FleetBenchmarkResult:
 
 def benchmark_model(
     model: ModelGateway, model_name: str, *, judge: bool = True, num_ctx: int = 8192,
-    framework: bool = True, call_timeout_s: float = 60.0,
+    framework: bool = True, call_timeout_s: float = 60.0, node: str | None = None,
 ) -> ModelBenchmark:
     """Run the battery against one model. ``judge=False`` skips the coherence pass.
 
@@ -386,19 +388,37 @@ def benchmark_model(
     full benchmark in a later round. ``quality`` is the mean of whatever dimensions actually ran, so
     a triage score is comparable only to other triage scores (not to a full score).
     """
-    def chat_fn(messages: list[Message]) -> str:
-        return model.chat_with_model(
-            model_name, messages,
-            params={"num_ctx": num_ctx, "__timeout_s__": call_timeout_s}, max_retries=0,
-        )
+    # ``node`` pins the WHOLE battery to one warm node (direct provider, no pool/retry) so the
+    # scheduler can run different models on different nodes at once without the pool re-routing a
+    # model's calls mid-battery and thrashing VRAM. Without it (mock / single-local), route via the
+    # gateway as before. Coherence judging always uses the gateway pool (it needs OTHER models).
+    if node and node.startswith("http"):
+        scorer = OllamaProvider(node, timeout=call_timeout_s)
+        warmer = OllamaProvider(node, timeout=WARMUP_TIMEOUT_S)
+
+        def chat_fn(messages: list[Message]) -> str:
+            return scorer.chat(model_name, messages, {"num_ctx": num_ctx})
+
+        def _warm() -> None:
+            warmer.chat(model_name, [{"role": "user", "content": "ok"}],
+                        {"num_ctx": num_ctx, "max_tokens": 1})
+    else:
+        def chat_fn(messages: list[Message]) -> str:
+            return model.chat_with_model(
+                model_name, messages,
+                params={"num_ctx": num_ctx, "__timeout_s__": call_timeout_s}, max_retries=0,
+            )
+
+        def _warm() -> None:
+            model.chat_with_model(
+                model_name, [{"role": "user", "content": "ok"}],
+                params={"num_ctx": num_ctx, "max_tokens": 1}, max_retries=0,
+            )
 
     # Warm the model into VRAM before timing. ONE token (max_tokens=1) so the load can't turn into a
     # multi-minute reason-fest on a thinking model; no retries. The real scoring calls follow warm.
     try:
-        model.chat_with_model(
-            model_name, [{"role": "user", "content": "ok"}],
-            params={"num_ctx": num_ctx, "max_tokens": 1}, max_retries=0,
-        )
+        _warm()
     except Exception as exc:
         log.warning("benchmark: warmup call failed for %s: %s", model_name, exc)
 
@@ -500,6 +520,29 @@ def _measure_node_speed(
 _DEFAULT_SKIP_S: float = 30.0
 
 
+def _choose_test_node(
+    candidates: list[str], probe: Callable[[str], float | None], test_budget: float,
+) -> tuple[str | None, dict[str, float]]:
+    """Pick which node to run a model's battery on, probing candidates in order. Returns the FIRST
+    node fast enough to test on (``speed <= test_budget``) — stopping there so we don't probe the
+    rest — else the FASTEST node that ran at all. Capability is established on the best available
+    node and is **never failed for being slow** (DESIGN §6/§1); a node that can't run it (probe
+    returns None) is skipped. Records every probed speed for the per-node placement matrix.
+    """
+    speeds: dict[str, float] = {}
+    fastest: str | None = None
+    for node in candidates:
+        speed = probe(node)
+        if speed is None:
+            continue   # node couldn't run it at all (down / won't load) → try the next
+        speeds[node] = speed
+        if speed <= test_budget:
+            return node, speeds   # fast enough — test here, don't bother probing the rest
+        if fastest is None or speed < speeds[fastest]:
+            fastest = node
+    return fastest, speeds   # none under budget → the fastest that ran (None if none ran)
+
+
 def _outside_in(by_size: list[str]) -> list[str]:
     """Reorder a smallest→largest list into big, small, big, small … so a running-average time
     estimate samples both extremes from the first two models and converges to the true mean fast."""
@@ -587,83 +630,95 @@ def benchmark_fleet(
     models = _outside_in(by_size)[:limit]
 
     total = len(models)
-    # Capability is NOT gated on the user's latency cap (DESIGN §6): a model slow on this node may
-    # be excellent on another, so the cap must never cut capability. We only skip a node too slow to
-    # even TEST on within a *generous* budget; the cap is recorded per-node, applied at routing.
-    # (Per-node requeue — try a faster node before giving up — is the next build; for now we test on
-    # the probe node, which is localhost/the-beast first, so the common case lands on the fast box.)
-    test_budget = max(_DEFAULT_SKIP_S, latency_budget_s)
+    # Capability is per-MODEL and NEVER failed on speed (DESIGN §6 / BENCHMARK_SCHEDULER): a model
+    # slow on one node may be excellent on another. We pick the fastest node that can run it, fall
+    # back through its other nodes if one is down/too-slow, and record per-node speed for routing.
+    test_budget = max(_DEFAULT_SKIP_S, latency_budget_s)   # "fast enough to bother testing here"
     call_timeout = 60.0   # hang protection per scoring call (no retries); NOT the latency cap
-    too_slow: set[str] = set()   # too slow to TEST on a reachable node — not a capability verdict
+    no_viable: set[str] = set()   # installed only on nodes that couldn't run it — not a quality cut
     log.info("benchmark: starting — %d model(s) to score (judge=%s, test budget %.0fs/turn)",
              total, judge, test_budget)
     judges_ok = judges_trustworthy(model) if judge else False
     results: list[ModelBenchmark] = []
+
+    # CONCURRENT: one worker per enabled http node (the worker is the node's VRAM lock — a node does
+    # one model at a time). Each model's candidate nodes are rotated by index so different models
+    # start on different nodes (spread → real parallelism). Mock/single-local (no http node) → the
+    # gateway path, one worker, sequential (order-preserving, so the specs hold).
+    http_nodes = sorted({n for m in models for n in nodes_with.get(m, []) if n.startswith("http")})
+    node_locks = {n: threading.Lock() for n in http_nodes}
+    state_lock = threading.Lock()
     loop_start = time.monotonic()
-    for i, model_name in enumerate(models, start=1):
-        log.info("benchmark: [%d/%d] %s …", i, total, model_name)
-        if progress is not None:
-            # ETA from the average wall-clock of the models already finished (outside-in makes this
-            # representative from the 2nd model on); None until we have at least one timing.
-            done = i - 1
-            eta = (time.monotonic() - loop_start) / done * (total - done) if done else None
-            progress(i, total, model_name, eta)
-        # Warm the model on its node and measure a representative per-turn latency. Record it (the
-        # per-node speed feeds routing/finals) — but only SKIP if it's too slow to even test here
-        # within the generous test budget; the user's cap is a routing concern, never a quality cut.
-        probe_node = next((n for n in nodes_with.get(model_name, []) if n.startswith("http")), None)
-        if probe_node is not None:
-            speed = _measure_node_speed(probe_node, model_name, timeout_s=test_budget,
-                                        warmup=True, num_ctx=num_ctx)
-            if speed is not None and persist:
-                update_catalogue_speed(storage, probe_node, model_name, speed)
-            if speed is not None and speed >= test_budget:
-                log.warning("benchmark: [%d/%d] %s — %.1fs/turn ≥ %.0fs test budget on %s; "
-                            "skipped HERE (a faster node would still qualify it)",
-                            i, total, model_name, speed, test_budget, probe_node)
-                too_slow.add(model_name)
-                continue
+    done_count = 0
+
+    def _qualify(item: tuple[int, str]) -> None:
+        nonlocal done_count
+        idx, model_name = item
+        cands = [n for n in nodes_with.get(model_name, []) if n.startswith("http")]
+        if cands:
+            r = idx % len(cands)
+            cands = cands[r:] + cands[:r]   # rotate so models spread across nodes
+
+        def probe(n: str) -> float | None:
+            with node_locks[n]:   # VRAM: hold the node while we warm + time it
+                return _measure_node_speed(n, model_name, timeout_s=test_budget,
+                                           warmup=True, num_ctx=num_ctx)
+
+        chosen, speeds = _choose_test_node(cands, probe, test_budget) if cands else (None, {})
+        if persist and speeds:
+            with state_lock:
+                for n, s in speeds.items():
+                    update_catalogue_speed(storage, n, model_name, s)
+        if cands and chosen is None:   # installed on http nodes but none could run it (all down)
+            with state_lock:
+                no_viable.add(model_name)
+            return
+
+        lock = node_locks.get(chosen) if chosen else None
+        if lock:
+            lock.acquire()
         try:
             bench = benchmark_model(model, model_name, judge=judges_ok, num_ctx=num_ctx,
-                                    framework=framework, call_timeout_s=call_timeout)
+                                    framework=framework, call_timeout_s=call_timeout, node=chosen)
         except Exception as exc:
-            log.warning("benchmark: [%d/%d] %s FAILED: %s", i, total, model_name, exc)
-            continue
-        log.info("benchmark: [%d/%d] %s done — quality=%.2f in %.1fs",
-                 i, total, model_name, bench.quality, bench.return_time)
-        if persist:
-            update_catalogue_scores(
-                storage,
-                model_name,
-                return_time=bench.return_time,
-                quality=bench.quality,
-                talk=bench.talk,
-                tools=bench.tools,
-                code=bench.code,
-                coherence=bench.coherence,
-                discipline=bench.discipline,
-                epistemics=bench.epistemics,
-                reasoning=bench.reasoning,
-            )
-            # Per-node speed for the OTHER nodes (the probe node was already measured above). Warm
-            # each before timing — the model isn't loaded on these nodes yet, so cold would mislead.
-            for node in nodes_with.get(model_name, []):
-                if node == probe_node:
-                    continue
-                elapsed = _measure_node_speed(node, model_name, timeout_s=test_budget,
-                                              warmup=True, num_ctx=num_ctx)
-                if elapsed is not None:
-                    update_catalogue_speed(storage, node, model_name, elapsed)
-        results.append(bench)
-        if on_result is not None:
-            home = probe_node or (nodes_with.get(model_name) or [""])[0]
-            on_result(bench, home)   # stream each score + its node (grouped by IP in the UI)
+            log.warning("benchmark: %s FAILED: %s", model_name, exc)
+            return
+        finally:
+            if lock:
+                lock.release()
+
+        with state_lock:
+            done_count += 1
+            log.info("benchmark: [%d/%d] %s done — q=%.2f, %.1fs/turn%s",
+                     done_count, total, model_name, bench.quality, bench.return_time,
+                     f" on {chosen}" if chosen else "")
+            if persist:
+                update_catalogue_scores(
+                    storage, model_name, return_time=bench.return_time, quality=bench.quality,
+                    talk=bench.talk, tools=bench.tools, code=bench.code, coherence=bench.coherence,
+                    discipline=bench.discipline, epistemics=bench.epistemics,
+                    reasoning=bench.reasoning,
+                )
+                if chosen:   # refine the chosen node's speed with the real battery latency
+                    update_catalogue_speed(storage, chosen, model_name, bench.return_time)
+            results.append(bench)
+            if progress is not None:
+                eta = (time.monotonic() - loop_start) / done_count * (total - done_count)
+                progress(done_count, total, model_name, eta)
+            if on_result is not None:
+                on_result(bench, chosen or (nodes_with.get(model_name) or [""])[0])
+
+    workers = max(1, len(http_nodes))   # ~one model per node; mock/single-local → 1 → sequential
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mimir-bench") as ex:
+        list(ex.map(_qualify, enumerate(models)))
+
     log.info(
-        "benchmark: scored %d of %d eligible; %d too big, %d too small, %d too slow; judges_ok=%s",
-        len(results), len(eligible), len(too_big), len(too_small), len(too_slow), judges_ok,
+        "benchmark: scored %d of %d eligible; %d too big, %d too small, %d no viable node; "
+        "judges_ok=%s", len(results), len(eligible), len(too_big), len(too_small),
+        len(no_viable), judges_ok,
     )
     return FleetBenchmarkResult(
         benchmarked=len(results), judges_ok=judges_ok, results=results,
         eligible=len(eligible), skipped_too_big=len(too_big),
-        skipped_too_small=len(too_small), skipped_too_slow=len(too_slow),
+        skipped_too_small=len(too_small), skipped_too_slow=len(no_viable),
     )
