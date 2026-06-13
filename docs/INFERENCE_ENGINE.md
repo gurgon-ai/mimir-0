@@ -305,11 +305,12 @@ Extensions this engine adds:
   **pass**; entirely below → **fail**; if it straddles the floor → **needs_more_data** (run more
   samples, up to a cap, before deciding). Add hysteresis (a small margin) so a borderline model does
   not flap in and out of qualification between runs.
-- **Concurrency + capacity awareness [proposed].** Benchmark backend pools **concurrently** across
-  nodes, bounded by a per-node concurrency cap (from config or a quick probe): **never exceed
-  `cap − 1` concurrent benchmark jobs on a node**, so qualification never starves real use or
-  overwhelms a small box. Distributed *or* local-only, sized to the hardware the user actually has.
-  Orchestration:
+- **Concurrency + capacity awareness [proposed — full design in `BENCHMARK_SCHEDULER.md`].**
+  Benchmark backend pools **concurrently** across nodes via a **work-stealing, one-worker-per-node**
+  scheduler: each node tests one model at a time (VRAM), fast nodes claim more, and a model too slow
+  to test on one node is **requeued to another** (never failed on speed). Bounded by a per-node
+  concurrency cap (default 1), so qualification never starves real use or overwhelms a small box.
+  Distributed *or* local-only, sized to the hardware the user actually has. Orchestration:
   - **Parallel across nodes, sequential within a node.** A node holds one model warm at a time
     (VRAM), so within a node it's warm → test → swap; but every node works at once. Each *distinct*
     model is dealt to one **home node** for scoring (quality is node-independent), spreading the
