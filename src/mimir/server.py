@@ -928,11 +928,11 @@ _HTML = """<!doctype html>
       <div class="hint" style="margin-top:6px;"><b>Find</b> lists installed models (fast, no scoring) → <b>Benchmark</b> scores them all at once (slow) → <b>Apply</b> routes each role to the best.</div>
       <div class="row" style="margin-top:8px; align-items:center; gap:14px; flex-wrap:wrap;">
         <label class="hint" style="display:flex; align-items:center; gap:6px;">Benchmark — min model size (B)
-          <input type="number" id="benchMinSize" min="0" step="1" style="width:70px;"/></label>
+          <input type="number" id="benchMinSize" min="0" step="1" autocomplete="off" style="width:70px;"/></label>
         <label class="hint" style="display:flex; align-items:center; gap:6px;">max model size (B)
-          <input type="number" id="benchMaxSize" min="0" step="1" style="width:70px;"/></label>
+          <input type="number" id="benchMaxSize" min="0" step="1" autocomplete="off" style="width:70px;"/></label>
         <label class="hint" style="display:flex; align-items:center; gap:6px;">max latency (s)
-          <input type="number" id="benchMaxLatency" min="0" step="0.5" style="width:70px;"/></label>
+          <input type="number" id="benchMaxLatency" min="0" step="0.5" autocomplete="off" style="width:70px;"/></label>
         <span class="hint">skips models smaller than the min (0 = off), bigger than the max, or slower than the latency (0 = 30s default)</span>
       </div>
       <div id="fleetMsg" class="hint">Press <b>1 · Find models</b> to inventory the fleet, then <b>2 · Benchmark</b> to score them.</div>
