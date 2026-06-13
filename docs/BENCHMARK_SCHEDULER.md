@@ -178,6 +178,23 @@ So the finals produce a **placement matrix**, not a single champion:
   worker."* This is the bridge to auto-distributing models across the LAN fleet (the discover →
   qualify → distribute vision): qualification reveals *which* runner-ups are worth pushing to edges.
 
+**Cast a wide net — the output is a graded, queryable fleet-capability map, not a single champion.**
+The non-user work (async sentinel, adversarial council, nightly review) doesn't want *the* best model;
+it wants a **diverse roster of good-enough ones** spread across the LAN — the parent runs a 16-persona
+council across 7 model families precisely because diversity beats a single brain for adversarial
+reasoning. So qualification grades **every "yellow-and-above" model on every node it can run on**, and
+role assignment is a **fuzzy query over the map, not a fixed pick**:
+
+- **User-facing (chat):** strict — top quality, under the cap, on a fast node.
+- **Background / council / sentinel:** generous — *any* yellow-and-above model that **runs** on an
+  idle edge qualifies; deliberately favor a **spread of families** for adversarial value.
+- Downstream subsystems query the map ("3 diverse council members that fit on idle edges," "what can
+  the macbook host for background reasoning") instead of consulting a hand-maintained list.
+
+This graded map — pool × node × per-dimension score × speed — is the thing the hand-tuned parent
+lacks. It's *learned*, and it self-updates whenever the fleet or the model lineup changes (the
+evergreen property): a new model is graded and placed the day it's installed, no human in the loop.
+
 ### Coherence is a post-qualification peer-review pass, not a qualification gate [next]
 
 Coherence is the one **judge-based** dimension — a panel of *other* models rates a candidate's answer
