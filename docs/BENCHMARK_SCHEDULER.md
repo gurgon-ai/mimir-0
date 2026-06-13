@@ -155,6 +155,22 @@ idle roles where it's the best choice — it just drops off the user-facing shor
 "never fail capability on speed" invariant (§1) is what makes this possible: capacity is preserved
 for every model, and the cap is a final, user-facing-only filter.
 
+### Coherence is a post-qualification peer-review pass, not a qualification gate [next]
+
+Coherence is the one **judge-based** dimension — a panel of *other* models rates a candidate's answer
+for faithfulness. Running it *inside* the qualification battery (as today) has a chicken-and-egg flaw:
+a trustworthy judge panel requires **qualified** models, but during qualification none exist yet, so
+the judges are "first-3-available" (weak ones included) → conservative, noisy, run-to-run-unstable
+scores that drag the ranking around for no signal. (Observed live: capable 24–27B models all landing
+~0.65 coherence — that's the panel, not the candidates.)
+
+The fix mirrors the parent's nightly **peer-review** phase: **defer coherence out of the deterministic
+qualification entirely.** The deterministic dimensions decide who qualifies; then a **post-
+qualification peer-review pass** runs coherence on the survivors only, judged by the **top qualified
+models** (a real trusted panel — never a model judging itself). Three wins: faster (survivors only),
+better-calibrated (qualified judges), and the qualification ranking stops carrying judge noise. This
+is capacity-bound, latency-irrelevant work — a natural fit for the finals or for idle/nightly time.
+
 ## 8. Failure modes (fail-loud)
 
 - **Node dies mid-battery** → the attempt raises → that (model, node) is marked tried and the model
