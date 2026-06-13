@@ -303,6 +303,61 @@ def fleet_model_pool(
     }
 
 
+def placement_matrix(
+    storage: StorageGateway, *, disabled: set[str] | None = None,
+    disabled_nodes: set[str] | None = None,
+) -> dict[str, Any]:
+    """The per-node worker roster — the DISPLAY side of the placement matrix the speed-test fills.
+
+    Grouped by node, every model installed on that node appears with **this node's** measured speed,
+    the (node-independent) capability scores, its per-role eligibility/bars, and two crowns: the
+    node's **champion** (best quality, this-node speed breaking ties — the most capable model you
+    can run here) and the **fastest** floor-clearing model on it. Unlike the results board (one row
+    per model, on its single capability-test node), a model appears on EVERY node it runs on — so a
+    strong multi-node worker like a mid-size model is finally visible as such (DESIGN §5/§5a).
+    """
+    disabled = disabled or set()
+    disabled_nodes = disabled_nodes or set()
+    by_node: dict[str, list[dict[str, Any]]] = {}
+    for e in list_catalogue(storage):
+        if "embed" in e.model.lower():
+            continue
+        slot: dict[str, Any] = {
+            "model": e.model, "family": e.family, "params_b": e.params_b,
+            "quality": e.quality, "talk": e.talk, "tools": e.tools, "code": e.code,
+            "discipline": e.discipline, "epistemics": e.epistemics, "reasoning": e.reasoning,
+            "coherence": e.coherence, "return_time": e.return_time,  # THIS node's per-turn latency
+            "enabled": e.model not in disabled,
+        }
+        eligible: list[str] = []
+        barred: dict[str, str] = {}
+        for role, (caps, _prefer) in ROLE_NEEDS.items():
+            reason = _bar_reason(slot, caps)
+            if reason is None:
+                eligible.append(role)
+            else:
+                barred[role] = reason
+        slot["eligible_roles"] = sorted(eligible)
+        slot["barred"] = barred
+        by_node.setdefault(e.node, []).append(slot)
+
+    for models in by_node.values():
+        # Best first: quality leads, this node's speed breaks ties (a faster model wins when equal).
+        models.sort(key=lambda m: (-(m["quality"] or -1.0),
+                                   m["return_time"] if m["return_time"] is not None else 1e9))
+        runnable = [m for m in models
+                    if (m["quality"] or 0.0) >= _CAPABILITY_FLOOR and m["return_time"] is not None]
+        if runnable:
+            runnable[0]["champion"] = True   # already sorted → best quality, speed tiebreak
+            min(runnable, key=lambda m: m["return_time"])["fastest"] = True
+
+    return {
+        "nodes": len([n for n in by_node if n not in disabled_nodes]),
+        "by_node": {n: ms for n, ms in by_node.items() if n not in disabled_nodes},
+        "disabled_nodes": sorted(disabled_nodes),
+    }
+
+
 def fleet_report(storage: StorageGateway) -> dict[str, Any]:
     """The catalogue as a per-node summary (the 'report' the operator sees)."""
     entries = list_catalogue(storage)

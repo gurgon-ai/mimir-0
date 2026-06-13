@@ -31,6 +31,7 @@ from .cognition.fleet import (
     FleetScanResult,
     fleet_model_pool,
     fleet_report,
+    placement_matrix,
     recommend_roles,
     resolve_auto_model,
     scan_fleet,
@@ -511,6 +512,14 @@ class Mimir:
     def fleet_report(self) -> dict[str, Any]:
         """The fleet catalogue as a per-node summary, with per-role recommendations."""
         return fleet_report(self._storage)
+
+    def placement_matrix(self) -> dict[str, Any]:
+        """The per-node worker roster: every model on every node it runs on, this-node speed, role
+        eligibility, and each node's champion/fastest. The display side of the speed-test matrix."""
+        return placement_matrix(
+            self._storage, disabled=disabled_models(self._storage),
+            disabled_nodes=disabled_nodes(self._storage),
+        )
 
     def fleet_recommendations(self) -> dict[str, Any]:
         """Best model per role from the benchmarked catalogue (recommend-only; DESIGN §4)."""
