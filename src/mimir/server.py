@@ -1336,6 +1336,10 @@ async function pollTournament() {
       const s = await api("GET", "/api/fleet/tournament/status");
       if (!s.active) break;
       renderTourney(s);
+      // Reflect the tournament's progress on the manual 1·2·3 buttons (it does scan→score→apply
+      // under the hood), so they're not stuck grey while the tournament runs.
+      btnState("fleetScanBtn", "done");   // the tournament scans the fleet first
+      btnState("fleetBenchBtn", s.phase === "running" ? "working" : "done");
       if (s.phase === "running") {
         const eta = (s.eta != null) ? ` · ~${fmtDuration(s.eta)} left` : "";
         const lbl = s.round_label || `Round ${s.round}`;
@@ -1370,6 +1374,7 @@ async function applyTourney() {
     const n = Object.keys(r.applied || {}).length;
     $("fleetMsg").textContent = n ? `Applied finals to ${n} role(s): ` + Object.entries(r.applied).map(([k, v]) => `${k}=${v}`).join(", ") : "Nothing to apply.";
     if (btn) btn.textContent = n ? "✅ Applied" : "Nothing to apply";
+    btnState("fleetApplyBtn", n ? "done" : "");   // light the manual "3 · Apply" too
     refreshState();
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; if (btn) { btn.disabled = false; btn.textContent = "✅ Apply finals to roles"; } }
 }
