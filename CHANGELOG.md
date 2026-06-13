@@ -55,13 +55,19 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
-- **The long-context probe now scales with the window you qualify at.** It used to plant the needle in
-  a fixed ~2k-token haystack — enough to clear Ollama's 2048 default but no real test of the window a
-  deployment actually runs. The haystack now **sizes to `benchmark_num_ctx`** (~60% of it), built from
-  a wide pool of invented, coherent, public-clean filler sentences (no gibberish — a model shouldn't
-  treat it specially — and nothing proprietary), with the needle in the **middle** (the "lost in the
-  middle" worst case). Set `benchmark_num_ctx` to your real deployment window (~10k–32k for a RAG-heavy
-  system) and qualification catches a model that's fine at 8k but loses the thread in a big context.
+- **The long-context probe now scales with the window you qualify at, and the default is the real
+  operational window.** It used to plant the needle in a fixed ~2k-token haystack — enough to clear
+  Ollama's 2048 default but no real test of the window a deployment actually runs. The haystack now
+  **sizes to `benchmark_num_ctx`** (~60% of it), built from a wide pool of invented, coherent,
+  public-clean filler sentences (no gibberish — a model shouldn't treat it specially — and nothing
+  proprietary), with the needle in the **middle** (the "lost in the middle" worst case). The default
+  `benchmark_num_ctx` is now **24576 (24k)** — qualify at the size you deploy at, because a different
+  window in production rebuilds the warm KV cache on the first real turn and makes the benchmark's
+  latencies lies. 24k is a proven window for a RAG + compression system: a fraction of models'
+  128k–256k theoretical max, which you neither need nor want (KV-cache cost + attention degradation).
+  Continuity comes from curated RAG memory and compression, not a giant raw window. Lower it only if
+  your edge nodes can't physically hold 24k — and then it's a *placement* fact (which node serves
+  which model at the window), not a capability cut.
 - **The final time trial — per-node placement matrix.** A new Fleet-tab action ("⏱ Speed-test
   remaining nodes") and `brain.complete_speed_matrix()` that, after qualification, speed-tests each
   **acceptable** model (quality ≥ a floor) on every enabled node it's *installed on but wasn't timed
