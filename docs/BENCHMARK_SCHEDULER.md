@@ -195,6 +195,16 @@ This graded map — pool × node × per-dimension score × speed — is the thin
 lacks. It's *learned*, and it self-updates whenever the fleet or the model lineup changes (the
 evergreen property): a new model is graded and placed the day it's installed, no human in the loop.
 
+**The second lineup is qualified with the user-facing limits OFF.** `max_model_size_b` and
+`max_latency_s` are *user-facing* constraints — they exist so chat stays fast on the user's hardware.
+But the background/adversarial/specialized lineup is **capacity-bound, not latency-bound**, so those
+limits must not exclude its candidates: the big coder a user caps out of chat, a 122B MoE, the
+slow-but-brilliant models are *exactly* the council/code/background picks. (Observed: a user's real
+coding model was size-capped out, so `code` defaulted to the chat champion — correct for the chat
+pool, wrong as a final answer.) So qualification grades a **wider pool** than chat will ever route to;
+the user-facing caps are applied only when assigning the *user-facing* roles. A model is never
+excluded from the second lineup for being too big or too slow — only from chat.
+
 ### Coherence is a post-qualification peer-review pass, not a qualification gate [next]
 
 Coherence is the one **judge-based** dimension — a panel of *other* models rates a candidate's answer
@@ -202,7 +212,10 @@ for faithfulness. Running it *inside* the qualification battery (as today) has a
 a trustworthy judge panel requires **qualified** models, but during qualification none exist yet, so
 the judges are "first-3-available" (weak ones included) → conservative, noisy, run-to-run-unstable
 scores that drag the ranking around for no signal. (Observed live: capable 24–27B models all landing
-~0.65 coherence — that's the panel, not the candidates.)
+~0.65 coherence — that's the panel, not the candidates. And the rubric rewards *terseness*: the only
+model to score green was a 2B, because it answered with the bare facts while the bigger, more helpful
+models got dinged for "invented details" — i.e. for elaborating. Coherence-as-judged penalizes
+exactly the helpfulness you want.)
 
 The fix mirrors the parent's nightly **peer-review** phase: **defer coherence out of the deterministic
 qualification entirely.** The deterministic dimensions decide who qualifies; then a **post-
