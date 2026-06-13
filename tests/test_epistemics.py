@@ -14,6 +14,7 @@ from mimir.cognition.epistemics import (
     _score_secret_word,
     _score_tier_deference,
     _score_uncertainty,
+    _score_vault_passphrase,
     evaluate_epistemics,
     flat_prompt,
     score_epistemic_competence,
@@ -73,6 +74,8 @@ def _structure_using_model(messages: list[Message]) -> str:
         return "Blue." if "stated_by_primary_user" in sys else "Red."
     if "secret" in q:  # grounding: the nonce is in both arms, so a reader answers it either way
         return "zephyr-quartz"
+    if "passphrase" in q:  # long-context needle: a reader of the long document finds it
+        return "quokka-lantern"
     return "I don't know." if "epistemic check" in sys.lower() else "Their spouse is Jane."
 
 
@@ -87,6 +90,8 @@ def _structure_blind_model(messages: list[Message]) -> str:
         return "Blue."
     if "secret" in q:
         return "zephyr-quartz"
+    if "passphrase" in q:
+        return "quokka-lantern"
     return "I don't know."
 
 
@@ -112,7 +117,7 @@ def test_chat_qualifier_scores_grounding_and_layered_deference() -> None:
     # nonce that lives only in context). A model that reads the context and honours tiers passes;
     # one that ignores both fails, so it can't qualify for the identity-bearing chat role.
     grounded = score_epistemic_competence(_structure_using_model, samples=1)
-    assert grounded == 1.0  # tier date + attribution + uncertainty + bird + secret all pass
+    assert grounded == 1.0  # date + attribution + uncertainty + bird + secret + needle all pass
 
     def context_blind(messages: list[Message]) -> str:
         q = messages[1]["content"].lower()
@@ -120,6 +125,23 @@ def test_chat_qualifier_scores_grounding_and_layered_deference() -> None:
             return "Red."  # ignores the high tier
         if "secret" in q:
             return "I have no secret word."  # ignores the context
+        if "passphrase" in q:
+            return "There is no passphrase in here."  # didn't read the long document
         return "Their spouse is Jane."  # confabulates instead of hedging
 
     assert score_epistemic_competence(context_blind, samples=1) == 0.0  # fails every probe
+
+
+def test_long_context_needle_is_long_and_findable() -> None:
+    # The haystack must be genuinely long (past Ollama's 2048-token default, ~4 chars/token → 8k+
+    # chars) with the needle planted in the middle and survivable through the real build_context.
+    from mimir.cognition.epistemics import GROUNDING_PROBES, _long_haystack
+
+    hay = _long_haystack("the vault passphrase is quokka-lantern")
+    assert "quokka-lantern" in hay
+    assert len(hay) > 8000  # > ~2048 tokens, so a default-context model truncates it away
+    assert _score_vault_passphrase("The passphrase is quokka-lantern.")
+    assert not _score_vault_passphrase("I couldn't find a passphrase.")
+    # The needle survives the real assembly pipeline (build_context didn't budget it out).
+    probe = next(p for p in GROUNDING_PROBES if p.name == "long_context")
+    assert "quokka-lantern" in structured_prompt(probe)

@@ -122,7 +122,7 @@ def test_recommendations_pick_per_role(brain: Mimir) -> None:
     _craft_scores(brain)
     recs = brain.fleet_recommendations()
     assert recs["bake"]["model"] == "mock-b"  # bake prefers quality → the high-quality model
-    assert recs["chat"] is not None  # chat is balanced; either could win, just must resolve
+    assert recs["chat"] is not None  # chat ranks on quality under the cap; must resolve to a model
     assert recs["bake"]["node"]  # the fastest node holding the model is named
 
 

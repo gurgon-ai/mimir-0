@@ -55,7 +55,7 @@ def scan_fleet(
     return FleetScanResult(nodes=nodes, models=len(entries))
 
 
-# Each role's required capability and whether it prefers speed, quality, or a balance.
+# Each role's required capability and whether it prefers speed or quality.
 # chat/bake/reasoning are the live roles; tools/code are forward-looking (DESIGN §9 extension
 # points) — recommended now so you know which model to use when you enable them.
 # chat and reasoning are identity-bearing — they speak AS the system and synthesize its self-model.
@@ -63,8 +63,12 @@ def scan_fleet(
 # exploit the tiered/provenance/gated context — DESIGN §3). A model that mimics the scaffolding OR
 # ignores evidence tiers can't clear the floor for these roles (§4). Each role lists every
 # capability it requires; a candidate must clear the floor on all of them.
+# The objective (every role): the best-scoring model FOR THIS SYSTEM that we're willing to wait for.
+# Latency is a hard cap (max_latency_s excludes too-slow models before scoring), NOT a penalty — so
+# WITHIN the cap, quality leads outright and speed only breaks ties. A dominant big model wins even
+# when a tiny one is faster; paying up to the cap is the whole point.
 ROLE_NEEDS: dict[str, tuple[tuple[str, ...], str]] = {
-    "chat": (("discipline", "epistemics", "reasoning"), "balanced"),
+    "chat": (("discipline", "epistemics", "reasoning"), "quality"),
     "bake": (("talk",), "quality"),
     "reasoning": (("discipline", "epistemics", "reasoning"), "quality"),
     "tools": (("tools",), "quality"),
@@ -125,16 +129,12 @@ def recommend_roles(
             continue
         if prefer == "fast":
             name, data = min(candidates, key=lambda c: c[1]["return_time"] or 1e9)
-        elif prefer == "quality":
+        else:  # "quality" — the objective: the best-scoring model we're willing to WAIT for. The
+            # latency cap already excluded anything too slow, so within it quality leads outright
+            # and return_time only breaks ties (a faster model wins when quality is equal). No
+            # soft speed penalty: under the cap, you've already decided the wait is worth it (§4).
             name, data = max(
                 candidates, key=lambda c: (c[1]["quality"], -(c[1]["return_time"] or 1e9))
-            )
-        else:  # balanced: quality is primary, slowness a secondary penalty. return_time is now real
-            # seconds per ~256-token turn (~1-15s), so the coefficient is small: a ~3s/turn edge is
-            # worth ~0.1 quality — enough to break ties and modest gaps without letting speed lead
-            # (the rule: speed can't be the only metric; quality leads). Tunable.
-            name, data = max(
-                candidates, key=lambda c: c[1]["quality"] - 0.03 * (c[1]["return_time"] or 0.0)
             )
         recommendations[role] = {
             "model": name,
