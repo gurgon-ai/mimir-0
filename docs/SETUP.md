@@ -258,7 +258,12 @@ benchmark_num_ctx = 8192       # context window for ALL benchmark calls. Ollama 
                                # 2048 unless told otherwise — too small for the layered epistemic
                                # prompts, which it would silently truncate (cutting off the high-tier
                                # fact and breaking the tier-deference test). Held consistent across
-                               # every model so qualification is fair; raise it to test longer context.
+                               # every model so qualification is fair. The long-context needle probe
+                               # SIZES ITS HAYSTACK to this value (~60%), so raising it doesn't just
+                               # permit longer context — it actively tests it. Set it to your real
+                               # deployment window (~10k–32k for a RAG-heavy system) and the benchmark
+                               # qualifies models at the window you'll actually run, catching ones
+                               # that are fine at 8k but get "lost in the middle" of a big context.
 ```
 
 On boot Mimir scans the subnet for `:11434`, inventories each node's models (family, weight,

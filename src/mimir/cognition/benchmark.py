@@ -439,7 +439,8 @@ def benchmark_model(
     # The expensive identity-qualification dimensions — only in the FULL benchmark (not at triage).
     # Epistemics: does the model exploit Mimir's tiered/provenance/gated context (DESIGN §3)? The
     # structured-arm competence (layered gauntlet + grounding + long-context) — the chat qualifier.
-    epistemics = score_epistemic_competence(chat_fn, samples=2) if framework else 0.0
+    epistemics = (score_epistemic_competence(chat_fn, samples=2, num_ctx=num_ctx)
+                  if framework else 0.0)
     coherence: float | None = None
     if framework and judge:
         try:

@@ -82,7 +82,10 @@ host = "http://localhost:11434"
 #                                   # 'high enough' + wins on latency beat a bigger, better one
 # max_latency_s = 0                 # per-turn latency target in seconds; 0 = off
 # benchmark_num_ctx = 8192          # context window for benchmark calls (Ollama defaults to a tiny
-#                                   # 2048 and would truncate the layered epistemic prompts)
+#                                   # 2048 and would truncate the layered epistemic prompts). The
+#                                   # long-context probe SCALES with this, so set it to your real
+#                                   # deployment window (~10k–32k for a RAG-heavy system) to actually
+#                                   # test the window you'll run at — not just clear the 2048 bar.
 
 # --- roles: one model per cognitive job. `model` is required; other keys are tuned params. ---
 
