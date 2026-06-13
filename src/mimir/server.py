@@ -924,6 +924,12 @@ _HTML = """<!doctype html>
     </div>
 
     <div class="tabpane hidden" id="tab-fleet">
+      <details class="hint" style="margin-bottom:10px; border:1px solid #333; border-radius:6px; padding:6px 10px;">
+        <summary style="cursor:pointer;">ℹ️ What these scores mean — <b>best for <em>this</em> system, not the world</b></summary>
+        <div style="margin-top:6px; line-height:1.5;">
+          Mimir ranks models by <b>operational fitness for its own roles on your hardware</b> — not “best model overall.” A winner is the best model <b>for the system as built</b>, under this test battery, on your fleet — never a universal benchmark. Any installed model can compete (model-agnostic). Speed is <b>per-node and shifts with load</b>, so routing re-selects live. Coherence is <b>experimental</b> (a peer-review annotation, not a gate). And a narrow win isn’t a landslide.
+        </div>
+      </details>
       <div class="row">
         <button id="fleetTourneyBtn" type="button" title="The recommended path. A staged knock-out: Round 0 qualifying (fast) → you pick survivors → Round 1 the full framework gauntlet → Round 2 finals. You choose who advances between rounds.">🏆 Run qualifying tournament</button>
       </div>
@@ -953,6 +959,12 @@ _HTML = """<!doctype html>
     </div>
 
     <div class="tabpane hidden" id="tab-models">
+      <details class="hint" style="margin-bottom:10px; border:1px solid #333; border-radius:6px; padding:6px 10px;">
+        <summary style="cursor:pointer;">ℹ️ What these scores mean — <b>best for <em>this</em> system, not the world</b></summary>
+        <div style="margin-top:6px; line-height:1.5;">
+          Mimir ranks models by <b>operational fitness for its own roles on your hardware</b> — not “best model overall.” A winner is the best model <b>for the system as built</b>, under this test battery, on your fleet — never a universal benchmark. Any installed model can compete (model-agnostic). Speed is <b>per-node and shifts with load</b>, so routing re-selects live. Coherence is <b>experimental</b> (a peer-review annotation, not a gate). And a narrow win isn’t a landslide.
+        </div>
+      </details>
       <div id="poolBackend" class="hint"></div>
       <div id="poolMsg" class="hint">Models Mimir can route to. A checked box keeps a model in the automatic pool; uncheck to exclude it. ✓ = passed the qualification gate.</div>
       <div id="poolList"></div>

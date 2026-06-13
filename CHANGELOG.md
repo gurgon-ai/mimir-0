@@ -55,6 +55,13 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **A "what these scores mean" banner above the leaderboard.** A one-line, expandable note at the top
+  of the Fleet and Models tabs: Mimir ranks models by *operational fitness for its own roles on your
+  hardware* — best for **this system as built**, under this battery, on your fleet — **not** "best
+  model overall." Collapsed by default (one line); expands to the full framing (model-agnostic; speed
+  is per-node and shifts with load so routing re-selects live; coherence is experimental; a narrow win
+  isn't a landslide). Defuses the "users overfit to the spectacle / read scores as universal truth"
+  risk without dulling the tournament. Zero-dep `<details>`/`<summary>`.
 - **The model pool explains its verdict — no silent role bars.** `recommend_roles` quietly dropped any
   model that missed a capability floor; you saw the winners but never *why* a model wasn't one. The
   pool now shows, per model, the roles it **qualifies for** (✓) alongside the ones it's **barred from**
