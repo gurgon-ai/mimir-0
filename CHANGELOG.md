@@ -7,6 +7,23 @@ Pre-1.0: the API and schema may change between releases.
 
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
+### Fixed (benchmark hangs)
+- **The latency cap didn't actually bound the benchmark — a 7s cap could still hang for minutes.**
+  Three compounding causes: (1) the pre-gate **warmup was untimed** (120s ceiling) *and* generated
+  freely, so a thinking model (e.g. qwen3) could reason for the full 120s during the load, before the
+  cap was ever checked; (2) the scoring **battery calls** ran on the pool's production 120s socket
+  timeout, which the cap never touched; (3) the pool **retried** that 120s timeout up to 3× on the
+  same slow node (~6 min on one model). Now: warmups load with a **single token** (`num_predict=1`)
+  so they can't reason; scoring calls carry a **tight per-call timeout** (~2× the latency budget,
+  45–90s) and run with **no pool retries**, so a slow/wedged model fails fast and the round continues
+  (it still fails *over* to another node that has the model — it just doesn't retry the slow one).
+  New plumbing: a reserved `__timeout_s__` param the Ollama provider honours per call, and a
+  `max_retries` override on the pool/gateway.
+- **A page refresh lost the whole tournament/benchmark view.** The resume logic only ran on the
+  Fleet-tab click, so a fresh load never reconnected — the run kept going server-side but the UI
+  forgot it. It now reattaches on page load (and tab-open), and shows a per-model elapsed timer so a
+  slow model reads as grinding, not hung.
+
 ### Added
 - **Per-node veto (schema v13).** Each discovered edge node can be toggled off in the Fleet tab —
   excluded from the pool's routing (with a fail-safe if *every* node is vetoed, so chat never

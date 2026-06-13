@@ -63,6 +63,30 @@ def test_failover_to_healthy_endpoint() -> None:
     assert pool.get_stats()["failovers"] >= 1
 
 
+def test_max_retries_override_disables_retry() -> None:
+    # Default: a transient failure is retried and succeeds.
+    a = FakeProvider("A", fail_times=1, transient=True)
+    assert ProviderPool([("A", a)], max_retries=2, sleep=_noop_sleep).chat(
+        "m", [], {}, priority=Priority.BACKGROUND) == "ok"
+    assert a.calls == 2
+
+    # Override to 0 (what the benchmark passes): one shot, no retry — the failure propagates so a
+    # slow/wedged model fails fast instead of being retried into a multi-minute stall.
+    b = FakeProvider("B", fail_times=1, transient=True)
+    pool = ProviderPool([("B", b)], max_retries=2, sleep=_noop_sleep)
+    with pytest.raises(ProviderError):
+        pool.chat("m", [], {}, priority=Priority.BACKGROUND, max_retries=0)
+    assert b.calls == 1
+
+
+def test_split_timeout_pulls_the_reserved_key() -> None:
+    from mimir.model.providers.ollama import _split_timeout
+    t, rest = _split_timeout({"num_ctx": 8192, "__timeout_s__": 30})
+    assert t == 30.0 and rest == {"num_ctx": 8192}  # the key is stripped from the Ollama options
+    t2, rest2 = _split_timeout({"num_ctx": 8192})
+    assert t2 is None and rest2 == {"num_ctx": 8192}  # absent → provider's own timeout
+
+
 def test_disabled_node_is_skipped_with_a_fail_safe() -> None:
     a = FakeProvider("A", reply="from-a")
     b = FakeProvider("B", reply="from-b")

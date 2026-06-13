@@ -368,14 +368,15 @@ class FleetBenchmarkResult:
 
 def benchmark_model(
     model: ModelGateway, model_name: str, *, judge: bool = True, num_ctx: int = 8192,
-    framework: bool = True,
+    framework: bool = True, call_timeout_s: float = 60.0,
 ) -> ModelBenchmark:
     """Run the battery against one model. ``judge=False`` skips the coherence pass.
 
     Every battery/epistemics/latency call routes through ``chat_fn``, which pins ``num_ctx`` so the
     layered epistemic prompts aren't truncated to Ollama's 2048 default (which would cut off the
-    high-tier fact and silently break the tier-deference test). One value, used for warmup too, so
-    the model loads once at that context and stays warm (DESIGN: num_ctx consistent across callers).
+    high-tier fact and silently break the tier-deference test), AND a tight ``call_timeout_s`` with
+    **no pool retries**, so a slow/wedged model fails fast (scoring 0 for that case) instead of
+    stalling the whole run on the production 120s ceiling × 3 retries.
 
     ``framework=False`` is the tournament's **triage** mode: it runs only the cheap capability
     dimensions (talk/tools/code/discipline/reasoning + latency) and SKIPS the expensive
@@ -385,12 +386,18 @@ def benchmark_model(
     a triage score is comparable only to other triage scores (not to a full score).
     """
     def chat_fn(messages: list[Message]) -> str:
-        return model.chat_with_model(model_name, messages, params={"num_ctx": num_ctx})
+        return model.chat_with_model(
+            model_name, messages,
+            params={"num_ctx": num_ctx, "__timeout_s__": call_timeout_s}, max_retries=0,
+        )
 
-    # Warm the model into VRAM before timing, so return_time reflects warm steady-state generation,
-    # not the one-time cold load (models get evicted between benchmarks). Untimed and tolerant.
+    # Warm the model into VRAM before timing. ONE token (max_tokens=1) so the load can't turn into a
+    # multi-minute reason-fest on a thinking model; no retries. The real scoring calls follow warm.
     try:
-        chat_fn([{"role": "user", "content": "ok"}])
+        model.chat_with_model(
+            model_name, [{"role": "user", "content": "ok"}],
+            params={"num_ctx": num_ctx, "max_tokens": 1}, max_retries=0,
+        )
     except Exception as exc:
         log.warning("benchmark: warmup call failed for %s: %s", model_name, exc)
 
@@ -466,7 +473,11 @@ def _measure_node_speed(
     opts = {"num_ctx": num_ctx}
     if warmup:
         try:
-            OllamaProvider(node, timeout=WARMUP_TIMEOUT_S).chat(model_name, _SPEED_PROMPT, opts)
+            # Load into VRAM with a SINGLE token, so a thinking model can't reason for minutes
+            # during the (untimed) warmup — the bug behind a 7s latency cap still hanging 120s+.
+            OllamaProvider(node, timeout=WARMUP_TIMEOUT_S).chat(
+                model_name, _SPEED_PROMPT, {**opts, "max_tokens": 1}
+            )
         except Exception:
             return round(WARMUP_TIMEOUT_S, 3)  # couldn't load in time → unusably slow → skip
     provider = OllamaProvider(node, timeout=timeout_s)
@@ -571,6 +582,10 @@ def benchmark_fleet(
 
     total = len(models)
     skip_budget = latency_budget_s if latency_budget_s > 0 else _DEFAULT_SKIP_S
+    # Per-call ceiling for the scoring battery (≠ the pre-gate probe): generous enough not to
+    # false-cut a thorough answer, tight enough that a wedged model fails in seconds, not the
+    # production 120s × 3 retries. Scales gently with the user's budget.
+    call_timeout = min(90.0, max(45.0, 2.0 * skip_budget))
     too_slow: set[str] = set()
     log.info("benchmark: starting — %d model(s) to score (judge=%s, skip > %.0fs)",
              total, judge, skip_budget)
@@ -602,7 +617,7 @@ def benchmark_fleet(
                 update_catalogue_speed(storage, probe_node, model_name, speed)
         try:
             bench = benchmark_model(model, model_name, judge=judges_ok, num_ctx=num_ctx,
-                                    framework=framework)
+                                    framework=framework, call_timeout_s=call_timeout)
         except Exception as exc:
             log.warning("benchmark: [%d/%d] %s FAILED: %s", i, total, model_name, exc)
             continue
