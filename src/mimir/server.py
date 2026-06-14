@@ -154,6 +154,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._identity_payload())
             elif route == "/api/onboarding":
                 self._send_json(self._onboarding_payload())
+            elif route == "/api/history":
+                self._send_json(self._history(params))
             elif route == "/api/mind":
                 self._send_json(self._mind())
             elif route == "/api/memories":
@@ -284,6 +286,14 @@ class _Handler(BaseHTTPRequestHandler):
         with self.server.brain_lock:
             self.server.brain.establish_identity({str(k): str(v) for k, v in answers.items()})
             return self._identity_payload()
+
+    def _history(self, params: dict[str, list[str]]) -> dict[str, Any]:
+        """The durable conversation log, for restoring the chat on page load."""
+        try:
+            limit = max(1, min(200, int((params.get("limit") or ["50"])[0])))
+        except ValueError:
+            limit = 50
+        return {"turns": self.server.brain.history(user="operator", limit=limit)}
 
     def _onboarding_payload(self) -> dict[str, Any]:
         """The seeding interview: every question + current answer, and what's still pending."""
@@ -2078,7 +2088,17 @@ async function onboardingNudge() {
   } catch (_) {}
 }
 
-refreshState(); loadIdentity(); resumeFleetWork(); onboardingNudge();
+// Restore the durable conversation on load (a refresh/restart no longer loses the chat), then nudge.
+async function restoreHistory() {
+  try {
+    const data = await api("GET", "/api/history?limit=50");
+    (data.turns || []).forEach(t => { addMsg("you", t.user_text); addMsg("mimir", t.reply); });
+    return (data.turns || []).length;
+  } catch (_) { return 0; }
+}
+
+refreshState(); loadIdentity(); resumeFleetWork();
+restoreHistory().then(n => { if (!n) onboardingNudge(); });
 </script>
 </body>
 </html>

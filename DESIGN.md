@@ -126,6 +126,13 @@ haven't been around in 14h (typically every ~6h)" or "the longest gap I've recor
 over the log (median/p90/longest gap), zero model cost, and silent within normal rhythm — awareness,
 not nagging. The same generic baseline machinery extends to entity/topic staleness later.
 
+**Session history + restore.** A durable conversation log (the `conversation` table — one row per
+exchange, pruned to a rolling window) is the lasting full turn history, distinct from the capped
+EXCHANGE recency buffer (which working-memory compression clears). It restores the chat on UI load,
+survives a process restart, and is **replayed to the model as real `user`/`assistant` messages** so a
+turn has genuine continuity rather than summary-only context — the root fix for a model treating each
+turn as a fresh start. A single-stream approximation of the home AI's session system.
+
 **Temporal narratives** (`cognition/narratives.py`) give it a sense of *what happened* over time: a
 hierarchical journal — **daily → weekly → monthly**, each tier compressed from the one below and
 **lossy by design** (details fade, patterns persist, like human memory). Generated off the hot path in

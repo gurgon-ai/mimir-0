@@ -382,3 +382,12 @@ def test_fleet_and_models_tabs_are_merged(base_url: str) -> None:
     assert status == 200
     assert 'id="roleAssign"' in html          # role assignment lives in the merged Fleet tab
     assert 'data-tab="models"' not in html     # the separate Models tab is gone
+
+
+def test_history_endpoint_and_restore(base_url: str) -> None:
+    _json("POST", base_url + "/api/turn", {"text": "hello there", "user": "operator"})
+    status, data = _json("GET", base_url + "/api/history")
+    assert status == 200
+    assert any("hello there" in t["user_text"] for t in data["turns"])
+    _, html = _get_html(base_url + "/")
+    assert "restoreHistory" in html  # the UI repopulates the chat from the log on load

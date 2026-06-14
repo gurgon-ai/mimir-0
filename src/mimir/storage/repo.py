@@ -190,6 +190,52 @@ def prune_narratives(gateway: StorageGateway, scope: str, keep: int) -> None:
     gateway.submit(_write)
 
 
+def record_conversation_turn(
+    gateway: StorageGateway, *, user: str | None, user_text: str, reply: str,
+    keep: int = 500, created_at: float | None = None,
+) -> None:
+    """Append one exchange to the durable conversation log, pruning to the most recent ``keep``.
+
+    This is the lasting turn history (for UI restore + model continuity), distinct from the capped
+    EXCHANGE recency buffer that working-memory compression clears."""
+    ts = time.time() if created_at is None else created_at
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "INSERT INTO conversation (user, user_text, reply, created_at) VALUES (?, ?, ?, ?)",
+            (user, user_text, reply, ts),
+        )
+        conn.execute(
+            "DELETE FROM conversation WHERE id NOT IN "
+            "(SELECT id FROM conversation ORDER BY id DESC LIMIT ?)",
+            (keep,),
+        )
+
+    gateway.submit(_write)
+
+
+def recent_conversation(
+    gateway: StorageGateway, *, user: str | None = None, limit: int = 20
+) -> list[dict[str, Any]]:
+    """The most recent exchanges, oldest→newest (for restore + replaying to the model). With a
+    ``user``, includes user-agnostic rows too (matching the store's user scoping)."""
+    def _read(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+        if user is None:
+            rows = conn.execute(
+                "SELECT user_text, reply, created_at FROM conversation ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT user_text, reply, created_at FROM conversation "
+                "WHERE user = ? OR user IS NULL ORDER BY id DESC LIMIT ?",
+                (user, limit),
+            ).fetchall()
+        return [{"user_text": r[0], "reply": r[1], "created_at": r[2]} for r in reversed(rows)]
+
+    return gateway.read(_read)
+
+
 def interaction_history(
     gateway: StorageGateway, *, user: str | None = None, since_ts: float = 0.0
 ) -> list[float]:

@@ -83,6 +83,16 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **Session history + restore.** A durable conversation log (schema v16 `conversation`, one row per
+  exchange, pruned to a rolling window) — the lasting full turn history, distinct from the capped
+  EXCHANGE recency buffer (cleared on compression) and `interactions` (timestamps only). It does
+  three things: (1) the web UI **restores the conversation on load** (`GET /api/history` →
+  `restoreHistory()`), so a refresh/restart no longer wipes the chat; (2) recent turns are **replayed
+  to the model as real `user`/`assistant` messages** (`_history_messages`), giving genuine continuity
+  instead of summary-only context — the root-cause fix for the "fresh start" greeting and a coherence
+  win on small models; (3) it survives a process restart (a new `Mimir` on the same DB has the
+  history). `Mimir.history()`, `repo.{record_conversation_turn,recent_conversation}`. A reasonable,
+  single-stream approximation of the home AI's session system.
 - **The burst worker — post-response cognition as a scheduled idle-window pool (brain slice 3;
   DESIGN §5a).** `cognition/burst.py` is the generic scheduler extracted from the home AI, stripped to
   a universal skeleton: **pent-up-demand priority** (`effective = base − starved_s × rate`, so starved
