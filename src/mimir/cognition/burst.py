@@ -249,8 +249,9 @@ class BurstWorker:
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop.clear()
-        self._thread = threading.Thread(target=self._loop, name="mimir-burst", daemon=True)
-        self._thread.start()
+        thread = threading.Thread(target=self._loop, name="mimir-burst", daemon=True)
+        thread.start()
+        self._thread = thread  # publish only once started — stop() never joins an unstarted thread
 
     def _loop(self) -> None:
         while not self._stop.is_set():

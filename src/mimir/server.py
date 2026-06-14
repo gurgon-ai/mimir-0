@@ -1814,17 +1814,31 @@ $("fleetApplyBtn").addEventListener("click", async () => {
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; btnState("fleetApplyBtn", "failed"); }
 });
 
+function ipTag(node) {
+  // The node's last IP octet, e.g. "IP.189" — enough to tell edge boxes apart at a glance.
+  if (!node) return "";
+  const host = node.replace(/^https?:\\/\\//, "").replace(/:\\d+$/, "");
+  if (host === "127.0.0.1" || host === "localhost") return "local";
+  const parts = host.split("."); return "IP." + parts[parts.length - 1];
+}
+
 function renderRoleAssign(data) {
-  // Per-role model picker: a dropdown per role, "auto" plus every known model. Choosing a concrete
-  // model pins the role (POST /api/fleet/role); "auto" is shown but selecting it is a no-op here
-  // (auto resolution happens server-side from the qualified pool).
+  // Per-role model picker: a dropdown per role, "auto" plus every known model. Each option shows the
+  // node it runs fastest on (last IP octet) and its last measured time, so the choice is informed.
+  // Choosing a concrete model pins the role (POST /api/fleet/role).
   const wrap = $("roleAssign"); if (!wrap) return;
   wrap.innerHTML = "";
   const active = data.active_roles || {};
   const autoRoles = new Set(data.auto_roles || []);
-  const options = new Set(data.available || []);
-  (data.models || []).forEach(m => options.add(m.model));
-  Object.keys(active).forEach(r => { if (active[r]) options.add(active[r]); });
+  const meta = {};  // model → {node, t} from the benchmarked pool
+  (data.models || []).forEach(m => { meta[m.model] = { node: m.node, t: m.return_time }; });
+  const names = new Set([...(data.available || []), ...Object.keys(meta)]);
+  Object.values(active).forEach(v => { if (v && v !== "auto") names.add(v); });
+  const label = (m) => {
+    const info = meta[m]; if (!info) return m;
+    const ip = ipTag(info.node); const t = (info.t != null) ? ` · ${info.t}s` : "";
+    return `${m}${ip ? ` · ${ip}` : ""}${t}`;
+  };
   const roles = Object.keys(active);
   if (!roles.length) { wrap.innerHTML = '<div class="hint">No roles configured.</div>'; return; }
   roles.sort().forEach(role => {
@@ -1836,10 +1850,11 @@ function renderRoleAssign(data) {
     lab.textContent = role;
     const sel = document.createElement("select");
     const autoOpt = document.createElement("option");
-    autoOpt.value = "auto"; autoOpt.textContent = isAuto ? `auto → ${current}` : "auto (pick best)";
+    autoOpt.value = "auto";
+    autoOpt.textContent = isAuto ? `auto → ${label(current)}` : "auto (pick best)";
     sel.appendChild(autoOpt);
-    [...options].sort().forEach(m => {
-      const o = document.createElement("option"); o.value = m; o.textContent = m;
+    [...names].sort().forEach(m => {
+      const o = document.createElement("option"); o.value = m; o.textContent = label(m);
       if (!isAuto && m === current) o.selected = true;
       sel.appendChild(o);
     });

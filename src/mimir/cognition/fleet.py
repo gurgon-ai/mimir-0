@@ -324,6 +324,7 @@ def fleet_model_pool(
                 "epistemics": e.epistemics,
                 "reasoning": e.reasoning,
                 "return_time": e.return_time,
+                "node": e.node,  # the node giving the best (lowest) return_time — for the picker
                 "approved": is_approved(e.family),
                 "benchmarked": e.quality is not None,
                 "nodes": [],
@@ -333,6 +334,7 @@ def fleet_model_pool(
             slot["return_time"] is None or e.return_time < slot["return_time"]
         ):
             slot["return_time"] = e.return_time
+            slot["node"] = e.node
 
     models: list[dict[str, Any]] = []
     for model, slot in rows.items():
