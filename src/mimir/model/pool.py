@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from typing import TypeVar
 
 from ..errors import ProviderError
+from .latency import LatencyStat, normalize_latency
 from .priority import Priority
 from .provider import Message, ModelInfo, Provider
 
@@ -69,6 +70,7 @@ class _Endpoint:
     models: set[str] = field(default_factory=set)  # known inventory (empty = unknown, route freely)
     reachable: bool = True  # active-health signal (set by refresh)
     inflight: int = 0  # current in-flight calls, for least-loaded selection
+    latency: dict[str, LatencyStat] = field(default_factory=dict)  # live s/turn per model here
 
 
 class ProviderPool:
@@ -83,6 +85,8 @@ class ProviderPool:
         sat_window_s: float = 30.0,
         sat_threshold: int = 5,
         sat_cooldown_s: float = 30.0,
+        latency_alpha: float = 0.3,
+        default_latency_s: float = 5.0,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -94,6 +98,11 @@ class ProviderPool:
         self._sat_window_s = sat_window_s
         self._sat_threshold = sat_threshold
         self._sat_cooldown_s = sat_cooldown_s
+        # Speed-aware routing: weight on the newest sample in the per-(node, model) EWMA, and the
+        # assumed cost of a node we haven't measured yet (so an unknown node is still tried — and so
+        # sampled — rather than starved or blindly trusted). See model/latency.py.
+        self._latency_alpha = latency_alpha
+        self._default_latency_s = default_latency_s
         self._clock = clock
         self._sleep = sleep
         self._lock = threading.Lock()
@@ -141,6 +150,7 @@ class ProviderPool:
         last_exc: ProviderError | None = None
         for index, (endpoint, _clamp) in enumerate(candidates):
             gen = _provider_stream(endpoint.provider, model, messages, params)
+            started = self._clock()
             try:
                 first = next(gen)
             except StopIteration:
@@ -162,8 +172,14 @@ class ProviderPool:
             self._record_success(endpoint)
             with self._lock:
                 self._stats["ok"] += 1
+            chunks = [first]
             yield first
-            yield from gen  # remaining tokens; a mid-stream error propagates as-is
+            for token in gen:  # remaining tokens; a mid-stream error propagates as-is
+                chunks.append(token)
+                yield token
+            # Passive measurement of the streamed turn (wall-clock of the full generation; the
+            # consumer drains it promptly on the hot path). Same per-token normalization as chat.
+            self._observe_latency(endpoint, model, self._clock() - started, "".join(chunks))
             return
 
         with self._lock:
@@ -198,6 +214,20 @@ class ProviderPool:
         with self._lock:
             self._disabled = set(names)
 
+    def known_models(self) -> set[str]:
+        """Models the *cached* inventory says are installed on a reachable node (no network call).
+
+        Refreshed by the prober's ``refresh``. Used to prune a role's fallback chain to models that
+        can actually run right now — cheaply, on every turn — unlike ``available_models`` which
+        lists live. Empty until the first inventory lands (caller should then not prune).
+        """
+        with self._lock:
+            out: set[str] = set()
+            for e in self._endpoints:
+                if e.reachable:
+                    out |= e.models
+            return out
+
     def get_stats(self) -> dict[str, object]:
         with self._lock:
             now = self._clock()
@@ -209,6 +239,16 @@ class ProviderPool:
                     e.name: round(e.saturated_until - now, 1)
                     for e in self._endpoints
                     if e.saturated_until > now
+                },
+                # Live speed: each node's fastest currently-known model (s/turn) — the routing
+                # signal, surfaced for the UI/placement view. None-valued stats are omitted.
+                "latency": {
+                    e.name: min(
+                        (s.value for s in e.latency.values() if s.value is not None),
+                        default=None,
+                    )
+                    for e in self._endpoints
+                    if any(s.value is not None for s in e.latency.values())
                 },
             }
 
@@ -294,7 +334,7 @@ class ProviderPool:
             with self._lock:
                 endpoint.inflight += 1
             try:
-                result = self._attempt(endpoint, fn, attempt_retries)
+                result, elapsed = self._attempt(endpoint, fn, attempt_retries)
             except ProviderError as exc:
                 self._record_failure(endpoint)
                 last_exc = exc
@@ -302,6 +342,10 @@ class ProviderPool:
                     raise  # permanent failure — failover won't help
                 continue  # transient — try the next endpoint
             else:
+                # Passive measurement (DESIGN §5): learn this node's speed from the real call we
+                # just made — no synthetic probe. Only chat (str) output is token-normalizable.
+                if kind == "chat" and model is not None and isinstance(result, str):
+                    self._observe_latency(endpoint, model, elapsed, result)
                 self._record_success(endpoint)
                 with self._lock:
                     self._stats["ok"] += 1
@@ -317,11 +361,19 @@ class ProviderPool:
             transient=True,
         ) from last_exc
 
-    def _attempt(self, endpoint: _Endpoint, fn: Callable[[Provider], R], max_retries: int) -> R:
-        """One endpoint, with retry/backoff on transient failures."""
+    def _attempt(
+        self, endpoint: _Endpoint, fn: Callable[[Provider], R], max_retries: int
+    ) -> tuple[R, float]:
+        """One endpoint, with retry/backoff on transient failures.
+
+        Returns ``(result, elapsed_s)`` where ``elapsed_s`` times only the *successful* provider
+        call — backoff sleeps and failed attempts are excluded, so the latency sample reflects the
+        node's real throughput, not how flaky it was getting there.
+        """
         for attempt in range(max_retries + 1):
+            started = self._clock()
             try:
-                return fn(endpoint.provider)
+                result = fn(endpoint.provider)
             except ProviderError as exc:
                 if exc.transient and attempt < max_retries:
                     wait = self._backoff_base_s * (2**attempt)  # 1s, 2s, 4s, ...
@@ -342,6 +394,8 @@ class ProviderPool:
                 raise ProviderError(
                     f"{endpoint.name}: {type(exc).__name__}: {exc}"
                 ) from exc
+            else:
+                return result, self._clock() - started
         raise ProviderError(f"{endpoint.name}: retry loop exhausted")  # defensive; unreachable
 
     # -- admission / health -----------------------------------------------------------
@@ -371,11 +425,16 @@ class ProviderPool:
                     havers = [e for e in eps if not e.models or model in e.models]
                     if havers:  # else: nobody known to have it → keep all (optimistic)
                         eps = havers
+            # Within a tier, order by EXPECTED WAIT — measured latency × current load — so a call
+            # routes to the node that will answer it soonest (DESIGN §5). With no latency known yet
+            # (all at the default seed) this reduces to least-loaded-first, the prior behaviour.
             healthy = sorted(
-                (e for e in eps if e.saturated_until <= now), key=lambda e: e.inflight
+                (e for e in eps if e.saturated_until <= now),
+                key=lambda e: self._expected_wait(e, model),
             )
             saturated = sorted(
-                (e for e in eps if e.saturated_until > now), key=lambda e: e.inflight
+                (e for e in eps if e.saturated_until > now),
+                key=lambda e: self._expected_wait(e, model),
             )
 
         if priority == Priority.CHAT_CRITICAL:
@@ -407,3 +466,83 @@ class ProviderPool:
         with self._lock:
             endpoint.failures.clear()
             endpoint.saturated_until = 0.0
+
+    # -- live latency (speed-aware routing, DESIGN §5) --------------------------------
+
+    def _expected_wait(self, endpoint: _Endpoint, model: str | None) -> float:
+        """This node's estimated seconds-to-answer for ``model`` right now: measured (or seeded, or
+        default) per-turn latency scaled by current load. Caller holds ``self._lock``."""
+        base = self._default_latency_s
+        if model is not None:
+            stat = endpoint.latency.get(model)
+            if stat is not None and stat.value is not None:
+                base = stat.value
+        return base * (endpoint.inflight + 1)
+
+    def _observe_latency(
+        self, endpoint: _Endpoint, model: str, elapsed_s: float, output: str
+    ) -> None:
+        """Fold a real (or probe) generation's wall-time into this node's per-model estimate."""
+        sample = normalize_latency(elapsed_s, output)
+        with self._lock:
+            endpoint.latency.setdefault(model, LatencyStat()).observe(
+                sample, alpha=self._latency_alpha, now=self._clock()
+            )
+
+    def seed_latency(self, seeds: dict[tuple[str, str], float]) -> None:
+        """Prime per-``(node, model)`` estimates from the catalogue's ``return_time`` snapshot so
+        routing starts informed, not cold (DESIGN §5). A seed only applies while no real sample has
+        landed for that pair — lived experience always wins over the frozen benchmark."""
+        with self._lock:
+            by_name = {e.name: e for e in self._endpoints}
+            for (node, model), value in seeds.items():
+                ep = by_name.get(node)
+                if ep is not None and value is not None:
+                    ep.latency.setdefault(model, LatencyStat()).seed(value)
+
+    def latency_snapshot(self) -> dict[tuple[str, str], dict[str, object]]:
+        """Live per-``(node, model)`` latency — for introspection and write-back to the placement
+        matrix: ``return_time`` (s/turn), ``samples`` (real obs), ``age_s`` (since last)."""
+        now = self._clock()
+        with self._lock:
+            return {
+                (e.name, model): {
+                    "return_time": stat.value,
+                    "samples": stat.samples,
+                    "age_s": round(now - stat.last_ts, 1) if stat.last_ts else None,
+                }
+                for e in self._endpoints
+                for model, stat in e.latency.items()
+                if stat.value is not None
+            }
+
+    def idle_nodes(self) -> list[str]:
+        """Reachable, non-vetoed endpoints with nothing in flight — safe targets for the rare idle
+        latency heartbeat (probing a busy node would both add load and skew its measurement)."""
+        with self._lock:
+            return [
+                e.name for e in self._endpoints
+                if e.reachable and e.inflight == 0 and e.name not in self._disabled
+            ]
+
+    def probe_latency(
+        self, node: str, model: str, messages: list[Message], params: dict[str, object]
+    ) -> float | None:
+        """Send ONE probe generation to a specific ``node``+``model`` and record its latency — the
+        idle heartbeat (DESIGN §5; kept rare — real traffic is the primary signal). Returns the
+        normalized s/turn, or ``None`` if the node is gone/busy/errored (a probe must never raise
+        into the caller, and a failed probe is not recorded as fast)."""
+        with self._lock:
+            ep = next((e for e in self._endpoints if e.name == node), None)
+            skip = ep is None or not ep.reachable or ep.inflight > 0 or node in self._disabled
+        if ep is None or skip:
+            return None
+        started = self._clock()
+        try:
+            out = ep.provider.chat(model, messages, params)
+        except Exception as exc:  # a probe failure must never propagate; just leave the estimate be
+            log.warning("model: idle latency probe failed on %s/%s: %s", node, model, exc)
+            return None
+        elapsed = self._clock() - started
+        self._observe_latency(ep, model, elapsed, out)
+        return normalize_latency(elapsed, out)

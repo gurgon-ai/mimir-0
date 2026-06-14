@@ -243,7 +243,14 @@ model.
 lan_backend = true             # scan the LAN for Ollama nodes (localhost is ALWAYS included)
 # subnet = "192.168.1.0/24"    # omit to auto-detect your local /24
 # nodes = ["192.168.1.50:11434"]  # optional explicit nodes (always included)
-refresh_interval_s = 60        # active health/inventory refresh
+refresh_interval_s = 60        # active health/inventory refresh (reachable? which models?)
+idle_probe_interval_s = 1800   # LIVE SPEED: node latency is learned passively from real calls (no
+                               # wasted synthetic calls); this rare idle heartbeat (default 30 min,
+                               # 0 = off) only tops up nodes that have gone quiet so their speed
+                               # estimate doesn't go stale. Routing sends each call to the healthiest,
+                               # fastest node (expected wait = latency × load), and writes live speed
+                               # back to the placement matrix.
+latency_alpha = 0.3            # EWMA weight on the newest latency sample (higher tracks load faster)
 max_model_size_b = 30          # only YOU know your hardware: benchmark/route models up to this many
                                # billion params (raise on a big GPU, lower on a Pi). Bigger = skipped.
 min_model_size_b = 0           # ...and a FLOOR; 0 = off. On capable hardware, stops a tiny model

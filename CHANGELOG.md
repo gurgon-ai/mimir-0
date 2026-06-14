@@ -65,6 +65,36 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **Speed- and health-aware routing — live node latency, learned from real traffic.** The provider
+  pool now routes a call to the node with the lowest **expected wait** (`latency × current load`),
+  not just the least-loaded one. Node speed is measured **passively on every real call** (no wasted
+  synthetic calls) and folded into a per-`(node, model)` EWMA in the benchmark's own
+  "seconds-per-~256-token-turn" unit; a rare **idle heartbeat** (`[backend] idle_probe_interval_s`,
+  default 30 min, decoupled from the faster health refresh) tops up nodes that have gone quiet.
+  Estimates **seed** from the catalogue's qualification `return_time` (routing is informed from turn
+  one) and are **written back** so the placement matrix/leaderboard show live, current speed. A failed
+  probe is recorded as *unmeasured*, never as fast. New: `model/latency.py` (the pure EWMA +
+  verbosity-independent normalizer, shared with the benchmark), `ProviderPool.{seed_latency,
+  latency_snapshot,idle_nodes,probe_latency,known_models}`, `Mimir.node_health()`, and
+  `[backend] latency_alpha`.
+- **Ranked fallback per role — a heterogeneous fleet still serves every role.** A role now resolves to
+  an **ordered chain of acceptable models** (its qualified ranking, best first), not a single model.
+  The gateway walks the chain: each model routes to its fastest healthy node; if every node for a
+  model is down, routing falls to the next acceptable model — so a fleet where node A has only Gemma
+  and node B only Qwen still serves `chat` (Gemma@A → Qwen@B). The chain is pruned to currently
+  reachable models, and a **pinned** model is never substituted. `ModelGateway.set_role_fallbacks` /
+  `fallbacks_view`; the brain derives each chain from `roster_for` on every (re)resolve.
+- **The bridge into the brain harness — `background`/`council` roles + a roster query.** The second
+  lineup is now first-class in the role gate: `background` (off-the-record reasoning) and `council`
+  (adversarial pool) are wired into `ROLE_NEEDS` as **loose** roles — a reasoning-competence floor
+  only, deliberately **not** discipline/epistemics-gated, so the big/undisciplined models the voice
+  can't use are available to cognition that never speaks *as* the assistant. The harness staffs itself
+  by **querying the roster** instead of a human reading a view: `Mimir.roster_for(role, n)` ("give me
+  N models for role R"), plus `background_model()` and `council_members(n)`, all honouring the same
+  model/node vetoes as every other pick. `council` routes to the diversity picker (families before
+  depth); single-best roles return the top-N. The single-best path (`recommend_roles`) and the pooled
+  path now share **one** ranking over **one** gate (`_bar_reason`), so the seated roster can never
+  disagree with the eligibility the leaderboard renders (DESIGN §5a, §10).
 - **The council-pool grading pass — qualify the big models caps-off.** The second lineup's selection
   is caps-off, but the big models (≥ the chat size cap — the 30–36B coders, the 122B MoE) were never
   *graded*: the benchmark's size cap skipped them, so they never entered the catalogue with scores and
