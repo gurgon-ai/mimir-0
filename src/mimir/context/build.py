@@ -25,7 +25,7 @@ from typing import Any
 
 from ..cognition.temporal import relative_age
 from ..embed.base import EmbeddingMode
-from ..prompts import RECALL_CLOSE, RECALL_OPEN, uncertainty_flag
+from ..prompts import CONVERSATION_STYLE, RECALL_CLOSE, RECALL_OPEN, uncertainty_flag
 from ..retrieval.hybrid import ScoredMemory
 from ..storage.models import Memory
 from .sections import Section, SectionTier, estimate_tokens, is_question
@@ -197,6 +197,18 @@ def build_context(
     )
     sections.append(identity_section)
 
+    # 2-bis. Conversational style — always-on, framework-level (whatever the identity says): the
+    #        blunt "don't greet every turn" rule, since each turn is sent without prior chat msgs.
+    style_section = Section(
+        name="style",
+        title="How to converse:",
+        body=CONVERSATION_STYLE,
+        tier=SectionTier.HIGH,
+        requested_tokens=estimate_tokens(CONVERSATION_STYLE),
+        admitted_tokens=estimate_tokens(CONVERSATION_STYLE),
+    )
+    sections.append(style_section)
+
     # 2a. Temporal grounding — the clock/calendar line, always-on, so the model can reason about
     #     recency and dates instead of guessing (DESIGN §3e). Small, high-tier, never truncated.
     time_section: Section | None = None
@@ -213,6 +225,7 @@ def build_context(
 
     # Reserve budget for the always-present pieces, then give the rest to knowledge.
     self_model_tokens = self_model_section.admitted_tokens if self_model_section else 0
+    style_tokens = style_section.admitted_tokens
     time_tokens = time_section.admitted_tokens if time_section else 0
     graph_body = "\n".join(f"- {f}" for f in (graph_facts or []))
     graph_tokens = estimate_tokens(graph_body) + 8 if graph_facts else 0
@@ -231,6 +244,7 @@ def build_context(
         budget_tokens
         - self_model_tokens
         - identity_section.admitted_tokens
+        - style_tokens
         - time_tokens
         - graph_tokens
         - procedures_tokens

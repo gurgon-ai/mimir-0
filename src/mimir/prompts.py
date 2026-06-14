@@ -86,6 +86,15 @@ SELF_MODEL_SYSTEM = (
     "the notes only."
 )
 
+# --- always-on conversational style (framework-level, regardless of identity) ------------
+# Each turn is sent as [system, user] with no prior assistant messages, so a model tends to read it
+# as a fresh start and greet every time. This blunt note (always injected) stops that.
+CONVERSATION_STYLE = (
+    "This is one continuous, ongoing conversation — not a new chat each turn. Do NOT greet the "
+    "user or say their name at the start of a reply (no \"Hi\", \"Hello\", \"Greetings\", etc.) "
+    "unless they just greeted you. Skip the preamble and answer directly."
+)
+
 # --- temporal narratives (hierarchical, lossy-by-design; DESIGN §3a/§3e) -----------------
 # Daily → weekly → monthly. The compression is lossy on purpose: details fade, patterns persist —
 # like human memory. All generic (the conversation + what was learned), no domain sources.
