@@ -157,6 +157,7 @@ def build_context(
     time_context: str | None = None,
     temporal_awareness: str | None = None,
     recent_history: str | None = None,
+    background_notes: str | None = None,
     now_ts: float | None = None,
     extra_sections: list[Section] | None = None,
 ) -> ContextBundle:
@@ -220,6 +221,7 @@ def build_context(
     working_memory_tokens = estimate_tokens(working_memory) + 8 if working_memory else 0
     awareness_tokens = estimate_tokens(temporal_awareness) + 8 if temporal_awareness else 0
     history_tokens = estimate_tokens(recent_history) + 8 if recent_history else 0
+    notes_tokens = estimate_tokens(background_notes) + 8 if background_notes else 0
     sentinel_tokens = (
         estimate_tokens(sentinel_note.text) + 8 if sentinel_note is not None else 0
     )
@@ -235,6 +237,7 @@ def build_context(
         - working_memory_tokens
         - awareness_tokens
         - history_tokens
+        - notes_tokens
         - sentinel_tokens
         - extra_reserved
         - _UNCERTAINTY_RESERVE,
@@ -311,6 +314,20 @@ def build_context(
                 tier=SectionTier.MEDIUM,
                 requested_tokens=estimate_tokens(working_memory),
                 admitted_tokens=estimate_tokens(working_memory),
+            )
+        )
+
+    # 4a. Background notes — what the burst worker surfaced from its own follow-up thinking since
+    #     the last turn (DESIGN §5a). Off-path work re-entering the conversation; medium tier.
+    if background_notes:
+        sections.append(
+            Section(
+                name="background_notes",
+                title="From your own follow-up thinking since we last spoke:",
+                body=background_notes,
+                tier=SectionTier.MEDIUM,
+                requested_tokens=estimate_tokens(background_notes),
+                admitted_tokens=estimate_tokens(background_notes),
             )
         )
 

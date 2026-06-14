@@ -5,11 +5,12 @@ This is where the spine is wired into the §6 loop:
     turn(text, user)
       → embed the query → recall via the storage gateway → build_context() (assemble)
       → model (chat) → reply
-      → record access · bake new facts (storage gateway) · fire the sentinel (async)
+      → record access · bake new facts (storage gateway) · signal the burst worker (async)
 
-Everything routes through the two gateways. The sentinel runs off the hot path and its failure
-cannot break the loop. The next turn joins the prior sentinel before assembling, so a note is
-always ready when it matters — without making the reply wait on reflection.
+Everything routes through the two gateways. Post-response cognition (sentinel, self-model, working
+memory, sleep/narratives) is scheduled through the **burst worker** (DESIGN §5a) — priority-ordered,
+slot-capped, interruptible — and runs in the idle window after the reply. The next turn settles the
+burst before assembling, so the latest note/identity is ready, without making the reply wait on it.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from .cognition.bake import bake
 from .cognition.benchmark import FleetBenchmarkResult, ModelBenchmark
 from .cognition.benchmark import benchmark_fleet as _benchmark_fleet
 from .cognition.benchmark import complete_speed_matrix as _complete_speed_matrix
+from .cognition.burst import BurstResult, BurstWorker, ResponseContext
 from .cognition.council import CouncilResult, deliberate
 from .cognition.epistemics import EpistemicResult, run_epistemics
 from .cognition.fleet import (
@@ -189,9 +191,15 @@ class Mimir:
         # cheap bootstrap path for poor memory (DESIGN §10; kickoff decision).
         log.info("Mimir online | embeddings: %s", self._embedder.mode.banner())
 
-        self._pending: list[threading.Thread] = []
         self._last_sentinel_error: BaseException | None = None
         self._turn_count = 0
+        self._turn_active = False  # True while a turn is generating — background yields to it (§5a)
+        # The burst worker: all post-response cognition (sentinel, self-model, working memory,
+        # sleep) is scheduled through it — priority-ordered, slot-capped, interruptible — instead of
+        # N raw threads (DESIGN §5a). Runs in the idle window after a reply; the next turn settles.
+        self._burst = BurstWorker(is_busy=lambda: self._turn_active)
+        self._register_burst_tasks()
+        self._burst.start()
         self._stop_idle = threading.Event()  # signals the idle latency heartbeat to stop
         self._idle_prober: threading.Thread | None = None
 
@@ -371,9 +379,9 @@ class Mimir:
     # -- the turn ---------------------------------------------------------------------
 
     def turn(self, text: str, user: str | None = None) -> TurnResult:
-        # Make sure the previous turn's background work (sentinel note, self-model) has landed
-        # before we assemble — so the prompt reflects the latest reflection and identity.
-        self._join_background()
+        # Settle the previous turn's burst (sentinel note, self-model) before we assemble — so the
+        # prompt reflects the latest reflection and identity (DESIGN §5a).
+        self._burst.wait_idle()
         self._turn_count += 1
 
         # Temporal awareness: read the gap from PRIOR interactions, then log this turn (DESIGN §3e).
@@ -394,65 +402,72 @@ class Mimir:
             record_exchange(self._storage, user=user, user_text=text, reply=intercept)
             return TurnResult(reply=intercept, context=bundle, baked=[])
 
-        # 1. Recall: embed the query, pull candidates, rank them.
-        query_vec = self._embedder.embed(text)
-        candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY)
-        retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
-        note = latest_sentinel_note(self._storage, user)
-        self_knowledge = self._compose_self_knowledge()
-        working_memory = current_working_memory(self._storage)
-        graph_facts = self._connected_facts(text, user)
-        procedures = self._matching_procedures(text, user)
+        self._turn_active = True  # foreground in progress — the burst yields to it (§5a)
+        try:
+            # Background notes the prior burst surfaced, to carry into this reply.
+            notes = self._burst.drain_surfaces()
 
-        # 2. Assemble the epistemic prompt.
-        bundle = build_context(
-            query=text,
-            user=user,
-            identity=self.config.identity,
-            retrieved=retrieved,
-            sentinel_note=note,
-            embed_mode=self._embedder.mode,
-            budget_tokens=self.config.context_budget_tokens,
-            self_knowledge=self_knowledge,
-            working_memory=working_memory,
-            graph_facts=graph_facts,
-            procedures=procedures,
-            time_context=self._time_context(),
-            temporal_awareness=awareness,
-            recent_history=self._recent_history(),
-            now_ts=now,
-        )
+            # 1. Recall: embed the query, pull candidates, rank them.
+            query_vec = self._embedder.embed(text)
+            candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY)
+            retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
+            note = latest_sentinel_note(self._storage, user)
+            self_knowledge = self._compose_self_knowledge()
+            working_memory = current_working_memory(self._storage)
+            graph_facts = self._connected_facts(text, user)
+            procedures = self._matching_procedures(text, user)
 
-        # 3. Generate the reply through the model gateway. Strip any internal epistemic tags the
-        #    model echoed (small models mimic the [tier=...; source=...] style) before it lands.
-        reply = strip_epistemic_tags(
-            self._model.chat(
-                "chat",
-                [
-                    {"role": "system", "content": bundle.prompt},
-                    {"role": "user", "content": text},
-                ],
+            # 2. Assemble the epistemic prompt.
+            bundle = build_context(
+                query=text,
+                user=user,
+                identity=self.config.identity,
+                retrieved=retrieved,
+                sentinel_note=note,
+                embed_mode=self._embedder.mode,
+                budget_tokens=self.config.context_budget_tokens,
+                self_knowledge=self_knowledge,
+                working_memory=working_memory,
+                graph_facts=graph_facts,
+                procedures=procedures,
+                time_context=self._time_context(),
+                temporal_awareness=awareness,
+                recent_history=self._recent_history(),
+                background_notes="\n".join(notes) if notes else None,
+                now_ts=now,
             )
-        )
 
-        # 4. Side effects through the storage gateway: relevance bookkeeping + bake.
-        record_access(self._storage, bundle.retrieved_ids)
-        baked = bake(
-            self._model,
-            self._storage,
-            self._embedder,
-            turn_text=text,
-            user=user,
-            primary_user=self.config.primary_user,
-        )
-        record_exchange(self._storage, user=user, user_text=text, reply=reply)
+            # 3. Generate the reply through the model gateway. Strip any internal epistemic tags the
+            #    model echoed (small models mimic the [tier=...; source=...] style) before it lands.
+            reply = strip_epistemic_tags(
+                self._model.chat(
+                    "chat",
+                    [
+                        {"role": "system", "content": bundle.prompt},
+                        {"role": "user", "content": text},
+                    ],
+                )
+            )
 
-        # 5. Background cognition off the hot path: sentinel, self-model, working memory.
-        self._spawn_sentinel(user=user, turn_text=text, reply=reply)
-        self._maybe_refresh_self_model()
-        self._maybe_refresh_working_memory()
-        self._maybe_sleep()
+            # 4. Side effects through the storage gateway: relevance bookkeeping + bake.
+            record_access(self._storage, bundle.retrieved_ids)
+            baked = bake(
+                self._model,
+                self._storage,
+                self._embedder,
+                turn_text=text,
+                user=user,
+                primary_user=self.config.primary_user,
+            )
+            record_exchange(self._storage, user=user, user_text=text, reply=reply)
+        finally:
+            self._turn_active = False
 
+        # 5. Fire the burst window: sentinel + any due self-model/working-memory/sleep, scheduled
+        #    and run off the hot path (DESIGN §5a). The next turn settles it.
+        self._burst.signal(ResponseContext(
+            user_text=text, reply=reply, user=user, turn_index=self._turn_count
+        ))
         return TurnResult(reply=reply, context=bundle, baked=baked)
 
     def turn_stream(
@@ -465,7 +480,7 @@ class Mimir:
         abandons the stream early, the turn is treated as interrupted — nothing is baked. The
         generator's *return value* (via ``StopIteration.value``) is ``context.introspect()``.
         """
-        self._join_background()
+        self._burst.wait_idle()
         self._turn_count += 1
 
         # Temporal awareness + the deterministic time intercept (DESIGN §3e), mirroring `turn`.
@@ -484,65 +499,71 @@ class Mimir:
             yield intercept
             return bundle.introspect()
 
-        query_vec = self._embedder.embed(text)
-        candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY)
-        retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
-        note = latest_sentinel_note(self._storage, user)
-        self_knowledge = self._compose_self_knowledge()
-        working_memory = current_working_memory(self._storage)
-        graph_facts = self._connected_facts(text, user)
-        procedures = self._matching_procedures(text, user)
-        bundle = build_context(
-            query=text,
-            user=user,
-            identity=self.config.identity,
-            retrieved=retrieved,
-            sentinel_note=note,
-            embed_mode=self._embedder.mode,
-            budget_tokens=self.config.context_budget_tokens,
-            self_knowledge=self_knowledge,
-            working_memory=working_memory,
-            graph_facts=graph_facts,
-            procedures=procedures,
-            time_context=self._time_context(),
-            temporal_awareness=awareness,
-            recent_history=self._recent_history(),
-            now_ts=now,
-        )
-        messages = [
-            {"role": "system", "content": bundle.prompt},
-            {"role": "user", "content": text},
-        ]
+        self._turn_active = True  # foreground in progress — the burst yields to it (§5a)
+        try:
+            notes = self._burst.drain_surfaces()
+            query_vec = self._embedder.embed(text)
+            candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY)
+            retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
+            note = latest_sentinel_note(self._storage, user)
+            self_knowledge = self._compose_self_knowledge()
+            working_memory = current_working_memory(self._storage)
+            graph_facts = self._connected_facts(text, user)
+            procedures = self._matching_procedures(text, user)
+            bundle = build_context(
+                query=text,
+                user=user,
+                identity=self.config.identity,
+                retrieved=retrieved,
+                sentinel_note=note,
+                embed_mode=self._embedder.mode,
+                budget_tokens=self.config.context_budget_tokens,
+                self_knowledge=self_knowledge,
+                working_memory=working_memory,
+                graph_facts=graph_facts,
+                procedures=procedures,
+                time_context=self._time_context(),
+                temporal_awareness=awareness,
+                recent_history=self._recent_history(),
+                background_notes="\n".join(notes) if notes else None,
+                now_ts=now,
+            )
+            messages = [
+                {"role": "system", "content": bundle.prompt},
+                {"role": "user", "content": text},
+            ]
 
-        # Strip internal epistemic tags as we stream, so neither the live display nor the stored
-        # reply carries them (a tag may straddle two deltas, hence the stateful stripper).
-        stripper = StreamTagStripper()
-        chunks: list[str] = []
-        for delta in self._model.chat_stream("chat", messages):
-            clean = stripper.feed(delta)
-            if clean:
-                chunks.append(clean)
-                yield clean
-        tail = stripper.flush()
-        if tail:
-            chunks.append(tail)
-            yield tail
-        reply = "".join(chunks)
+            # Strip internal epistemic tags as we stream, so neither the live display nor the stored
+            # reply carries them (a tag may straddle two deltas, hence the stateful stripper).
+            stripper = StreamTagStripper()
+            chunks: list[str] = []
+            for delta in self._model.chat_stream("chat", messages):
+                clean = stripper.feed(delta)
+                if clean:
+                    chunks.append(clean)
+                    yield clean
+            tail = stripper.flush()
+            if tail:
+                chunks.append(tail)
+                yield tail
+            reply = "".join(chunks)
 
-        record_access(self._storage, bundle.retrieved_ids)
-        bake(
-            self._model,
-            self._storage,
-            self._embedder,
-            turn_text=text,
-            user=user,
-            primary_user=self.config.primary_user,
-        )
-        record_exchange(self._storage, user=user, user_text=text, reply=reply)
-        self._spawn_sentinel(user=user, turn_text=text, reply=reply)
-        self._maybe_refresh_self_model()
-        self._maybe_refresh_working_memory()
-        self._maybe_sleep()
+            record_access(self._storage, bundle.retrieved_ids)
+            bake(
+                self._model,
+                self._storage,
+                self._embedder,
+                turn_text=text,
+                user=user,
+                primary_user=self.config.primary_user,
+            )
+            record_exchange(self._storage, user=user, user_text=text, reply=reply)
+        finally:
+            self._turn_active = False
+
+        self._burst.signal(ResponseContext(
+            user_text=text, reply=reply, user=user, turn_index=self._turn_count
+        ))
         return bundle.introspect()
 
     def _connected_facts(self, query: str, user: str | None) -> list[str]:
@@ -673,48 +694,82 @@ class Mimir:
         """
         return synthesize_self_model(self._model, self._storage)
 
-    def _maybe_refresh_self_model(self) -> None:
-        every = self.config.self_model_refresh_every
-        if every <= 0:
-            return
-        # Seed one on the first turn, then refresh on cadence as experience accumulates.
-        if self._turn_count == 1 or self._turn_count % every == 0:
-
-            def _run() -> None:
-                try:
-                    synthesize_self_model(self._model, self._storage)
-                except BaseException as exc:  # logged downgrade — never touches the turn
-                    log.error(
-                        "self-model refresh failed (off the hot path; turn unaffected): %s",
-                        exc,
-                        exc_info=True,
-                    )
-
-            self._start_background("mimir-self-model", _run)
-
     # -- working memory ---------------------------------------------------------------
 
     def refresh_working_memory(self) -> Memory | None:
         """Fold the accumulated exchanges into the rolling working-memory summary now (sync)."""
         return synthesize_working_memory(self._model, self._storage)
 
-    def _maybe_refresh_working_memory(self) -> None:
-        every = self.config.working_memory_refresh_every
-        if every <= 0:
-            return
-        if self._turn_count % every == 0:
+    # -- burst tasks: the post-response cognition the worker schedules (DESIGN §5a) ---
 
-            def _run() -> None:
-                try:
-                    synthesize_working_memory(self._model, self._storage)
-                except BaseException as exc:  # logged downgrade — never touches the turn
-                    log.error(
-                        "working-memory refresh failed (off the hot path; turn unaffected): %s",
-                        exc,
-                        exc_info=True,
-                    )
+    def _register_burst_tasks(self) -> None:
+        """Register the standard post-response work on the burst worker. The sentinel is user-class
+        (runs first, every turn — its note must be ready for the next turn); the rest are autonomous
+        and fire on their cadence (self-model, working memory, sleep+narratives)."""
+        self._burst.register("sentinel", self._sentinel_task, base_priority=5.0,
+                             user_requested=True)
+        self._burst.register("self_model", self._self_model_task, base_priority=30.0,
+                             trigger=lambda ctx: self._due("self_model"))
+        self._burst.register("working_memory", self._working_memory_task, base_priority=25.0,
+                             trigger=lambda ctx: self._due("working_memory"))
+        self._burst.register("sleep", self._sleep_task, base_priority=60.0,
+                             trigger=lambda ctx: self._due("sleep"))
 
-            self._start_background("mimir-working-memory", _run)
+    def _due(self, which: str) -> bool:
+        """Whether a cadence task is due this turn (preserving the prior per-task schedules)."""
+        if which == "self_model":
+            every = self.config.self_model_refresh_every
+            return every > 0 and (self._turn_count == 1 or self._turn_count % every == 0)
+        if which == "working_memory":
+            every = self.config.working_memory_refresh_every
+            return every > 0 and self._turn_count % every == 0
+        if which == "sleep":
+            every = self.config.sleep_every
+            return every > 0 and self._turn_count % every == 0
+        return False
+
+    def _sentinel_task(self, ctx: ResponseContext) -> Callable[[], BurstResult]:
+        def run() -> BurstResult:
+            self._last_sentinel_error = None
+            try:
+                run_sentinel(self._model, self._storage, user=ctx.user,
+                             turn_text=ctx.user_text, reply=ctx.reply)
+            except BaseException as exc:  # logged downgrade — the turn is already done (§10)
+                self._last_sentinel_error = exc
+                log.error("sentinel failed (off the hot path; turn unaffected): %s", exc,
+                          exc_info=True)
+            return BurstResult()
+        return run
+
+    def _self_model_task(self, ctx: ResponseContext) -> Callable[[], BurstResult]:
+        def run() -> BurstResult:
+            try:
+                synthesize_self_model(self._model, self._storage)
+            except BaseException as exc:
+                log.error("self-model refresh failed (turn unaffected): %s", exc, exc_info=True)
+            return BurstResult()
+        return run
+
+    def _working_memory_task(self, ctx: ResponseContext) -> Callable[[], BurstResult]:
+        def run() -> BurstResult:
+            try:
+                synthesize_working_memory(self._model, self._storage)
+            except BaseException as exc:
+                log.error("working-memory refresh failed (turn unaffected): %s", exc, exc_info=True)
+            return BurstResult()
+        return run
+
+    def _sleep_task(self, ctx: ResponseContext) -> Callable[[], BurstResult]:
+        def run() -> BurstResult:
+            try:
+                consolidate(self._storage)
+                run_narrative_cycle(
+                    self._model, self._storage, now=local_now(self.config.timezone)
+                )
+            except BaseException as exc:
+                log.error("consolidation failed (turn unaffected): %s", exc, exc_info=True)
+            return BurstResult()
+        return run
 
     # -- sleep / consolidation --------------------------------------------------------
 
@@ -985,59 +1040,9 @@ class Mimir:
         """
         return deliberate(self._model, self._storage, self._embedder, question=question, user=user)
 
-    def _maybe_sleep(self) -> None:
-        every = self.config.sleep_every
-        if every <= 0 or self._turn_count % every != 0:
-            return
-
-        def _run() -> None:
-            try:
-                consolidate(self._storage)
-                run_narrative_cycle(  # write the period's journal while consolidating (§3a/§3e)
-                    self._model, self._storage, now=local_now(self.config.timezone)
-                )
-            except BaseException as exc:  # logged downgrade — never touches the turn
-                log.error(
-                    "consolidation failed (off the hot path; turn unaffected): %s",
-                    exc,
-                    exc_info=True,
-                )
-
-        self._start_background("mimir-sleep", _run)
-
-    # -- background plumbing ----------------------------------------------------------
-
-    def _spawn_sentinel(self, *, user: str | None, turn_text: str, reply: str) -> None:
-        self._last_sentinel_error = None
-
-        def _run() -> None:
-            try:
-                run_sentinel(
-                    self._model, self._storage, user=user, turn_text=turn_text, reply=reply
-                )
-            except BaseException as exc:  # logged downgrade — never touches the turn
-                self._last_sentinel_error = exc
-                log.error(
-                    "sentinel failed (off the hot path; this turn is unaffected): %s",
-                    exc,
-                    exc_info=True,
-                )
-
-        self._start_background("mimir-sentinel", _run)
-
-    def _start_background(self, name: str, work: Callable[[], None]) -> None:
-        thread = threading.Thread(target=work, name=name, daemon=True)
-        thread.start()
-        self._pending.append(thread)
-
-    def _join_background(self) -> None:
-        pending, self._pending = self._pending, []
-        for thread in pending:
-            thread.join(timeout=30)
-
     def wait_for_sentinel(self) -> None:
-        """Block until the most recent turn's background work (note, self-model) has landed."""
-        self._join_background()
+        """Block until the most recent turn's burst (note, self-model) has drained (DESIGN §5a)."""
+        self._burst.wait_idle()
 
     @property
     def last_sentinel_error(self) -> BaseException | None:
@@ -1047,7 +1052,7 @@ class Mimir:
     # -- lifecycle --------------------------------------------------------------------
 
     def close(self) -> None:
-        self._join_background()
+        self._burst.stop()
         self._stop_idle.set()
         if self._idle_prober is not None:
             self._idle_prober.join(timeout=5)

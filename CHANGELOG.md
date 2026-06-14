@@ -65,6 +65,19 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **The burst worker — post-response cognition as a scheduled idle-window pool (brain slice 3;
+  DESIGN §5a).** `cognition/burst.py` is the generic scheduler extracted from the home AI, stripped to
+  a universal skeleton: **pent-up-demand priority** (`effective = base − starved_s × rate`, so starved
+  work floats up), **two task classes** (user-driven runs continuously; autonomous is slot-capped),
+  **interruptibility** (an injected `is_busy` predicate — foreground always wins), and **surfaces**
+  (a task can emit a note injected into the next reply as a `[…follow-up thinking…]` section). The
+  brain now routes all post-response work — sentinel, self-model, working memory, sleep/narratives —
+  through one worker instead of four independent threads; `turn()`/`turn_stream()` *signal* it after
+  the reply and the next turn *settles* it (so the note/identity is ready), preserving the
+  acceptance-loop contract. Pure, per-instance state + injected clock → deterministic
+  (`signal()`+`drain_once()` tested without threads). `build_context(background_notes=…)`,
+  `Mimir.wait_for_sentinel()` now waits on the worker; removed the ad-hoc `_spawn_sentinel`/`_maybe_*`
+  plumbing. +9 tests.
 - **Temporal narratives — a hierarchical, lossy-by-design journal (brain slice 2; DESIGN §3a/§3e).**
   The system now has a sense of *what happened* over time: `cognition/narratives.py` writes a
   first-person **daily** entry, compresses dailies older than 3 days into a **weekly** summary, and
