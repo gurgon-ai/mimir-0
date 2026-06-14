@@ -57,7 +57,7 @@ from .cognition.procedural import learn_procedure, render_procedures, retrieve_p
 from .cognition.self_model import synthesize_self_model
 from .cognition.sentinel import run_sentinel
 from .cognition.sleep import SleepReport, consolidate
-from .cognition.temporal import answer_time_query, local_now, time_prefix
+from .cognition.temporal import answer_time_query, gap_insight, local_now, time_prefix
 from .cognition.working_memory import (
     current_working_memory,
     record_exchange,
@@ -83,11 +83,13 @@ from .storage.repo import (
     bump_procedure_uses,
     disabled_models,
     disabled_nodes,
+    interaction_history,
     latest_self_model,
     latest_sentinel_note,
     list_catalogue,
     list_memories,
     record_access,
+    record_interaction,
     set_model_enabled,
     set_node_enabled,
     update_catalogue_speed,
@@ -346,6 +348,12 @@ class Mimir:
         circuit before a model call. ``turn`` uses it automatically."""
         return answer_time_query(text, local_now(self.config.timezone), self.config.hemisphere)
 
+    def _temporal_awareness(self, user: str | None, now_ts: float) -> str | None:
+        """A deterministic 'you've been away longer than usual' note from the interaction log, or
+        ``None``. Computed from PRIOR interactions (call before logging the current turn)."""
+        history = interaction_history(self._storage, user=user)
+        return gap_insight(history, now_ts)
+
     # -- the turn ---------------------------------------------------------------------
 
     def turn(self, text: str, user: str | None = None) -> TurnResult:
@@ -353,6 +361,11 @@ class Mimir:
         # before we assemble — so the prompt reflects the latest reflection and identity.
         self._join_background()
         self._turn_count += 1
+
+        # Temporal awareness: read the gap from PRIOR interactions, then log this turn (DESIGN §3e).
+        now = time.time()
+        awareness = self._temporal_awareness(user, now)
+        record_interaction(self._storage, now, user)
 
         # 0. Deterministic time-query intercept — answer "what day/season is it" with no model call
         #    (DESIGN §3e). Still recorded as an exchange (continuity), nothing to bake/reflect on.
@@ -362,7 +375,7 @@ class Mimir:
                 query=text, user=user, identity=self.config.identity, retrieved=[],
                 sentinel_note=None, embed_mode=self._embedder.mode,
                 budget_tokens=self.config.context_budget_tokens,
-                time_context=self._time_context(),
+                time_context=self._time_context(), now_ts=now,
             )
             record_exchange(self._storage, user=user, user_text=text, reply=intercept)
             return TurnResult(reply=intercept, context=bundle, baked=[])
@@ -391,7 +404,8 @@ class Mimir:
             graph_facts=graph_facts,
             procedures=procedures,
             time_context=self._time_context(),
-            now_ts=time.time(),
+            temporal_awareness=awareness,
+            now_ts=now,
         )
 
         # 3. Generate the reply through the model gateway. Strip any internal epistemic tags the
@@ -439,6 +453,22 @@ class Mimir:
         self._join_background()
         self._turn_count += 1
 
+        # Temporal awareness + the deterministic time intercept (DESIGN §3e), mirroring `turn`.
+        now = time.time()
+        awareness = self._temporal_awareness(user, now)
+        record_interaction(self._storage, now, user)
+        intercept = self.maybe_time_answer(text)
+        if intercept is not None:
+            bundle = build_context(
+                query=text, user=user, identity=self.config.identity, retrieved=[],
+                sentinel_note=None, embed_mode=self._embedder.mode,
+                budget_tokens=self.config.context_budget_tokens,
+                time_context=self._time_context(), now_ts=now,
+            )
+            record_exchange(self._storage, user=user, user_text=text, reply=intercept)
+            yield intercept
+            return bundle.introspect()
+
         query_vec = self._embedder.embed(text)
         candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY)
         retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
@@ -460,7 +490,8 @@ class Mimir:
             graph_facts=graph_facts,
             procedures=procedures,
             time_context=self._time_context(),
-            now_ts=time.time(),
+            temporal_awareness=awareness,
+            now_ts=now,
         )
         messages = [
             {"role": "system", "content": bundle.prompt},

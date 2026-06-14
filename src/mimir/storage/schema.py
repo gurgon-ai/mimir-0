@@ -206,6 +206,22 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             ")",
         ],
     ),
+    (
+        14,
+        [
+            # Interaction log: one tiny row per turn (timestamp + user), durable and append-only —
+            # unlike the EXCHANGE recency log (capped/cleared on compression), this is the lasting
+            # record of WHEN the user engaged. It powers temporal-awareness baselines (DESIGN §3e):
+            # "you haven't been around in 14h (typical ~6h)". Pruned to a rolling window so it never
+            # grows unbounded. Just a timestamp — no content, so it's cheap and privacy-light.
+            "CREATE TABLE interactions ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " ts REAL NOT NULL,"
+            " user TEXT"
+            ")",
+            "CREATE INDEX idx_interactions_ts ON interactions(ts)",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -275,4 +291,5 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
     },
     "model_prefs": {"model", "enabled", "updated_at"},
     "node_prefs": {"node", "enabled", "updated_at"},
+    "interactions": {"id", "ts", "user"},
 }

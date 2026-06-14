@@ -117,6 +117,43 @@ def delete_memory(gateway: StorageGateway, memory_id: int) -> None:
     gateway.submit(_write)
 
 
+def record_interaction(
+    gateway: StorageGateway, ts: float, user: str | None = None, *, keep: int = 5000
+) -> None:
+    """Append one interaction timestamp (one per turn) to the durable log, pruning to the most
+    recent ``keep`` rows so it never grows unbounded. Powers temporal-awareness baselines (§3e)."""
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute("INSERT INTO interactions (ts, user) VALUES (?, ?)", (ts, user))
+        conn.execute(
+            "DELETE FROM interactions WHERE id NOT IN "
+            "(SELECT id FROM interactions ORDER BY ts DESC LIMIT ?)",
+            (keep,),
+        )
+
+    gateway.submit(_write)
+
+
+def interaction_history(
+    gateway: StorageGateway, *, user: str | None = None, since_ts: float = 0.0
+) -> list[float]:
+    """Interaction timestamps at/after ``since_ts``, oldest→newest. With ``user`` set, includes
+    user-agnostic rows too (matching the rest of the store's user scoping)."""
+    def _read(conn: sqlite3.Connection) -> list[float]:
+        if user is None:
+            rows = conn.execute(
+                "SELECT ts FROM interactions WHERE ts >= ? ORDER BY ts", (since_ts,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT ts FROM interactions WHERE ts >= ? AND (user = ? OR user IS NULL) "
+                "ORDER BY ts",
+                (since_ts, user),
+            ).fetchall()
+        return [float(r[0]) for r in rows]
+
+    return gateway.read(_read)
+
+
 def list_memories(
     gateway: StorageGateway,
     *,

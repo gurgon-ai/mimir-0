@@ -155,6 +155,7 @@ def build_context(
     graph_facts: list[str] | None = None,
     procedures: list[str] | None = None,
     time_context: str | None = None,
+    temporal_awareness: str | None = None,
     now_ts: float | None = None,
     extra_sections: list[Section] | None = None,
 ) -> ContextBundle:
@@ -216,6 +217,7 @@ def build_context(
     procedures_body = "\n".join(f"- {p}" for p in (procedures or []))
     procedures_tokens = estimate_tokens(procedures_body) + 8 if procedures else 0
     working_memory_tokens = estimate_tokens(working_memory) + 8 if working_memory else 0
+    awareness_tokens = estimate_tokens(temporal_awareness) + 8 if temporal_awareness else 0
     sentinel_tokens = (
         estimate_tokens(sentinel_note.text) + 8 if sentinel_note is not None else 0
     )
@@ -229,6 +231,7 @@ def build_context(
         - graph_tokens
         - procedures_tokens
         - working_memory_tokens
+        - awareness_tokens
         - sentinel_tokens
         - extra_reserved
         - _UNCERTAINTY_RESERVE,
@@ -291,6 +294,20 @@ def build_context(
                 tier=SectionTier.MEDIUM,
                 requested_tokens=estimate_tokens(working_memory),
                 admitted_tokens=estimate_tokens(working_memory),
+            )
+        )
+
+    # 4b. Temporal awareness — a deterministic baseline note ("you've been away longer than usual"),
+    #     zero model cost, so the system feels time passing (DESIGN §3e). Soft signal, medium tier.
+    if temporal_awareness:
+        sections.append(
+            Section(
+                name="temporal_awareness",
+                title="Temporal awareness:",
+                body=temporal_awareness,
+                tier=SectionTier.MEDIUM,
+                requested_tokens=estimate_tokens(temporal_awareness),
+                admitted_tokens=estimate_tokens(temporal_awareness),
             )
         )
 

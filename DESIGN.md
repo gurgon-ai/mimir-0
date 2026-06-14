@@ -120,6 +120,12 @@ model reasons about recency instead of guessing. Timezone + hemisphere are `[loc
 host zone, northern seasons) — universal, no place baked into core. Explicit time/date/season
 questions are answered by a **deterministic intercept** (zero model cost) before any model call.
 
+It also has a **temporal-awareness baseline**: a durable interaction log (one timestamp per turn)
+lets it notice when the gap since you were last around is unusual *for your own rhythm* — "you
+haven't been around in 14h (typically every ~6h)" or "the longest gap I've recorded." Pure statistics
+over the log (median/p90/longest gap), zero model cost, and silent within normal rhythm — awareness,
+not nagging. The same generic baseline machinery extends to entity/topic staleness later.
+
 The self-model section leads with the operator-established identity anchors **verbatim** — these are
 authoritative. Any synthesized self-narrative is grounded in operational history and must **not**
 restate or override those anchors: a synthesis that invents or changes the system's name is a
