@@ -222,6 +222,24 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "CREATE INDEX idx_interactions_ts ON interactions(ts)",
         ],
     ),
+    (
+        15,
+        [
+            # Temporal narratives (DESIGN §3a/§3e): hierarchical daily→weekly→monthly journal rows,
+            # lossy by design (details fade, patterns persist). One row per (scope, period); the
+            # unique index makes regeneration an idempotent replace, and old entries are pruned to a
+            # per-scope retention cap. Generated off the hot path in the consolidation pass.
+            "CREATE TABLE narratives ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " scope TEXT NOT NULL,"        # 'daily' | 'weekly' | 'monthly'
+            " period TEXT NOT NULL,"       # e.g. '2026-06-14' or '2026-06-01_to_2026-06-07'
+            " narrative TEXT NOT NULL,"
+            " source_count INTEGER NOT NULL DEFAULT 0,"
+            " created_at REAL NOT NULL"
+            ")",
+            "CREATE UNIQUE INDEX idx_narratives_scope_period ON narratives(scope, period)",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -292,4 +310,5 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
     "model_prefs": {"model", "enabled", "updated_at"},
     "node_prefs": {"node", "enabled", "updated_at"},
     "interactions": {"id", "ts", "user"},
+    "narratives": {"id", "scope", "period", "narrative", "source_count", "created_at"},
 }

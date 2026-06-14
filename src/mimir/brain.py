@@ -48,6 +48,7 @@ from .cognition.identity import (
     render_anchors,
 )
 from .cognition.ingest import IngestResult, ingest_document
+from .cognition.narratives import render_recent_history, run_narrative_cycle
 from .cognition.onboarding import (
     onboarding_profile,
     pending_onboarding,
@@ -354,6 +355,19 @@ class Mimir:
         history = interaction_history(self._storage, user=user)
         return gap_insight(history, now_ts)
 
+    def _recent_history(self) -> str | None:
+        """The temporal-narrative arc (month → week → lately) for the prompt, or ``None``."""
+        return render_recent_history(self._storage)
+
+    def generate_narratives(self) -> dict[str, Any]:
+        """Run the temporal-narrative cycle now (daily entry + weekly/monthly roll-up), sync.
+
+        Normally runs off the hot path in the consolidation pass; this is the explicit hook (DESIGN
+        §3a/§3e). Idempotent per period — re-running the same day reuses today's entry."""
+        return run_narrative_cycle(
+            self._model, self._storage, now=local_now(self.config.timezone)
+        )
+
     # -- the turn ---------------------------------------------------------------------
 
     def turn(self, text: str, user: str | None = None) -> TurnResult:
@@ -405,6 +419,7 @@ class Mimir:
             procedures=procedures,
             time_context=self._time_context(),
             temporal_awareness=awareness,
+            recent_history=self._recent_history(),
             now_ts=now,
         )
 
@@ -491,6 +506,7 @@ class Mimir:
             procedures=procedures,
             time_context=self._time_context(),
             temporal_awareness=awareness,
+            recent_history=self._recent_history(),
             now_ts=now,
         )
         messages = [
@@ -703,8 +719,14 @@ class Mimir:
     # -- sleep / consolidation --------------------------------------------------------
 
     def sleep(self) -> SleepReport:
-        """Run a consolidation pass now (dedup, decay, archive, contradiction resolution)."""
-        return consolidate(self._storage)
+        """Run a consolidation pass now (dedup, decay, archive, contradiction resolution) + write
+        the period's temporal narratives (daily entry, weekly/monthly roll-up; DESIGN §3a/§3e)."""
+        report = consolidate(self._storage)
+        try:
+            self.generate_narratives()
+        except Exception as exc:  # narratives are enrichment — never fail consolidation (§10)
+            log.error("narrative cycle failed during sleep (consolidation unaffected): %s", exc)
+        return report
 
     def scan_fleet(self) -> FleetScanResult:
         """Inventory the model fleet (nodes + models) and rebuild the catalogue (DESIGN §5)."""
@@ -971,6 +993,9 @@ class Mimir:
         def _run() -> None:
             try:
                 consolidate(self._storage)
+                run_narrative_cycle(  # write the period's journal while consolidating (§3a/§3e)
+                    self._model, self._storage, now=local_now(self.config.timezone)
+                )
             except BaseException as exc:  # logged downgrade — never touches the turn
                 log.error(
                     "consolidation failed (off the hot path; turn unaffected): %s",
