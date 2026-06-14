@@ -47,6 +47,11 @@ from .cognition.identity import (
     render_anchors,
 )
 from .cognition.ingest import IngestResult, ingest_document
+from .cognition.onboarding import (
+    onboarding_profile,
+    pending_onboarding,
+    record_answer,
+)
 from .cognition.procedural import learn_procedure, render_procedures, retrieve_procedures
 from .cognition.self_model import synthesize_self_model
 from .cognition.sentinel import run_sentinel
@@ -541,6 +546,31 @@ class Mimir:
     def pending_identity_questions(self) -> list[tuple[str, str]]:
         """The ``(key, question)`` pairs the interview still needs answered."""
         return pending_questions(self._storage)
+
+    # -- the seeding interview (onboarding, DESIGN §9) ---------------------------------
+
+    def onboarding_profile(self) -> list[dict[str, Any]]:
+        """The seeding interview as the editable 'one place': every question + its current answer.
+
+        These are the operator's highest-provenance facts (``stated_by_primary_user``,
+        ``provenance="onboarding"``) — the orientation everything else builds on. Re-runnable and
+        editable any time (see ``record_onboarding_answer``)."""
+        return onboarding_profile(self._storage)
+
+    def pending_onboarding(self) -> list[dict[str, str]]:
+        """The interview questions still unanswered — drives the strip and the first-run prompt."""
+        return pending_onboarding(self._storage)
+
+    def record_onboarding_answer(self, key: str, answer: str) -> Memory | None:
+        """Store/update one interview answer as a top-tier onboarding fact (blank clears it).
+
+        Captured model-free and persisted immediately (crash-safe; the doc's §2 law), mirroring
+        name/operator/location into the always-on identity anchors. Returns the stored memory, or
+        ``None`` if cleared/unknown."""
+        return record_answer(
+            self._storage, self._embedder,
+            key=key, answer=answer, primary_user=self.config.primary_user,
+        )
 
     def _compose_self_knowledge(self) -> str | None:
         """The self-model section body: identity anchors (verbatim) + synthesized self-model.

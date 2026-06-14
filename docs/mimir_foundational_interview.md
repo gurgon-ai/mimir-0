@@ -10,6 +10,17 @@ and the tournament land. It must stay public-clean and **generic**: the question
 become *seed config + memories*, never anything hardcoded into the core (see DESIGN §9; the household
 is the canonical example, not a baked-in assumption).
 
+> **Status — Phase 1 shipped.** The deterministic, crash-safe **capture** half is built
+> (`src/mimir/cognition/onboarding.py`): a one-question-at-a-time interview strip under the tournament
+> board (and a re-runnable **Profile** tab), with each answer persisted immediately as a
+> `stated_by_primary_user` / `provenance="onboarding"` memory — one editable row per question, living
+> in one place; name/operator/location mirror into the identity anchors. The current question set is a
+> focused subset (assistant name · who/what you do · weekly schedule · location · household · pets ·
+> interests). **Phase 2** (not yet built) is the smart **parse pass** of §10: split one answer into
+> several typed facts + graph triples, mark inferred-vs-stated, and review-before-commit — plus the
+> richer Core-12/Expanded-8 question set and the preference/config knobs (answer style, uncertainty
+> mode, idle window) of §8.
+
 ---
 
 ## 1. Where it lives: paired with the tournament

@@ -65,6 +65,20 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **The seeding interview (Phase 1) — the operator's first, highest-provenance facts.** A short
+  get-to-know-you — what to call the assistant, who the operator is and what they do, their week,
+  location, household, pets, interests — paired with the qualifying tournament and **re-runnable any
+  time**. Each answer is **captured model-free and persisted immediately** (crash-safe; works before
+  any chat model qualifies) as a `stated_by_primary_user` (top tier, 1.30×), `provenance="onboarding"`
+  memory — the orientation everything else builds on. The facts **live in one place** (one editable
+  row per question, keyed by `meta.onboarding_key`; re-answering updates in place) surfaced in a new
+  **Profile** tab; name/operator/location also mirror into the identity anchors that inject into the
+  self-model. UI: when the tournament board is up it now takes ~85% of the chat pane and a
+  one-question-at-a-time **interview strip** sits below; a first-run prompt invites it. New:
+  `cognition/onboarding.py`, `Mimir.{onboarding_profile,pending_onboarding,record_onboarding_answer}`,
+  `repo.delete_memory`, `GET /api/onboarding` + `POST /api/onboarding/answer`. The LLM parse pass
+  (one answer → several typed facts + graph triples, review-before-commit) is Phase 2. See
+  `docs/mimir_foundational_interview.md`.
 - **Speed- and health-aware routing — live node latency, learned from real traffic.** The provider
   pool now routes a call to the node with the lowest **expected wait** (`latency × current load`),
   not just the least-loaded one. Node speed is measured **passively on every real call** (no wasted
