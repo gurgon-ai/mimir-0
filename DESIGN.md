@@ -309,13 +309,19 @@ models are acceptable for a role*; routing decides *which model on which node an
 - **Attention governor** — a generic "foreground beats background" scheduler driven by software
   signals (chat-in-flight / consolidation-running / model-reload-pending / idle).
 
-### 5a. The idle window — burst cognition + bidirectional RAG  **[partial → proposed]**
+### 5a. The idle window — burst cognition + bidirectional RAG  **[engine landed → extending]**
 
 A finding from months of running this on small, distributed compute (the project's origin): **after
 the model answers, the GPU goes idle while the user reads, thinks, and composes a reply.** In text
 that's a few seconds; **on voice it's 30 seconds or more, routinely**. That window is not dead time
 — it is *the* reclaimable resource that lets a small or distributed rig act like a much bigger brain.
 Reference design (proven in the parent system, to be rebuilt public-clean):
+
+> **Landed (the engine):** `cognition/burst.py` is the generic scheduler — pent-up-demand priority,
+> the two task classes, the slot cap, interruptibility (an injected `is_busy` predicate), and
+> surfaces. The brain routes all post-response cognition (sentinel, self-model, working memory,
+> sleep/narratives) through it instead of N raw threads; `turn()` signals it, the next turn settles
+> it. Still to come: idle-takeover continuous mode and bidirectional (output-triggered) RAG below.
 
 **The burst worker — the idle window as a first-class, scheduled resource pool.** After each
 response the engine fires a *burst window* and drains a queue of background tasks, with these
