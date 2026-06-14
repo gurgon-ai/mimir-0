@@ -336,3 +336,25 @@ def test_page_includes_interview_strip_and_profile_tab(base_url: str) -> None:
     assert status == 200
     assert 'id="interviewStrip"' in html
     assert 'data-tab="profile"' in html
+
+
+def test_onboarding_capture_is_lockfree_during_long_ops(mock_config: Config) -> None:
+    # The interview runs DURING the qualifying tournament, which holds brain_lock for whole rounds.
+    # Capturing an answer must NOT take that lock, or "Next" hangs until the round ends. We simulate
+    # a long round by holding the lock here and asserting the POST still returns promptly.
+    brain = Mimir(mock_config)
+    server = create_server(brain, "127.0.0.1", 0)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        with server.brain_lock:  # stand in for an in-progress tournament round
+            status, data = _json("POST", base + "/api/onboarding/answer",
+                                 {"key": "pets", "answer": "a dog named Rex"})
+        assert status == 200
+        answers = {q["key"]: q["answer"] for q in data["profile"]}
+        assert answers["pets"] == "a dog named Rex"
+    finally:
+        server.shutdown()
+        brain.close()
