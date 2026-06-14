@@ -155,7 +155,7 @@ idle roles where it's the best choice — it just drops off the user-facing shor
 "never fail capability on speed" invariant (§1) is what makes this possible: capacity is preserved
 for every model, and the cap is a final, user-facing-only filter.
 
-### Distribution's payoff is parallelism, not "best model faster" — the placement matrix [next]
+### Distribution's payoff is parallelism, not "best model faster" — the placement matrix [built]
 
 The beast almost always wins user-facing (best model, fastest). An edge earns its keep a *different*
 way: by running **background cognition concurrently** — council, sentinel, the nightly backlog — so
@@ -204,6 +204,16 @@ coding model was size-capped out, so `code` defaulted to the chat champion — c
 pool, wrong as a final answer.) So qualification grades a **wider pool** than chat will ever route to;
 the user-facing caps are applied only when assigning the *user-facing* roles. A model is never
 excluded from the second lineup for being too big or too slow — only from chat.
+
+**[built]** The second lineup ships in two parts: **selection** — `council_roster()` ranks within
+each model family then round-robins *across* families (diversity beats ranking for adversarial work),
+capacity-bound and never latency-gated; and **grading** — `benchmark_council_pool()` grades the
+above-cap models (the 30–36B coders, the 122B MoE) with the caps off, **in place / no rescan** so the
+main pool's scores survive (the `complete_speed_matrix` discipline). Surfaced as the 🏟️ Council view
+(3/5/7 seats, families represented, bench) + 🏋️ Qualify big models. The per-node **placement matrix**
+(`placement_matrix()` + 📊 view) is the display side: every model on every node it runs on, with that
+node's speed and the node's winner. Still open: explicit background/council *roles* in `ROLE_NEEDS`
+(loose, non-discipline-gated) so role assignment can query the roster directly.
 
 ### Coherence is a post-qualification peer-review pass, not a qualification gate [next]
 

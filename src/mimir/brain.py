@@ -678,6 +678,40 @@ class Mimir:
             only_models=only_models, progress=progress,
         )
 
+    def benchmark_council_pool(
+        self,
+        *,
+        progress: Callable[[int, int, str, float | None], None] | None = None,
+        on_result: Callable[[ModelBenchmark, str], None] | None = None,
+    ) -> FleetBenchmarkResult:
+        """Grade the COUNCIL pool: the models **above** the chat size cap, with the user-facing caps
+        OFF (no upper size limit, no latency gate) — so the big/slow models a chat cap excludes get
+        scored and can enter the council roster (the second lineup). Same full gauntlet as the main
+        pool (``framework``/``judge`` on) so their quality is comparable.
+
+        Like the speed-test, it **does NOT rescan** — that would wipe the existing quality scores;
+        it grades the big models *in place* on the catalogue a prior tournament/benchmark built. So
+        run a tournament first (to discover + score the main pool), then this to fill in the big
+        council models without touching the rest.
+        """
+        cap = self.config.backend.max_model_size_b if self.config.backend else 30.0
+        ctx = self.config.backend.benchmark_num_ctx if self.config.backend else 24576
+        return _benchmark_fleet(
+            self._model,
+            self._storage,
+            only_approved=False,   # council wants diversity — don't gate on the curated allowlist
+            max_params_b=0.0,      # 0 = no upper size cap (the whole point of the second lineup)
+            min_params_b=cap,      # only the models ABOVE the chat cap (the big pool)
+            judge=True,
+            latency_budget_s=0.0,  # 0 = no latency gate (capacity-bound, not latency-bound)
+            num_ctx=ctx,
+            disabled_nodes=disabled_nodes(self._storage),
+            framework=True,
+            persist=True,
+            progress=progress,
+            on_result=on_result,
+        )
+
     def evaluate_epistemics(
         self, models: list[str] | None = None, *, samples: int = 3
     ) -> list[EpistemicResult]:
