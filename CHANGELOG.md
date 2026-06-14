@@ -65,6 +65,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **The council-pool grading pass — qualify the big models caps-off.** The second lineup's selection
+  is caps-off, but the big models (≥ the chat size cap — the 30–36B coders, the 122B MoE) were never
+  *graded*: the benchmark's size cap skipped them, so they never entered the catalogue with scores and
+  couldn't be drawn into the council. **🏋️ Qualify big models** (on the council view) grades exactly
+  those — models above the chat cap, with the caps **off** (no upper size limit, no latency gate) and
+  the full gauntlet (so their quality is comparable to the main pool). Crucially it grades them **in
+  place — no rescan** (the `complete_speed_matrix` discipline), so the main pool's hard-won scores
+  survive; run a tournament first, then this fills in the big council models without touching the rest.
+  `/api/fleet/benchmark/council` → `benchmark_council_pool()`, reusing the benchmark board/progress.
 - **The second lineup — a diversity-first adversarial council roster.** Adversarial / council /
   background reasoning gets its value from **family diversity** (different model families fail in
   different ways — a council of five qwen variants is worth far less than five different families),

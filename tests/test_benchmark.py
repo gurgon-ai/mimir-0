@@ -342,6 +342,23 @@ def test_placement_matrix_shows_each_model_on_every_node_with_a_winner(db_path: 
         sg.close()
 
 
+def test_council_pool_grading_preserves_existing_scores(brain: Mimir) -> None:
+    # The council-pool pass grades the big models IN PLACE — it must NOT rescan, which would wipe
+    # the main pool's hard-won scores (the complete_speed_matrix discipline). With only small mock
+    # models (under the 30B cap) nothing is graded, and crucially the prior score survives.
+    from mimir.storage.repo import list_catalogue, update_catalogue_scores
+
+    brain.scan_fleet()
+    update_catalogue_scores(
+        brain._storage, "mock-a", quality=0.9, talk=1.0, tools=1.0, code=1.0,
+        coherence=None, discipline=1.0, epistemics=1.0, reasoning=1.0,
+    )
+    result = brain.benchmark_council_pool()
+    assert result.benchmarked == 0   # nothing above the cap → the big pool is empty here
+    survivor = next(e for e in list_catalogue(brain._storage) if e.model == "mock-a")
+    assert survivor.quality == 0.9   # preserved — the council pass did NOT rescan and wipe it
+
+
 def test_council_roster_favors_family_diversity_over_raw_ranking(db_path: str) -> None:
     # The second lineup's whole point: a SPREAD of families, not the top-N. Given three high-quality
     # qwen models plus one good gemma and one good mistral, a 3-seat council must take one from EACH

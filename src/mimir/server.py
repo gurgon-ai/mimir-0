@@ -214,6 +214,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._scan_fleet())
             elif route == "/api/fleet/benchmark":
                 self._send_json(self._benchmark_fleet(body))
+            elif route == "/api/fleet/benchmark/council":
+                self._send_json(self._benchmark_council())
             elif route == "/api/fleet/tournament/start":
                 self._send_json(self._tournament_start(body))
             elif route == "/api/fleet/tournament/advance":
@@ -354,23 +356,20 @@ class _Handler(BaseHTTPRequestHandler):
             result = self.server.brain.scan_fleet()
         return {"nodes": result.nodes, "models": result.models}
 
-    def _benchmark_fleet(self, body: dict[str, Any]) -> dict[str, Any]:
-        """Kick off a benchmark in the background and return immediately. The run is multi-minute;
-        the UI polls /api/fleet/benchmark/status. Holding the brain lock for the whole run (in the
-        worker thread) preserves serialization against turns, but the status + state reads are
-        lock-free, so the page never freezes (the bug this fixes).
-
-        Optional body fields ``max_model_size_b`` / ``min_model_size_b`` / ``max_latency_s`` (the UI
-        scope fields) override the configured cap/floor/latency for this run."""
+    def _run_benchmark_bg(
+        self, run: Any, *, scanning: str = "scanning the fleet…"
+    ) -> dict[str, Any]:
+        """Shared background-run scaffold for any benchmark-style pass: sets up bench_state, the
+        progress/on_result callbacks, and the worker thread; ``run(progress, on_result)`` does the
+        actual work and returns a FleetBenchmarkResult. Holding the brain lock for the whole run (in
+        the worker) preserves serialization against turns, but status reads stay lock-free so the
+        page never freezes. The UI polls /api/fleet/benchmark/status for all of them."""
         srv = self.server
-        cap = float(body["max_model_size_b"]) if body.get("max_model_size_b") not in (None, "") else None
-        floor = float(body["min_model_size_b"]) if body.get("min_model_size_b") not in (None, "") else None
-        latency = float(body["max_latency_s"]) if body.get("max_latency_s") not in (None, "") else None
         with srv.bench_lock:
             if srv.bench_state.get("running"):
                 return {"started": False, **srv.bench_state}  # already running
             srv.bench_state = {"running": True, "i": 0, "total": 0,
-                               "current": "scanning the fleet…", "done": False, "results": []}
+                               "current": scanning, "done": False, "results": []}
 
         def _progress(i: int, total: int, model: str, eta: float | None) -> None:
             with srv.bench_lock:
@@ -388,10 +387,7 @@ class _Handler(BaseHTTPRequestHandler):
         def _run() -> None:
             try:
                 with srv.brain_lock:
-                    result = srv.brain.benchmark_fleet(
-                        max_params_b=cap, min_params_b=floor, latency_budget_s=latency,
-                        progress=_progress, on_result=_on_result,
-                    )
+                    result = run(_progress, _on_result)
                 with srv.bench_lock:
                     srv.bench_state.update(
                         running=False, done=True, current="",
@@ -407,6 +403,26 @@ class _Handler(BaseHTTPRequestHandler):
 
         threading.Thread(target=_run, name="mimir-benchmark", daemon=True).start()
         return {"started": True}
+
+    def _benchmark_fleet(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Kick off the main fleet benchmark in the background. Optional body fields
+        ``max_model_size_b`` / ``min_model_size_b`` / ``max_latency_s`` (the UI scope fields)
+        override the configured cap/floor/latency for this run."""
+        cap = float(body["max_model_size_b"]) if body.get("max_model_size_b") not in (None, "") else None
+        floor = float(body["min_model_size_b"]) if body.get("min_model_size_b") not in (None, "") else None
+        latency = float(body["max_latency_s"]) if body.get("max_latency_s") not in (None, "") else None
+        return self._run_benchmark_bg(lambda p, r: self.server.brain.benchmark_fleet(
+            max_params_b=cap, min_params_b=floor, latency_budget_s=latency,
+            progress=p, on_result=r,
+        ))
+
+    def _benchmark_council(self) -> dict[str, Any]:
+        """Grade the council pool — the big models above the chat cap, caps off — in place (no
+        rescan, so the main pool's scores survive). Then they enter the council roster."""
+        return self._run_benchmark_bg(
+            lambda p, r: self.server.brain.benchmark_council_pool(progress=p, on_result=r),
+            scanning="grading the council pool (big models, caps off)…",
+        )
 
     def _benchmark_status(self) -> dict[str, Any]:
         with self.server.bench_lock:
@@ -1388,14 +1404,26 @@ async function showCouncil(size) {
   try { renderCouncil(await api("GET", "/api/fleet/council?size=" + _councilSize)); }
   catch (e) { $("fleetMsg").textContent = "Error loading council: " + e.message; }
 }
+// Grade the big models above the chat cap (caps off, in place — no rescan), so they enter the
+// council pool. Reuses the benchmark board/progress; reopen the council when it finishes.
+async function qualifyCouncilPool() {
+  _benchBoardClosed = false;
+  $("fleetMsg").textContent = "Grading the council pool — big models, caps off…";
+  try {
+    const res = await api("POST", "/api/fleet/benchmark/council", {});
+    if (res.started === false) { $("fleetMsg").textContent = "Busy: " + (res.error || "a run is already in progress"); return; }
+    pollBenchmark();   // same background board; click 🏟️ Council again when it's done
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
+}
 function renderCouncil(data) {
   _benchBoardClosed = false; benchShow(true);
   const r = data.roster || [];
   let h = '<h2>🏟️ Adversarial council — the diverse second lineup <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>';
   h += `<div class="legend">A <b>spread of ${data.families.length} families</b> across ${data.size} seat(s) — diversity beats ranking for adversarial reasoning. Not latency-gated (big-and-slow welcome). Pool: ${data.pool} models in ${data.pool_families} families.</div>`;
   h += '<div class="row" style="margin:8px 0; gap:6px; align-items:center;"><span class="hint">Seats:</span>'
-    + [3, 5, 7].map(n => `<button class="secondary" style="padding:3px 10px;${n === _councilSize ? "border-color:#2d8;" : ""}" onclick="showCouncil(${n})">${n}</button>`).join("") + '</div>';
-  if (!r.length) { $("benchBoard").innerHTML = h + '<div class="hint" style="margin-top:12px;">No qualified models yet — run a benchmark first (and the speed-test). For the big council models, benchmark with the size cap off.</div>'; return; }
+    + [3, 5, 7].map(n => `<button class="secondary" style="padding:3px 10px;${n === _councilSize ? "border-color:#2d8;" : ""}" onclick="showCouncil(${n})">${n}</button>`).join("")
+    + '<button class="secondary" style="margin-left:14px; padding:3px 10px;" onclick="qualifyCouncilPool()" title="Grade the big models above the chat size cap (caps off, no rescan) so they enter the council pool. Run a tournament/benchmark first.">🏋️ Qualify big models</button></div>';
+  if (!r.length) { $("benchBoard").innerHTML = h + '<div class="hint" style="margin-top:12px;">No qualified models seated yet — run a benchmark/tournament first. The big ≥cap council models (the 122B etc.) are skipped by the chat size cap, so click <b>🏋️ Qualify big models</b> to grade them caps-off into the pool.</div>'; return; }
   h += '<table><tr><th>Seat</th><th>Family</th><th>Model</th><th>Quality</th><th>Reason</th><th>Runs on</th></tr>';
   r.forEach((m, i) => {
     const t = m.return_time != null ? ` · ${m.return_time.toFixed(1)}s` : "";
