@@ -232,6 +232,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._matrix_start())
             elif route == "/api/fleet/apply":
                 self._send_json({"applied": self._apply_recommendations()})
+            elif route == "/api/fleet/role":
+                self._send_json(self._set_role(body))
             elif route == "/api/fleet/model":
                 self._send_json(self._set_model_enabled(body))
             elif route == "/api/fleet/node":
@@ -636,7 +638,17 @@ class _Handler(BaseHTTPRequestHandler):
             pool["max_model_size_b"] = be.max_model_size_b if be else 30.0
             pool["min_model_size_b"] = be.min_model_size_b if be else 0.0
             pool["max_latency_s"] = be.max_latency_s if be else 0.0
+            # Live model names, so the role-assignment dropdown has options even before a benchmark.
+            pool["available"] = sorted(brain._model.available_models())
         return pool
+
+    def _set_role(self, body: dict[str, Any]) -> dict[str, Any]:
+        role = str(body.get("role", "")).strip()
+        model = str(body.get("model", "")).strip()
+        if not role or not model:
+            raise ValueError("'role' and 'model' are required")
+        with self.server.brain_lock:
+            return {"roles": self.server.brain.set_role(role, model)}
 
     def _set_model_enabled(self, body: dict[str, Any]) -> dict[str, Any]:
         model = str(body.get("model", "")).strip()
@@ -946,7 +958,6 @@ _HTML = """<!doctype html>
       <button data-tab="procedures">Habits</button>
       <button data-tab="council">Council</button>
       <button data-tab="fleet">Fleet</button>
-      <button data-tab="models">Models</button>
       <button data-tab="docs">Docs</button>
     </div>
 
@@ -1053,15 +1064,13 @@ _HTML = """<!doctype html>
       </div>
       <div id="fleetMsg" class="hint">Press <b>1 · Find models</b> to inventory the fleet, then <b>2 · Benchmark</b> to score them.</div>
       <div id="fleetList"></div>
-    </div>
 
-    <div class="tabpane hidden" id="tab-models">
-      <details class="hint" style="margin-bottom:10px; border:1px solid #333; border-radius:6px; padding:6px 10px;">
-        <summary style="cursor:pointer;">ℹ️ What these scores mean — <b>best for <em>this</em> system, not the world</b></summary>
-        <div style="margin-top:6px; line-height:1.5;">
-          Mimir ranks models by <b>operational fitness for its own roles on your hardware</b> — not “best model overall.” A winner is the best model <b>for the system as built</b>, under this test battery, on your fleet — never a universal benchmark. Any installed model can compete (model-agnostic). Speed is <b>per-node and shifts with load</b>, so routing re-selects live. Coherence is <b>experimental</b> (a peer-review annotation, not a gate). And a narrow win isn’t a landslide.
-        </div>
-      </details>
+      <h2 style="margin-top:20px;">Role assignment</h2>
+      <div class="hint" style="margin-bottom:8px;">Pick the model for each role, or leave it on <b>auto</b> (the system picks the best-qualified). Setting one manually <b>pins</b> it — a rescan won't change it.</div>
+      <div id="roleAssign"></div>
+      <div id="roleMsg" class="hint" style="min-height:14px;"></div>
+
+      <h2 style="margin-top:20px;">Models</h2>
       <div id="poolBackend" class="hint"></div>
       <div id="poolMsg" class="hint">Models Mimir can route to. A checked box keeps a model in the automatic pool; uncheck to exclude it. ✓ = passed the qualification gate.</div>
       <div id="poolList"></div>
@@ -1199,7 +1208,7 @@ $("ingestBtn").addEventListener("click", async () => {
 });
 
 // --- tabs ---
-const loaders = { mind: loadMind, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet, models: loadModels };
+const loaders = { mind: loadMind, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet };
 document.querySelectorAll(".tabs button").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));
@@ -1342,6 +1351,7 @@ async function loadFleet() {
       d.appendChild(tags); list.appendChild(d);
     });
     if (!Object.keys(data.by_node || {}).length) list.innerHTML = '<div class="hint">No models yet — click "1 · Find models".</div>';
+    loadModels();        // the merged tab also shows role assignment + the model pool
     resumeFleetWork();
   } catch (e) { $("fleetList").innerHTML = "error: " + e.message; }
 }
@@ -1798,9 +1808,59 @@ $("fleetApplyBtn").addEventListener("click", async () => {
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; btnState("fleetApplyBtn", "failed"); }
 });
 
+function renderRoleAssign(data) {
+  // Per-role model picker: a dropdown per role, "auto" plus every known model. Choosing a concrete
+  // model pins the role (POST /api/fleet/role); "auto" is shown but selecting it is a no-op here
+  // (auto resolution happens server-side from the qualified pool).
+  const wrap = $("roleAssign"); if (!wrap) return;
+  wrap.innerHTML = "";
+  const active = data.active_roles || {};
+  const autoRoles = new Set(data.auto_roles || []);
+  const options = new Set(data.available || []);
+  (data.models || []).forEach(m => options.add(m.model));
+  Object.keys(active).forEach(r => { if (active[r]) options.add(active[r]); });
+  const roles = Object.keys(active);
+  if (!roles.length) { wrap.innerHTML = '<div class="hint">No roles configured.</div>'; return; }
+  roles.sort().forEach(role => {
+    const current = active[role] || "auto";
+    const isAuto = autoRoles.has(role);
+    const row = document.createElement("div"); row.className = "field";
+    row.style.display = "flex"; row.style.alignItems = "center"; row.style.gap = "10px";
+    const lab = document.createElement("label"); lab.style.minWidth = "90px"; lab.style.margin = "0";
+    lab.textContent = role;
+    const sel = document.createElement("select");
+    const autoOpt = document.createElement("option");
+    autoOpt.value = "auto"; autoOpt.textContent = isAuto ? `auto → ${current}` : "auto (pick best)";
+    sel.appendChild(autoOpt);
+    [...options].sort().forEach(m => {
+      const o = document.createElement("option"); o.value = m; o.textContent = m;
+      if (!isAuto && m === current) o.selected = true;
+      sel.appendChild(o);
+    });
+    if (isAuto) sel.value = "auto";
+    sel.addEventListener("change", () => { if (sel.value && sel.value !== "auto") setRole(role, sel.value); });
+    const tag = document.createElement("span"); tag.className = "tag";
+    tag.textContent = isAuto ? "auto" : "pinned"; tag.title = isAuto
+      ? "the system picks the best-qualified model for this role" : "manually fixed to one model";
+    row.appendChild(lab); row.appendChild(sel); row.appendChild(tag);
+    wrap.appendChild(row);
+  });
+}
+
+async function setRole(role, model) {
+  $("roleMsg").textContent = `Setting ${role} → ${model}…`;
+  try {
+    await api("POST", "/api/fleet/role", { role, model });
+    $("roleMsg").textContent = `${role} pinned to ${model}.`;
+    loadModels(); refreshState();
+    setTimeout(() => { $("roleMsg").textContent = ""; }, 2500);
+  } catch (e) { $("roleMsg").textContent = "Error: " + e.message; }
+}
+
 async function loadModels() {
   try {
     const data = await api("GET", "/api/fleet/pool");
+    renderRoleAssign(data);
     const backend = data.lan_backend ? `LAN fleet (${data.nodes_up} node(s) up)` : "Local only";
     const auto = (data.auto_roles || []).join(", ") || "none (all roles pinned)";
     $("poolBackend").innerHTML = `<b>Backend:</b> ${backend} &middot; <b>Auto roles:</b> ${auto}. Locality is set by [backend] lan_backend in mimir.toml (restart to change).`;

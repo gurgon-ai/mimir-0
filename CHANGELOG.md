@@ -7,6 +7,15 @@ Pre-1.0: the API and schema may change between releases.
 
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
+### Changed
+- **Manual per-role model assignment + Fleet/Models tabs merged.** The web UI's **Fleet** tab now has
+  a **Role assignment** control: a dropdown per role to leave it on **auto** (best-qualified, re-picked
+  on rescan) or **pin** a specific model (honoured exactly, never substituted) — backed by
+  `Mimir.set_role(role, model)` and `POST /api/fleet/role`. The separate **Models** tab is gone; its
+  model pool (enable/disable, roles served/barred) folded into **Fleet**, which shares most of the same
+  data. `/api/fleet/pool` now also returns `available` (live model names) so the dropdown has options
+  before any benchmark.
+
 ### Fixed
 - **A failed latency probe was recorded as 0.0s — making a timing-out model rank as the *fastest*.**
   `_measure_turn_latency` caught a probe failure (timeout/transport error) and returned `0.0`, the
