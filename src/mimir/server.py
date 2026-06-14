@@ -1368,6 +1368,8 @@ function renderPlacement(data) {
   _benchBoardClosed = false; benchShow(true);
   let h = '<h2>📊 Per-node placement — what runs best on each node <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>';
   h += '<div class="legend">🏆 node winner (best quality, speed breaks ties) · ⚡ fastest here · ✅ ≥0.80 🟡 0.50–0.79 ❌ &lt;0.50 · speed is per-node · roles: green = eligible, ⊘ = barred</div>';
+  h += '<div class="hint" style="margin:6px 0;">☑ Untick a machine to <b>exclude it from qualification + routing</b> — e.g. disable the GPU box to see what your edge nodes can do <i>on their own</i> (the whole point: useful home AI without killer compute). Takes effect on the next benchmark/tournament.</div>';
+  const disabledNodes = new Set(data.disabled_nodes || []);
   const nodes = Object.keys(data.by_node || {}).sort((a, b) => {
     const la = a.includes("127.0.0.1"), lb = b.includes("127.0.0.1");
     if (la !== lb) return la ? -1 : 1; return a.localeCompare(b);
@@ -1375,8 +1377,10 @@ function renderPlacement(data) {
   if (!nodes.length) { $("benchBoard").innerHTML = h + '<div class="hint" style="margin-top:12px;">No placement data yet — run a benchmark, then the speed-test.</div>'; return; }
   nodes.forEach(node => {
     const models = data.by_node[node];
-    const champ = models.find(m => m.champion);
-    h += `<div class="nodehdr" style="margin-top:14px;">${shortNode(node)} · ${models.length} model(s)${champ ? ` · winner 🏆 <b>${champ.model}</b> (q${(champ.quality ?? 0).toFixed(2)} · ${champ.return_time != null ? champ.return_time.toFixed(1) + "s" : "·"})` : ""}</div>`;
+    const off = disabledNodes.has(node);
+    const champ = off ? null : models.find(m => m.champion);
+    h += `<div style="${off ? "opacity:0.45;" : ""}">`;
+    h += `<div class="nodehdr" style="margin-top:14px;"><label style="cursor:pointer;" title="Use this machine in the fleet. Untick to exclude it from qualification + routing."><input type="checkbox" ${off ? "" : "checked"} onchange="toggleNodeFromView('${node}', this.checked)"> ${shortNode(node)}</label> · ${models.length} model(s)${off ? " — <b>disabled</b> (excluded)" : (champ ? ` · winner 🏆 <b>${champ.model}</b> (q${(champ.quality ?? 0).toFixed(2)} · ${champ.return_time != null ? champ.return_time.toFixed(1) + "s" : "·"})` : "")}</div>`;
     h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Disc</th><th>Epis</th><th>Coh</th><th>Speed</th><th>Roles</th></tr>";
     models.forEach(m => {
       const flag = (m.champion ? "🏆" : "") + (m.fastest ? "⚡" : "");
@@ -1390,9 +1394,18 @@ function renderPlacement(data) {
         + `<td>${m.return_time != null ? m.return_time.toFixed(1) + "s" : "·"}</td>`
         + `<td style="font-size:11px;"><span style="color:#7fd17f;">${elig}</span> <span style="color:#e0a0a0;" title="${barTitle}">${bars}</span></td></tr>`;
     });
-    h += "</table>";
+    h += "</table></div>";
   });
   $("benchBoard").innerHTML = h;
+}
+// Toggle a machine on/off from the placement view (excludes it from qualification + routing), then
+// re-render so the change is visible. The thesis: disable the GPU beast to test the edge-only fleet.
+async function toggleNodeFromView(node, enabled) {
+  try {
+    await api("POST", "/api/fleet/node", { node, enabled });
+    $("fleetMsg").textContent = `${shortNode(node)} ${enabled ? "enabled" : "disabled"} — applies on the next benchmark/tournament.`;
+    showPlacement();
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
 }
 
 // The adversarial-council roster (the "second lineup") — a SPREAD of model families, not the top-N.

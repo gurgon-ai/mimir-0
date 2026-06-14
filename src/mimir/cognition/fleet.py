@@ -351,9 +351,12 @@ def placement_matrix(
             runnable[0]["champion"] = True   # already sorted → best quality, speed tiebreak
             min(runnable, key=lambda m: m["return_time"])["fastest"] = True
 
+    # Include EVERY node (disabled ones too) so the view can show them greyed with a re-enable
+    # toggle — hiding a disabled node would make it un-toggleable. The caller marks disabled ones.
     return {
-        "nodes": len([n for n in by_node if n not in disabled_nodes]),
-        "by_node": {n: ms for n, ms in by_node.items() if n not in disabled_nodes},
+        "nodes": len(by_node),
+        "enabled_nodes": len([n for n in by_node if n not in disabled_nodes]),
+        "by_node": by_node,
         "disabled_nodes": sorted(disabled_nodes),
     }
 
