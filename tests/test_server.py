@@ -391,3 +391,8 @@ def test_history_endpoint_and_restore(base_url: str) -> None:
     assert any("hello there" in t["user_text"] for t in data["turns"])
     _, html = _get_html(base_url + "/")
     assert "restoreHistory" in html  # the UI repopulates the chat from the log on load
+
+
+def test_page_has_history_tab(base_url: str) -> None:
+    _, html = _get_html(base_url + "/")
+    assert 'data-tab="history"' in html and 'id="historyList"' in html
