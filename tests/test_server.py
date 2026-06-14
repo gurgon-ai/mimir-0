@@ -301,3 +301,38 @@ def test_bad_requests_fail_with_4xx(base_url: str) -> None:
     status2, data2 = _json("POST", base_url + "/api/ingest", {"path": "/no/such/file.md"})
     assert status2 == 400
     assert "error" in data2
+
+
+def test_onboarding_flow_persists_and_reports(base_url: str) -> None:
+    # The seeding interview: starts empty/incomplete, an answer persists + lands in the profile, and
+    # completion flips only once every question is answered.
+    status, data = _json("GET", base_url + "/api/onboarding")
+    assert status == 200
+    assert data["started"] is False and data["complete"] is False
+    assert any(q["key"] == "assistant_name" for q in data["profile"])
+    n_questions = len(data["profile"])
+
+    s2, after = _json("POST", base_url + "/api/onboarding/answer",
+                      {"key": "assistant_name", "answer": "Mimir"})
+    assert s2 == 200 and after["started"] is True
+    answers = {q["key"]: q["answer"] for q in after["profile"]}
+    assert answers["assistant_name"] == "Mimir"
+    assert len(after["pending"]) == n_questions - 1
+
+    # Answer the rest → complete.
+    for q in after["pending"]:
+        _json("POST", base_url + "/api/onboarding/answer", {"key": q["key"], "answer": "x"})
+    _, done = _json("GET", base_url + "/api/onboarding")
+    assert done["complete"] is True and done["pending"] == []
+
+
+def test_onboarding_answer_requires_a_key(base_url: str) -> None:
+    status, data = _json("POST", base_url + "/api/onboarding/answer", {"answer": "x"})
+    assert status == 400 and "error" in data
+
+
+def test_page_includes_interview_strip_and_profile_tab(base_url: str) -> None:
+    status, html = _get_html(base_url + "/")
+    assert status == 200
+    assert 'id="interviewStrip"' in html
+    assert 'data-tab="profile"' in html

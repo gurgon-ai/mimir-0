@@ -9,6 +9,8 @@ small JSON API:
     GET  /api/state        embedding mode, memory count, anchors established
     GET  /api/identity     current anchors + the questions still pending
     POST /api/identity     {"answers": {...}}  establish/revise identity anchors
+    GET  /api/onboarding   the seeding interview: every question + answer, what's pending
+    POST /api/onboarding/answer  {"key": "...", "answer": "..."}  store/update one answer (blank clears)
     POST /api/turn         {"text": "...", "user": "..."}  → {"reply", "introspect"}
     POST /api/ingest       {"path": "..."}  ingest a local document
 
@@ -150,6 +152,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._state())
             elif route == "/api/identity":
                 self._send_json(self._identity_payload())
+            elif route == "/api/onboarding":
+                self._send_json(self._onboarding_payload())
             elif route == "/api/mind":
                 self._send_json(self._mind())
             elif route == "/api/memories":
@@ -202,6 +206,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._turn(body))
             elif route == "/api/identity":
                 self._send_json(self._establish(body))
+            elif route == "/api/onboarding/answer":
+                self._send_json(self._onboarding_answer(body))
             elif route == "/api/ingest":
                 self._send_json(self._ingest(body))
             elif route == "/api/sleep":
@@ -276,6 +282,28 @@ class _Handler(BaseHTTPRequestHandler):
         with self.server.brain_lock:
             self.server.brain.establish_identity({str(k): str(v) for k, v in answers.items()})
             return self._identity_payload()
+
+    def _onboarding_payload(self) -> dict[str, Any]:
+        """The seeding interview: every question + current answer, and what's still pending."""
+        brain = self.server.brain
+        profile = brain.onboarding_profile()
+        pending = brain.pending_onboarding()
+        return {
+            "profile": profile,
+            "pending": pending,
+            "complete": not pending,
+            # First-run prompt: nudge the interview only when nothing's been captured yet.
+            "started": any(q["answer"] for q in profile),
+        }
+
+    def _onboarding_answer(self, body: dict[str, Any]) -> dict[str, Any]:
+        key = str(body.get("key", "")).strip()
+        if not key:
+            raise ValueError("'key' is required")
+        answer = str(body.get("answer", ""))
+        with self.server.brain_lock:
+            self.server.brain.record_onboarding_answer(key, answer)
+            return self._onboarding_payload()
 
     def _ingest(self, body: dict[str, Any]) -> dict[str, Any]:
         path = str(body.get("path", "")).strip()
@@ -865,6 +893,17 @@ _HTML = """<!doctype html>
   .searchrow { display:flex; gap:6px; margin-bottom:10px; }
   .searchrow input { flex:1; }
   .searchrow select { background:#11161d; border:1px solid #2b333f; color:#d7dde5; border-radius:8px; padding:0 8px; }
+  /* the seeding-interview strip: sits in the bottom slice of the chat pane under the tournament board */
+  #interviewStrip { flex:none; max-height:34%; overflow:auto; border-top:2px solid #1f6feb; padding:12px 14px; background:#0d1320; }
+  #interviewStrip .ivhead { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:#6f8ad0; margin-bottom:6px; display:flex; align-items:center; gap:10px; }
+  #interviewStrip .ivq { font-size:15px; color:#e7edf5; margin-bottom:9px; }
+  #ivForm { display:flex; gap:8px; }
+  #ivForm input { flex:1; }
+  #ivProgress { font-size:12px; color:#6f7a8a; margin-top:7px; }
+  .profile-fact { border:1px solid #232a35; border-radius:8px; padding:9px 11px; margin-bottom:9px; }
+  .profile-fact label { display:block; font-size:12px; color:#9aa4b2; margin-bottom:4px; }
+  .profile-fact .ans { width:100%; }
+  .profile-fact .anchorbadge { font-size:10px; color:#6f8ad0; margin-left:6px; }
 </style>
 </head>
 <body>
@@ -876,6 +915,19 @@ _HTML = """<!doctype html>
   <div id="chat">
     <div id="benchBoard" style="display:none; flex:1; overflow:auto; padding:18px;"></div>
     <div id="log"></div>
+    <div id="interviewStrip" style="display:none;">
+      <div class="ivhead"><span>🌱 Getting to know you</span>
+        <span id="ivProgressTop" style="color:#6f7a8a;"></span>
+        <button class="secondary" type="button" id="ivSkip" style="margin-left:auto; padding:3px 9px;">Skip</button>
+        <button class="secondary" type="button" id="ivDone" style="padding:3px 9px;">Later</button>
+      </div>
+      <div class="ivq" id="ivQ">…</div>
+      <form id="ivForm">
+        <input type="text" id="ivInput" placeholder="Type your answer…" autocomplete="off"/>
+        <button type="submit" id="ivSend">Next</button>
+      </form>
+      <div id="ivProgress"></div>
+    </div>
     <form id="composer">
       <input type="text" id="text" placeholder="Say something to Mimir…" autocomplete="off"/>
       <button type="submit" id="send">Send</button>
@@ -884,6 +936,7 @@ _HTML = """<!doctype html>
   <aside>
     <div class="tabs">
       <button data-tab="identity" class="active">Identity</button>
+      <button data-tab="profile">Profile</button>
       <button data-tab="mind">Mind</button>
       <button data-tab="memories">Memories</button>
       <button data-tab="graph">Graph</button>
@@ -901,6 +954,19 @@ _HTML = """<!doctype html>
         <button id="saveIdent" type="button">Save</button>
       </div>
       <div id="identMsg"></div>
+    </div>
+
+    <div class="tabpane hidden" id="tab-profile">
+      <h2>You &amp; this place</h2>
+      <div class="hint" style="margin-bottom:10px;">The seeding interview — your highest-trust facts
+        (<span class="tag tier">stated_by_primary_user</span>), the orientation everything else builds
+        on. Edit any answer below, or run the guided interview. Everything's editable anytime.</div>
+      <div class="row" style="margin-bottom:12px;">
+        <button id="runInterviewBtn" type="button">🌱 Run interview</button>
+        <button class="secondary" id="profileReloadBtn" type="button">Reload</button>
+      </div>
+      <div id="profileFacts"></div>
+      <div id="profileMsg" style="font-size:12px; color:#7fd17f; margin-top:6px; min-height:14px;"></div>
     </div>
 
     <div class="tabpane hidden" id="tab-mind">
@@ -1313,7 +1379,10 @@ let _benchBoardClosed = false;
 function benchShow(on) {
   $("benchBoard").style.display = on ? "block" : "none";
   $("log").style.display = on ? "none" : "";
-  $("composer").style.display = on ? "none" : "";
+  // the composer is hidden while the board OR the interview owns the pane
+  $("composer").style.display = (on || ivState.active) ? "none" : "";
+  if (on) { maybeStartInterview(); }                       // pair the interview with the tournament
+  else if (ivState.mode === "board") interviewShow(false); // board gone → retire a board-paired strip
 }
 function closeBench() { _benchBoardClosed = true; benchShow(false); }
 function _emoji(v) { return v == null ? "·" : v >= 0.8 ? "✅" : v >= 0.5 ? "🟡" : "❌"; }
@@ -1830,7 +1899,102 @@ $("councilBtn").addEventListener("click", async () => {
   $("councilBtn").disabled = false;
 });
 
-refreshState(); loadIdentity(); resumeFleetWork();
+// -- the seeding interview: a one-question-at-a-time strip under the tournament board -----------
+// (and re-runnable any time from the Profile tab). Capture-only; answers persist immediately.
+const ivState = { queue: [], i: 0, active: false, dismissed: false, mode: null };
+
+function interviewShow(on) {
+  ivState.active = on;
+  $("interviewStrip").style.display = on ? "block" : "none";
+  if (on) $("composer").style.display = "none";
+  // when the interview ends, hand the composer back — unless the board still owns the pane
+  else if ($("benchBoard").style.display === "none") $("composer").style.display = "";
+}
+
+async function maybeStartInterview() {
+  if (ivState.active || ivState.dismissed) return;        // don't restart on every board poll
+  let data; try { data = await api("GET", "/api/onboarding"); } catch (_) { return; }
+  if (data.complete) return;
+  startInterview(data.pending, "board");
+}
+
+function startInterview(queue, mode) {
+  ivState.queue = queue; ivState.i = 0; ivState.dismissed = false; ivState.mode = mode || "manual";
+  interviewShow(true);
+  renderInterviewQ();
+}
+
+function renderInterviewQ() {
+  const q = ivState.queue[ivState.i];
+  if (!q) {  // finished the queue
+    $("ivQ").textContent = "All set — thank you. You can edit any of this anytime in the Profile tab.";
+    $("ivForm").style.display = "none"; $("ivSkip").style.display = "none";
+    $("ivProgressTop").textContent = ""; $("ivProgress").textContent = "";
+    $("ivDone").textContent = "Close";
+    return;
+  }
+  $("ivForm").style.display = ""; $("ivSkip").style.display = ""; $("ivDone").textContent = "Later";
+  $("ivQ").textContent = q.question;
+  $("ivInput").value = q.answer || "";
+  $("ivProgressTop").textContent = `${ivState.i + 1} / ${ivState.queue.length}`;
+  $("ivProgress").textContent = "Press Enter to save · skippable · stored as your highest-trust facts.";
+  $("ivInput").focus();
+}
+
+async function submitInterviewAnswer() {
+  const q = ivState.queue[ivState.i]; if (!q) return;
+  const answer = $("ivInput").value.trim();
+  if (answer) {
+    try { await api("POST", "/api/onboarding/answer", { key: q.key, answer }); }
+    catch (e) { $("ivProgress").textContent = "Error: " + e.message; return; }
+    refreshState();
+    if (!$("tab-profile").classList.contains("hidden")) loadProfile();
+  }
+  ivState.i++; renderInterviewQ();
+}
+
+$("ivForm").addEventListener("submit", (e) => { e.preventDefault(); submitInterviewAnswer(); });
+$("ivSkip").addEventListener("click", () => { ivState.i++; renderInterviewQ(); });
+$("ivDone").addEventListener("click", () => { ivState.dismissed = true; interviewShow(false); });
+
+// -- Profile tab: the editable 'one place' for the seeding facts --------------------------------
+async function loadProfile() {
+  let data; try { data = await api("GET", "/api/onboarding"); } catch (e) { $("profileMsg").textContent = "Error: " + e.message; return; }
+  const wrap = $("profileFacts"); wrap.innerHTML = "";
+  data.profile.forEach(q => {
+    const d = document.createElement("div"); d.className = "profile-fact";
+    const badge = q.anchor ? `<span class="anchorbadge">↳ self-model: ${q.anchor}</span>` : "";
+    d.innerHTML = `<label>${q.question}${badge}</label>`;
+    const inp = document.createElement("input"); inp.type = "text"; inp.className = "ans";
+    inp.value = q.answer || ""; inp.placeholder = "(not answered)"; inp.dataset.key = q.key;
+    inp.addEventListener("change", async () => {
+      try {
+        await api("POST", "/api/onboarding/answer", { key: q.key, answer: inp.value });
+        $("profileMsg").textContent = "Saved."; refreshState();
+        setTimeout(() => $("profileMsg").textContent = "", 1500);
+      } catch (e) { $("profileMsg").textContent = "Error: " + e.message; }
+    });
+    d.appendChild(inp); wrap.appendChild(d);
+  });
+}
+
+$("runInterviewBtn").addEventListener("click", async () => {
+  let data; try { data = await api("GET", "/api/onboarding"); } catch (_) { return; }
+  // re-runnable: walk every question, pre-filled with current answers, so it doubles as a refresh
+  startInterview(data.profile.map(q => ({ key: q.key, question: q.question, answer: q.answer })), "manual");
+});
+$("profileReloadBtn").addEventListener("click", loadProfile);
+loaders.profile = loadProfile;
+
+// First-run nudge: if nothing's been captured yet, invite the interview (once, in the chat).
+async function onboardingNudge() {
+  try {
+    const data = await api("GET", "/api/onboarding");
+    if (!data.started) addMsg("mimir", "👋 Before we get going, I'd love to learn a little about you and this place — it makes me useful from the very first turn. Open the Profile tab and hit “Run interview” (or it'll appear under the tournament board while your fleet is being qualified). Everything's editable later, and you choose what I keep.");
+  } catch (_) {}
+}
+
+refreshState(); loadIdentity(); resumeFleetWork(); onboardingNudge();
 </script>
 </body>
 </html>

@@ -406,7 +406,14 @@ needs.
   guard, archival of low-salience provisionals, and conservative contradiction resolution over
   functional graph relations)_, ~~inner council~~ _(landed: adversarial deliberation — generic
   personas take positions in parallel, spread across auto-discovered models, and a synthesizer
-  weighs them into a verdict stored as recallable understanding)_, the qualification battery.
+  weighs them into a verdict stored as recallable understanding)_, ~~the seeding interview~~
+  _(landed, Phase 1: a short get-to-know-you — what to call the assistant, who the operator is and
+  what they do, their week, location, household, pets, interests — paired with the qualifying
+  tournament. Captured model-free and persisted immediately as the operator's highest-provenance
+  facts: `stated_by_primary_user` memories with `provenance="onboarding"`, one editable row per
+  question living in one place, name/operator/location mirrored into the identity anchors. The
+  LLM parse pass (one answer → several typed facts + triples, review-before-commit) is Phase 2)_,
+  the qualification battery.
 - **Adapters (separate extras/packages):** ~~a reference HTTP server~~ _(landed: a stdlib,
   zero-dependency reference web server + single-page UI — chat, the identity interview, document
   ingest; `python -m mimir.server`)_, streaming, an optional voice adapter, and example plugins

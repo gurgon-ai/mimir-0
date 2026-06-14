@@ -105,6 +105,18 @@ def get_memory(gateway: StorageGateway, memory_id: int) -> Memory | None:
     return gateway.read(_read)
 
 
+def delete_memory(gateway: StorageGateway, memory_id: int) -> None:
+    """Permanently remove a memory by id (a hard delete, distinct from sleep's archive).
+
+    Used for user-governed edits — re-answering an onboarding question replaces its row, and the
+    Profile panel can drop a fact outright. Goes through the single writer like every mutation.
+    """
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+
+    gateway.submit(_write)
+
+
 def list_memories(
     gateway: StorageGateway,
     *,
