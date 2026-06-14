@@ -63,6 +63,12 @@ every = 0
 top_k = 3            # max matching habits injected per turn
 min_match = 0.3      # minimum trigger relevance (cosine or keyword) before a habit fires
 
+[locale]
+# Temporal grounding: the clock/calendar sense injected each turn so Mimir can reason about time
+# (and answer "what season is it?" with no model call). Universal — no place is baked into core.
+# timezone = "America/Vancouver"   # IANA name; omit to use the host's local zone
+hemisphere = "north"               # "north" or "south" — which way the seasons run
+
 [provider]
 # "ollama" talks to a local Ollama server with stdlib HTTP (no extra deps).
 # "mock" is a deterministic, offline stand-in for tests/demos (needs no model server).

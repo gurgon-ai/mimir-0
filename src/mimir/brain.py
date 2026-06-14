@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,6 +57,7 @@ from .cognition.procedural import learn_procedure, render_procedures, retrieve_p
 from .cognition.self_model import synthesize_self_model
 from .cognition.sentinel import run_sentinel
 from .cognition.sleep import SleepReport, consolidate
+from .cognition.temporal import answer_time_query, local_now, time_prefix
 from .cognition.working_memory import (
     current_working_memory,
     record_exchange,
@@ -331,6 +333,19 @@ class Mimir:
         """Construct from a ``mimir.toml`` path."""
         return cls(load_config(path))
 
+    # -- temporal grounding (DESIGN §3e) ----------------------------------------------
+
+    def _time_context(self) -> str:
+        """The clock/calendar line injected each turn, in the configured zone + hemisphere."""
+        return time_prefix(local_now(self.config.timezone), self.config.hemisphere)
+
+    def maybe_time_answer(self, text: str) -> str | None:
+        """A direct, model-free answer to an explicit time/date/season question, or ``None``.
+
+        The deterministic intercept (DESIGN §3e) — exposed so a host (CLI, server, voice) can short-
+        circuit before a model call. ``turn`` uses it automatically."""
+        return answer_time_query(text, local_now(self.config.timezone), self.config.hemisphere)
+
     # -- the turn ---------------------------------------------------------------------
 
     def turn(self, text: str, user: str | None = None) -> TurnResult:
@@ -338,6 +353,19 @@ class Mimir:
         # before we assemble — so the prompt reflects the latest reflection and identity.
         self._join_background()
         self._turn_count += 1
+
+        # 0. Deterministic time-query intercept — answer "what day/season is it" with no model call
+        #    (DESIGN §3e). Still recorded as an exchange (continuity), nothing to bake/reflect on.
+        intercept = self.maybe_time_answer(text)
+        if intercept is not None:
+            bundle = build_context(
+                query=text, user=user, identity=self.config.identity, retrieved=[],
+                sentinel_note=None, embed_mode=self._embedder.mode,
+                budget_tokens=self.config.context_budget_tokens,
+                time_context=self._time_context(),
+            )
+            record_exchange(self._storage, user=user, user_text=text, reply=intercept)
+            return TurnResult(reply=intercept, context=bundle, baked=[])
 
         # 1. Recall: embed the query, pull candidates, rank them.
         query_vec = self._embedder.embed(text)
@@ -362,6 +390,8 @@ class Mimir:
             working_memory=working_memory,
             graph_facts=graph_facts,
             procedures=procedures,
+            time_context=self._time_context(),
+            now_ts=time.time(),
         )
 
         # 3. Generate the reply through the model gateway. Strip any internal epistemic tags the
@@ -429,6 +459,8 @@ class Mimir:
             working_memory=working_memory,
             graph_facts=graph_facts,
             procedures=procedures,
+            time_context=self._time_context(),
+            now_ts=time.time(),
         )
         messages = [
             {"role": "system", "content": bundle.prompt},

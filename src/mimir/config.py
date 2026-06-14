@@ -119,6 +119,12 @@ class Config:
     # Procedural memory: how many matching procedures to inject, and the minimum trigger match.
     procedural_top_k: int = 3
     procedural_min_match: float = 0.3
+    # Temporal grounding (DESIGN §3e): the system's clock + calendar awareness, injected each turn
+    # so it can answer relative-time questions ("how long ago?", "what season?"). An IANA timezone
+    # (e.g. "America/Vancouver"); None = the host's local zone. Hemisphere flips the season dates —
+    # universal, no place baked into core. Both are locale knobs, not deployment secrets.
+    timezone: str | None = None
+    hemisphere: str = "north"  # "north" or "south" — which way the seasons run
 
     def validate(self) -> None:
         """Raise ``ConfigError`` loud on any unrunnable configuration."""
@@ -235,6 +241,9 @@ def load_config(path: str | Path) -> Config:
         sleep_every=int(raw.get("sleep", {}).get("every", 0)),
         procedural_top_k=int(raw.get("procedural", {}).get("top_k", 3)),
         procedural_min_match=float(raw.get("procedural", {}).get("min_match", 0.3)),
+        timezone=(str(raw["locale"]["timezone"]) if raw.get("locale", {}).get("timezone")
+                  else None),
+        hemisphere=str(raw.get("locale", {}).get("hemisphere", "north")),
     )
     config.validate()
     return config

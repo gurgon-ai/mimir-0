@@ -65,6 +65,16 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **Temporal grounding — the brain's clock/calendar sense (DESIGN §3e).** First slice of the
+  thinking-components extraction from the home AI, stripped to a universal skeleton (no integrations).
+  `cognition/temporal.py` injects a compact "It is Thursday, January 15 2026, 2:30 PM. Season: winter
+  (spring in 64 days)." line into every prompt, and every recalled fact now carries a relative-age tag
+  (`…; 3 days ago`) so the model reasons about recency instead of guessing. Explicit time/date/season
+  questions are answered by a **deterministic intercept** (`Mimir.maybe_time_answer`, used
+  automatically by `turn()`) with zero model cost. Timezone + hemisphere are `[locale]` config
+  (default: host zone, northern seasons) — universal, no place baked into core. Pure functions
+  (the moment is passed in), so it's deterministic and fully tested. `build_context()` gains
+  `time_context` and `now_ts`.
 - **The seeding interview (Phase 1) — the operator's first, highest-provenance facts.** A short
   get-to-know-you — what to call the assistant, who the operator is and what they do, their week,
   location, household, pets, interests — paired with the qualifying tournament and **re-runnable any

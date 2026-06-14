@@ -361,6 +361,10 @@ every = 0                       # turns between consolidation passes (dedup/deca
 top_k = 3                       # max matching learned habits injected per turn
 min_match = 0.3                 # minimum trigger relevance before a habit fires
 
+[locale]                        # temporal grounding — clock/calendar sense injected each turn
+# timezone = "America/Vancouver"  # IANA name; omit to use the host's local zone
+hemisphere = "north"            # "north" | "south" — which way the seasons run
+
 [provider]
 type = "ollama"                 # "ollama" | "mock"
 host = "http://localhost:11434" # ollama only

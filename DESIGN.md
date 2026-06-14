@@ -107,10 +107,18 @@ confident hallucination.
 
 ### 3e. The assembly contract — `build_context()`
 This is the heart. Given a turn + user, it produces an ordered, budgeted prompt: self-model →
-identity/persona → typed knowledge sections (each capped) → goals → working memory → sentinel note
-(high-attention end slot) → uncertainty flag. It is the single point where "universal" must be kept
-strictly separate from any deployment-specific context — the core ships the universal sections;
-everything else is a *registered context source*.
+identity/persona → **the current moment (time/season)** → typed knowledge sections (each capped, and
+each fact **tagged with its age**) → goals → working memory → sentinel note (high-attention end slot)
+→ uncertainty flag. It is the single point where "universal" must be kept strictly separate from any
+deployment-specific context — the core ships the universal sections; everything else is a *registered
+context source*.
+
+**Temporal grounding.** The system has an always-on clock/calendar sense (`cognition/temporal.py`): a
+compact "It is Thursday, January 15 2026, 2:30 PM. Season: winter (spring in 64 days)." line is
+injected each turn, and every recalled fact carries a relative-age tag (`… ; 3 days ago`) so the
+model reasons about recency instead of guessing. Timezone + hemisphere are `[locale]` config (default:
+host zone, northern seasons) — universal, no place baked into core. Explicit time/date/season
+questions are answered by a **deterministic intercept** (zero model cost) before any model call.
 
 The self-model section leads with the operator-established identity anchors **verbatim** — these are
 authoritative. Any synthesized self-narrative is grounded in operational history and must **not**
