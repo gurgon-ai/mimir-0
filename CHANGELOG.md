@@ -8,6 +8,10 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Changed
+- **The web chat now streams.** The composer was calling the non-streaming `/api/turn` (the UI froze
+  until the whole reply landed — painful on slow edge nodes); it now uses the existing SSE
+  `/api/turn/stream` so tokens appear as they're generated, with a pulsing **"thinking…"** indicator
+  until the first token so you can tell it's working.
 - **Manual per-role model assignment + Fleet/Models tabs merged.** The web UI's **Fleet** tab now has
   a **Role assignment** control: a dropdown per role to leave it on **auto** (best-qualified, re-picked
   on rescan) or **pin** a specific model (honoured exactly, never substituted) — backed by
@@ -17,6 +21,11 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   before any benchmark.
 
 ### Fixed
+- **The model greeted the operator by name every turn.** Each turn is sent as just `[system, user]`
+  (no prior assistant messages), so a model reads it as a fresh start and opens with "Greetings, …".
+  The default identity now instructs it to treat the session as one ongoing conversation — pick up
+  where it left off, no greeting or name-restating unless greeted first. (A fuller fix — threading
+  recent turns in as real chat messages — is a later improvement.)
 - **A failed latency probe was recorded as 0.0s — making a timing-out model rank as the *fastest*.**
   `_measure_turn_latency` caught a probe failure (timeout/transport error) and returned `0.0`, the
   best possible sort key — so a model that aced the short capability probes but timed out on the

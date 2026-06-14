@@ -866,6 +866,8 @@ _HTML = """<!doctype html>
   .user { margin-left:auto; }
   .user .body { background:#1f6feb; color:#fff; }
   .mimir .body { background:#1a2029; }
+  .msg .body.thinking { color:#8a94a3; font-style:italic; animation: pulse 1.1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity:.4 } 50% { opacity:1 } }
   .meta { font-size:11px; color:#6f7a8a; margin-top:4px; }
   #composer { display:flex; gap:8px; padding:12px; border-top:1px solid #232a35; }
   #composer input[type=text] { flex:1; }
@@ -1115,8 +1117,13 @@ function addMsg(who, body, meta) {
 async function streamTurn(text) {
   const bubble = addMsg("mimir", "");
   const body = bubble.querySelector(".body");
+  // Thinking indicator: a pulsing placeholder until the first token arrives, so you can tell it's
+  // working even when an edge node is slow to start generating.
+  body.classList.add("thinking"); body.textContent = "thinking…";
+  let started = false;
+  const begin = () => { if (!started) { started = true; body.classList.remove("thinking"); body.textContent = ""; } };
   const resp = await fetch("/api/turn/stream", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, user: "operator" }) });
-  if (!resp.ok) { const e = await resp.json().catch(() => ({ error: "HTTP " + resp.status })); throw new Error(e.error); }
+  if (!resp.ok) { body.classList.remove("thinking"); const e = await resp.json().catch(() => ({ error: "HTTP " + resp.status })); throw new Error(e.error); }
   const reader = resp.body.getReader(); const dec = new TextDecoder();
   let buf = "", introspect = null;
   while (true) {
@@ -1129,11 +1136,12 @@ async function streamTurn(text) {
       evt.split("\\n").forEach(l => { if (l.startsWith("event:")) ev = l.slice(6).trim(); else if (l.startsWith("data:")) data += l.slice(5).trim(); });
       if (!data) continue;
       let obj; try { obj = JSON.parse(data); } catch (_) { continue; }
-      if (ev === "token") { body.textContent += obj.text; $("log").scrollTop = $("log").scrollHeight; }
+      if (ev === "token") { begin(); body.textContent += obj.text; $("log").scrollTop = $("log").scrollHeight; }
       else if (ev === "done") { introspect = obj.introspect; }
-      else if (ev === "error") { body.textContent += (body.textContent ? "\\n" : "") + "[error] " + obj.error; }
+      else if (ev === "error") { begin(); body.textContent += (body.textContent ? "\\n" : "") + "[error] " + obj.error; }
     }
   }
+  if (!started) { body.classList.remove("thinking"); body.textContent = "(no response)"; }
   if (introspect) {
     const m = document.createElement("div"); m.className = "meta";
     m.textContent = `sources: ${introspect.source_count} · ${introspect.embed_mode}` + (introspect.uncertainty_triggered ? " · ⚠ thin evidence" : "");
@@ -1173,12 +1181,10 @@ $("composer").addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = $("text").value.trim(); if (!text) return;
   addMsg("you", text); $("text").value = ""; $("send").disabled = true;
-  try {
-    const r = await api("POST", "/api/turn", { text, user: "operator" });
-    const i = r.introspect || {};
-    const meta = `sources: ${i.source_count} · ${i.embed_mode}` + (i.uncertainty_triggered ? " · ⚠ thin evidence" : "");
-    addMsg("mimir", r.reply, meta);
-  } catch (e) { addMsg("mimir", "[error] " + e.message); }
+  // Stream the reply token-by-token (with a thinking indicator) so a slow edge node shows progress
+  // instead of a frozen UI.
+  try { await streamTurn(text); }
+  catch (e) { addMsg("mimir", "[error] " + e.message); }
   $("send").disabled = false; $("text").focus(); refreshState();
 });
 
