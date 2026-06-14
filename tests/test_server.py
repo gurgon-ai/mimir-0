@@ -358,3 +358,27 @@ def test_onboarding_capture_is_lockfree_during_long_ops(mock_config: Config) -> 
     finally:
         server.shutdown()
         brain.close()
+
+
+def test_set_role_pins_a_model(base_url: str) -> None:
+    # Manual override: pick a model for a role and it sticks (pinned, out of the auto set).
+    status, data = _json("POST", base_url + "/api/fleet/role",
+                        {"role": "chat", "model": "mock-b"})
+    assert status == 200
+    assert data["roles"]["chat"] == "mock-b"
+    _, pool = _json("GET", base_url + "/api/fleet/pool")
+    assert pool["active_roles"]["chat"] == "mock-b"
+    assert "chat" not in pool["auto_roles"]
+    assert "mock-b" in pool["available"]  # the dropdown's option source
+
+
+def test_set_role_requires_role_and_model(base_url: str) -> None:
+    status, data = _json("POST", base_url + "/api/fleet/role", {"role": "chat"})
+    assert status == 400 and "error" in data
+
+
+def test_fleet_and_models_tabs_are_merged(base_url: str) -> None:
+    status, html = _get_html(base_url + "/")
+    assert status == 200
+    assert 'id="roleAssign"' in html          # role assignment lives in the merged Fleet tab
+    assert 'data-tab="models"' not in html     # the separate Models tab is gone

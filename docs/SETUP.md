@@ -324,6 +324,13 @@ switch tabs. The size/latency scope fields (`min_model_size_b`, `max_model_size_
 apply to the whole run. This is the recommended path; *Find / Benchmark / Apply* remain as the manual,
 one-step-at-a-time equivalents.
 
+**Assign roles manually** (Fleet tab → *Role assignment*, or `brain.set_role(role, model)`). Each role
+has a dropdown: leave it on **auto** (the system routes to the best-qualified model and re-picks on a
+rescan) or choose a specific model to **pin** it — a pin is honoured exactly and never substituted or
+re-assigned. The Fleet tab now also holds the full **model pool** (enable/disable each model, see which
+roles it serves or is barred from) — Fleet and Models were merged into one view since they share so
+much.
+
 ## 6. Configuration reference
 
 ```toml

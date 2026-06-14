@@ -66,7 +66,7 @@ from .cognition.working_memory import (
     record_exchange,
     synthesize_working_memory,
 )
-from .config import AUTO_MODEL, BackendConfig, Config, ProviderSpec, load_config
+from .config import AUTO_MODEL, BackendConfig, Config, ProviderSpec, RoleSpec, load_config
 from .context.build import ContextBundle, build_context
 from .embed.base import Embedder, EmbeddingMode
 from .embed.endpoint import EndpointEmbedder, NullEmbedder
@@ -887,6 +887,21 @@ class Mimir:
             active_roles={r: s.model for r, s in self._model.roles_view().items()},
             auto_roles=self._auto_roles,
         )
+
+    def set_role(self, role: str, model: str) -> dict[str, str]:
+        """Pin a role to a specific model — a manual override of `auto` selection (DESIGN §4).
+
+        Routing then uses exactly this model (its fallback chain is cleared — a pin is never
+        substituted) and the role leaves the auto set, so a later rescan won't reassign it. Returns
+        the full role→model map after the change.
+        """
+        self._model.set_role_model(role, model)
+        existing = self.config.roles.get(role)
+        self.config.roles[role] = RoleSpec(model=model, params=existing.params if existing else {})
+        self._auto_roles.discard(role)
+        self._model.set_role_fallbacks(role, [])
+        log.info("role %r manually pinned to %s", role, model)
+        return {r: s.model for r, s in self._model.roles_view().items()}
 
     def _apply_role_recs(self, recs: dict[str, Any]) -> dict[str, str]:
         """Re-point the real roles (chat/bake/reasoning) at the given recommendations. Shared by
