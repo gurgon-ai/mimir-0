@@ -301,9 +301,12 @@ class _Handler(BaseHTTPRequestHandler):
         if not key:
             raise ValueError("'key' is required")
         answer = str(body.get("answer", ""))
-        with self.server.brain_lock:
-            self.server.brain.record_onboarding_answer(key, answer)
-            return self._onboarding_payload()
+        # Lock-free by design (like /api/state): the interview is meant to run DURING the qualifying
+        # tournament, which holds brain_lock for whole rounds (minutes). Taking it here would hang
+        # "Next" until the round finished. Capture is a storage write + embed — the storage gateway is
+        # the thread-safe single writer and the embedder is pool-/stdlib-safe, so no global lock needed.
+        self.server.brain.record_onboarding_answer(key, answer)
+        return self._onboarding_payload()
 
     def _ingest(self, body: dict[str, Any]) -> dict[str, Any]:
         path = str(body.get("path", "")).strip()
