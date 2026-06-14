@@ -91,7 +91,9 @@ from .storage.repo import (
     latest_sentinel_note,
     list_catalogue,
     list_memories,
+    recent_conversation,
     record_access,
+    record_conversation_turn,
     record_interaction,
     set_model_enabled,
     set_node_enabled,
@@ -110,6 +112,7 @@ _PROBE_PROMPT = [{"role": "user", "content": "In one or two sentences, say you a
 _PROBE_TIMEOUT_S = 20.0
 _PROBE_PREDICT = 64  # cap the probe generation — long enough to time throughput, still cheap
 _FALLBACK_DEPTH = 4  # how many acceptable models deep a role's fallback chain runs (best first)
+_HISTORY_TURNS = 6   # recent exchanges replayed to the model as real messages (continuity)
 
 
 def _latency_staleness(info: dict[str, object] | None) -> float:
@@ -370,6 +373,19 @@ class Mimir:
         """The temporal-narrative arc (month → week → lately) for the prompt, or ``None``."""
         return render_recent_history(self._storage)
 
+    def _history_messages(self, user: str | None) -> list[dict[str, str]]:
+        """Recent exchanges as real chat messages, so the model has genuine conversational
+        continuity (not just summarized text) — the session-history replay (DESIGN §3a)."""
+        msgs: list[dict[str, str]] = []
+        for turn in recent_conversation(self._storage, user=user, limit=_HISTORY_TURNS):
+            msgs.append({"role": "user", "content": turn["user_text"]})
+            msgs.append({"role": "assistant", "content": turn["reply"]})
+        return msgs
+
+    def history(self, *, user: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        """The durable conversation log, oldest→newest — what the UI restores on load (§3a)."""
+        return recent_conversation(self._storage, user=user, limit=limit)
+
     def generate_narratives(self) -> dict[str, Any]:
         """Run the temporal-narrative cycle now (daily entry + weekly/monthly roll-up), sync.
 
@@ -403,6 +419,7 @@ class Mimir:
                 time_context=self._time_context(), now_ts=now,
             )
             record_exchange(self._storage, user=user, user_text=text, reply=intercept)
+            record_conversation_turn(self._storage, user=user, user_text=text, reply=intercept)
             return TurnResult(reply=intercept, context=bundle, baked=[])
 
         self._turn_active = True  # foreground in progress — the burst yields to it (§5a)
@@ -447,6 +464,7 @@ class Mimir:
                     "chat",
                     [
                         {"role": "system", "content": bundle.prompt},
+                        *self._history_messages(user),
                         {"role": "user", "content": text},
                     ],
                 )
@@ -463,6 +481,7 @@ class Mimir:
                 primary_user=self.config.primary_user,
             )
             record_exchange(self._storage, user=user, user_text=text, reply=reply)
+            record_conversation_turn(self._storage, user=user, user_text=text, reply=reply)
         finally:
             self._turn_active = False
 
@@ -499,6 +518,7 @@ class Mimir:
                 time_context=self._time_context(), now_ts=now,
             )
             record_exchange(self._storage, user=user, user_text=text, reply=intercept)
+            record_conversation_turn(self._storage, user=user, user_text=text, reply=intercept)
             yield intercept
             return bundle.introspect()
 
@@ -533,6 +553,7 @@ class Mimir:
             )
             messages = [
                 {"role": "system", "content": bundle.prompt},
+                *self._history_messages(user),
                 {"role": "user", "content": text},
             ]
 
@@ -561,6 +582,7 @@ class Mimir:
                 primary_user=self.config.primary_user,
             )
             record_exchange(self._storage, user=user, user_text=text, reply=reply)
+            record_conversation_turn(self._storage, user=user, user_text=text, reply=reply)
         finally:
             self._turn_active = False
 

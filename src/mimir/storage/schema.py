@@ -240,6 +240,24 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "CREATE UNIQUE INDEX idx_narratives_scope_period ON narratives(scope, period)",
         ],
     ),
+    (
+        16,
+        [
+            # Conversation log: the durable, full turn history (one row per exchange — user text +
+            # reply) so the conversation survives a restart and the UI can RESTORE it on load, so
+            # recent turns can be replayed to the model as real messages for continuity. Unlike
+            # the EXCHANGE recency buffer (capped/cleared on compression) and from `interactions`
+            # (timestamps only). Pruned to a rolling window so it never grows unbounded.
+            "CREATE TABLE conversation ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " user TEXT,"
+            " user_text TEXT NOT NULL,"
+            " reply TEXT NOT NULL,"
+            " created_at REAL NOT NULL"
+            ")",
+            "CREATE INDEX idx_conversation_created ON conversation(created_at)",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -311,4 +329,5 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
     "node_prefs": {"node", "enabled", "updated_at"},
     "interactions": {"id", "ts", "user"},
     "narratives": {"id", "scope", "period", "narrative", "source_count", "created_at"},
+    "conversation": {"id", "user", "user_text", "reply", "created_at"},
 }
