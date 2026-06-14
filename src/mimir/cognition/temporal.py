@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
+import statistics
 
 # Northern-hemisphere meteorological/astronomical season starts (month, day). Close enough for
 # conversation. The southern hemisphere runs the opposite season on the same dates.
@@ -156,3 +157,41 @@ def relative_age(then_ts: float, now_ts: float) -> str:
     if seconds < 45:
         return "just now"
     return f"{humanize_duration(seconds)} ago"
+
+
+# -- temporal-awareness baseline: is this gap normal for this user? (component 3) ------
+
+_GAP_FLOOR_S = 4 * 3600  # don't remark on gaps shorter than this (no nagging about a lunch break)
+
+
+def gap_insight(
+    timestamps: list[float], now_ts: float, *, min_events: int = 5, window_days: int = 30
+) -> str | None:
+    """A note when the time since the last interaction is **notable for this user's own history**,
+    else ``None`` (normal, or not enough history). Pure statistics — zero model cost (DESIGN §3e).
+
+    ``timestamps`` are PRIOR interaction epochs (not including the current turn). We measure the
+    distribution of past gaps over a rolling window and compare the current gap to it: beyond the
+    longest ever → "longest gap recorded"; beyond the 90th percentile (or 2× median) → "longer than
+    usual". Anything within normal rhythm, or below a floor, stays silent — awareness, not chatter.
+    """
+    cutoff = now_ts - window_days * 86400
+    recent = sorted(t for t in timestamps if t >= cutoff)
+    if len(recent) < min_events:
+        return None
+    gaps = sorted(recent[i + 1] - recent[i] for i in range(len(recent) - 1))
+    if not gaps:
+        return None
+    current = now_ts - recent[-1]
+    if current < _GAP_FLOOR_S:
+        return None
+    median = statistics.median(gaps)
+    p90 = gaps[min(int(len(gaps) * 0.9), len(gaps) - 1)]
+    longest = gaps[-1]
+    if current > longest * 1.05:
+        return (f"It's been {humanize_duration(current)} since you were last here — "
+                f"the longest gap I've recorded.")
+    if current > p90 or current > median * 2:
+        return (f"You haven't been around in {humanize_duration(current)} — longer than usual "
+                f"(typically about every {humanize_duration(median)}).")
+    return None

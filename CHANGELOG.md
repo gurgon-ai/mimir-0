@@ -75,6 +75,14 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   (default: host zone, northern seasons) — universal, no place baked into core. Pure functions
   (the moment is passed in), so it's deterministic and fully tested. `build_context()` gains
   `time_context` and `now_ts`.
+- **Temporal-awareness baselines — the system feels time passing (DESIGN §3e).** A durable
+  interaction log (one timestamp per turn, schema v14 `interactions`, pruned to a rolling window)
+  powers a deterministic "you've been away longer than usual" note: pure statistics over the user's
+  own gap distribution (median/p90/longest), surfaced as a `[Temporal awareness:]` prompt section
+  only when the current gap is genuinely notable — silent within normal rhythm, zero model cost.
+  `cognition/temporal.gap_insight`, `repo.{record_interaction,interaction_history}`,
+  `build_context(temporal_awareness=…)`. The same baseline machinery extends to entity/topic
+  staleness later.
 - **The seeding interview (Phase 1) — the operator's first, highest-provenance facts.** A short
   get-to-know-you — what to call the assistant, who the operator is and what they do, their week,
   location, household, pets, interests — paired with the qualifying tournament and **re-runnable any

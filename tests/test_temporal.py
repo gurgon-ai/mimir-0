@@ -11,6 +11,7 @@ import datetime as dt
 from mimir.brain import Mimir
 from mimir.cognition.temporal import (
     answer_time_query,
+    gap_insight,
     humanize_duration,
     next_season,
     season_of,
@@ -94,3 +95,45 @@ def test_recalled_facts_carry_their_age() -> None:
     assert "tier=conversation" in line and "source=conversation" in line
     # Without now_ts, the age tag is omitted (backwards-compatible).
     assert "ago" not in _memory_line(mem)
+
+
+# -- component 3: temporal-awareness baselines (deterministic, no model) ---------------
+
+_NOW = 2_000_000.0
+
+
+def test_gap_insight_needs_history() -> None:
+    assert gap_insight([1.0, 2.0, 3.0], _NOW) is None  # < 5 events → silent
+
+
+def test_gap_insight_flags_an_unprecedented_gap() -> None:
+    # Steady hourly rhythm, but the user's been gone 14h — the longest gap on record.
+    hist = [_NOW - 14 * 3600 - i * 3600 for i in range(10)]
+    out = gap_insight(hist, _NOW)
+    assert out and "longest gap" in out
+
+
+def test_gap_insight_flags_a_longer_than_usual_gap() -> None:
+    # Mostly hourly with one long historical gap, so 14h is notable but not the record.
+    hist = [_NOW - 14 * 3600 - i * 3600 for i in range(9)]
+    hist.append(hist[-1] - 30 * 3600)  # one big historical gap → 14h isn't the longest
+    out = gap_insight(hist, _NOW)
+    assert out and "longer than usual" in out
+
+
+def test_gap_insight_stays_silent_below_the_floor() -> None:
+    hist = [_NOW - 3600 - i * 3600 for i in range(10)]  # last seen 1h ago — no nagging
+    assert gap_insight(hist, _NOW) is None
+
+
+def test_turn_surfaces_temporal_awareness_after_a_gap(brain: Mimir) -> None:
+    import time as _t
+
+    from mimir.storage.repo import interaction_history, record_interaction
+
+    now = _t.time()
+    for i in range(10):  # seed a steady hourly history ending 14h ago
+        record_interaction(brain._storage, now - 14 * 3600 - i * 3600, "operator")
+    assert len(interaction_history(brain._storage, user="operator")) == 10  # log round-trips
+    result = brain.turn("hey", user="operator")
+    assert any(s.name == "temporal_awareness" for s in result.context.sections)
