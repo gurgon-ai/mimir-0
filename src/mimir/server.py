@@ -965,6 +965,7 @@ _HTML = """<!doctype html>
       <button data-tab="identity" class="active">Identity</button>
       <button data-tab="profile">Profile</button>
       <button data-tab="mind">Mind</button>
+      <button data-tab="history">History</button>
       <button data-tab="memories">Memories</button>
       <button data-tab="graph">Graph</button>
       <button data-tab="procedures">Habits</button>
@@ -980,6 +981,16 @@ _HTML = """<!doctype html>
         <button id="saveIdent" type="button">Save</button>
       </div>
       <div id="identMsg"></div>
+    </div>
+
+    <div class="tabpane hidden" id="tab-history">
+      <h2>Conversation history</h2>
+      <div class="hint" style="margin-bottom:8px;">The durable log of past turns (oldest first, newest at the bottom). Survives restarts; the chat pane restores the most recent on load.</div>
+      <div class="row" style="margin-bottom:10px;">
+        <button class="secondary" id="historyReloadBtn" type="button">Reload</button>
+      </div>
+      <div id="historyMsg" class="hint" style="min-height:14px;"></div>
+      <div id="historyList"></div>
     </div>
 
     <div class="tabpane hidden" id="tab-profile">
@@ -1223,8 +1234,35 @@ $("ingestBtn").addEventListener("click", async () => {
   } catch (e) { $("ingestResult").textContent = "Error: " + e.message; }
 });
 
+async function loadHistory() {
+  const list = $("historyList");
+  try {
+    const data = await api("GET", "/api/history?limit=200");
+    const turns = data.turns || [];
+    list.innerHTML = "";
+    $("historyMsg").textContent = turns.length ? `${turns.length} turn(s) retained.` : "";
+    if (!turns.length) { list.innerHTML = '<div class="hint">No conversation yet.</div>'; return; }
+    turns.forEach(t => {
+      const d = document.createElement("div"); d.className = "mem";
+      const u = document.createElement("div"); u.className = "text"; u.style.color = "#9fd0ff";
+      u.textContent = "you: " + t.user_text;
+      const a = document.createElement("div"); a.className = "text"; a.style.marginTop = "4px";
+      a.textContent = "mimir: " + t.reply;
+      d.appendChild(u); d.appendChild(a);
+      if (t.created_at) {
+        const meta = document.createElement("div"); meta.className = "meta";
+        meta.textContent = new Date(t.created_at * 1000).toLocaleString();
+        d.appendChild(meta);
+      }
+      list.appendChild(d);
+    });
+    list.scrollTop = list.scrollHeight;  // newest at the bottom, like the chat
+  } catch (e) { list.innerHTML = "error: " + e.message; }
+}
+$("historyReloadBtn").addEventListener("click", loadHistory);
+
 // --- tabs ---
-const loaders = { mind: loadMind, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet };
+const loaders = { mind: loadMind, history: loadHistory, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet };
 document.querySelectorAll(".tabs button").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));
