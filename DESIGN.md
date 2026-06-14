@@ -126,6 +126,14 @@ haven't been around in 14h (typically every ~6h)" or "the longest gap I've recor
 over the log (median/p90/longest gap), zero model cost, and silent within normal rhythm — awareness,
 not nagging. The same generic baseline machinery extends to entity/topic staleness later.
 
+**Temporal narratives** (`cognition/narratives.py`) give it a sense of *what happened* over time: a
+hierarchical journal — **daily → weekly → monthly**, each tier compressed from the one below and
+**lossy by design** (details fade, patterns persist, like human memory). Generated off the hot path in
+the consolidation pass from generic sources (the running summary + recent exchanges + the facts
+learned that period — no domain feeds), retained per-tier (10 / 5 / 13), and injected as a
+`[Recent history:]` section (coarsest first) so a turn weeks later still has the shape of what came
+before without dragging the raw transcript.
+
 The self-model section leads with the operator-established identity anchors **verbatim** — these are
 authoritative. Any synthesized self-narrative is grounded in operational history and must **not**
 restate or override those anchors: a synthesis that invents or changes the system's name is a

@@ -156,6 +156,7 @@ def build_context(
     procedures: list[str] | None = None,
     time_context: str | None = None,
     temporal_awareness: str | None = None,
+    recent_history: str | None = None,
     now_ts: float | None = None,
     extra_sections: list[Section] | None = None,
 ) -> ContextBundle:
@@ -218,6 +219,7 @@ def build_context(
     procedures_tokens = estimate_tokens(procedures_body) + 8 if procedures else 0
     working_memory_tokens = estimate_tokens(working_memory) + 8 if working_memory else 0
     awareness_tokens = estimate_tokens(temporal_awareness) + 8 if temporal_awareness else 0
+    history_tokens = estimate_tokens(recent_history) + 8 if recent_history else 0
     sentinel_tokens = (
         estimate_tokens(sentinel_note.text) + 8 if sentinel_note is not None else 0
     )
@@ -232,6 +234,7 @@ def build_context(
         - procedures_tokens
         - working_memory_tokens
         - awareness_tokens
+        - history_tokens
         - sentinel_tokens
         - extra_reserved
         - _UNCERTAINTY_RESERVE,
@@ -283,6 +286,20 @@ def build_context(
     # source_count = how much substantive typed knowledge fed this turn (DESIGN §3d): admitted
     # memory facts plus connected graph edges — two independent grounding layers.
     source_count = len(retrieved_ids) + len(graph_facts or [])
+
+    # 3c. Recent history — the temporal-narrative arc (month → week → lately), longer-horizon
+    #     context before working memory's recency (DESIGN §3a/§3e). Lossy summaries, not facts.
+    if recent_history:
+        sections.append(
+            Section(
+                name="recent_history",
+                title="Recent history (your own journal):",
+                body=recent_history,
+                tier=SectionTier.MEDIUM,
+                requested_tokens=estimate_tokens(recent_history),
+                admitted_tokens=estimate_tokens(recent_history),
+            )
+        )
 
     # 4. Working memory — rolling salient context, just before the end slot (DESIGN §3e).
     if working_memory:

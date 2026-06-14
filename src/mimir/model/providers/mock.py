@@ -19,6 +19,7 @@ from ...prompts import (
     BAKE_MARKER,
     COUNCIL_PERSONA_MARKER,
     COUNCIL_SYNTH_MARKER,
+    NARRATIVE_MARKER,
     RECALL_CLOSE,
     RECALL_OPEN,
     SELF_MODEL_MARKER,
@@ -56,6 +57,8 @@ class MockProvider:
             return self._self_model(user)
         if SENTINEL_MARKER in system:
             return self._reflect(user)
+        if NARRATIVE_MARKER in system:
+            return self._narrative(user)
         return self._reply(system, user)
 
     def chat_stream(
@@ -116,6 +119,13 @@ class MockProvider:
         """Author a deterministic self-description grounded in the brief's first line."""
         first = brief.strip().splitlines()[0] if brief.strip() else "I hold no memories yet."
         return f"I am a memory system shaped by use. {first}"
+
+    @staticmethod
+    def _narrative(material: str) -> str:
+        """A deterministic period journal entry, referencing how much material it drew on."""
+        topics = material.count("- ") + material.count("you:")
+        return (f"Journal: a period of steady activity, with {topics} thread(s) of context "
+                f"carried forward into a single coherent account.")
 
     @staticmethod
     def _reflect(turn_text: str) -> str:

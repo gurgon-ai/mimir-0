@@ -86,6 +86,33 @@ SELF_MODEL_SYSTEM = (
     "the notes only."
 )
 
+# --- temporal narratives (hierarchical, lossy-by-design; DESIGN §3a/§3e) -----------------
+# Daily → weekly → monthly. The compression is lossy on purpose: details fade, patterns persist —
+# like human memory. All generic (the conversation + what was learned), no domain sources.
+NARRATIVE_MARKER = "Write a journal"
+NARRATIVE_DAILY_SYSTEM = (
+    f"{NARRATIVE_MARKER} entry — your own first-person account of what happened this period, drawn "
+    "ONLY from the material below (recent exchanges, the running summary, and the facts you "
+    "learned). "
+    "Give each distinct topic, decision, thing learned, or change its own short paragraph; be "
+    "specific (names, topics, outcomes) but invent nothing not in the material. A quiet period "
+    "gets two or three sentences — do not pad. Respond with the entry only."
+)
+NARRATIVE_WEEKLY_SYSTEM = (
+    f"{NARRATIVE_MARKER} entry compressing the daily entries below into one higher-level summary. "
+    "Keep every distinct topic, decision, and outcome with their specifics (names, dates, "
+    "numbers); "
+    "drop the fine-grained back-and-forth. Details fade, patterns persist. First person, one short "
+    "paragraph per theme. Respond with the summary only."
+)
+NARRATIVE_MONTHLY_SYSTEM = (
+    f"{NARRATIVE_MARKER} entry synthesizing the weekly summaries below into one monthly narrative. "
+    "Organize by theme; preserve the important specifics (names, dates, milestones, outcomes) "
+    "while "
+    "weaving them into a coherent arc — this is long-term memory. First person. Respond with the "
+    "narrative only."
+)
+
 # --- default identity --------------------------------------------------------------------
 DEFAULT_IDENTITY = (
     "You are Mimir, a local-first assistant with an evidence-aware memory. You attribute "

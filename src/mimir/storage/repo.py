@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from typing import Any
 
 from .gateway import Priority, StorageGateway
 from .models import (
@@ -128,6 +129,62 @@ def record_interaction(
             "DELETE FROM interactions WHERE id NOT IN "
             "(SELECT id FROM interactions ORDER BY ts DESC LIMIT ?)",
             (keep,),
+        )
+
+    gateway.submit(_write)
+
+
+def save_narrative(
+    gateway: StorageGateway, *, scope: str, period: str, narrative: str,
+    source_count: int = 0, created_at: float | None = None,
+) -> None:
+    """Upsert one temporal narrative — regenerating a (scope, period) replaces it (idempotent)."""
+    ts = time.time() if created_at is None else created_at
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "INSERT OR REPLACE INTO narratives "
+            "(scope, period, narrative, source_count, created_at) VALUES (?, ?, ?, ?, ?)",
+            (scope, period, narrative, source_count, ts),
+        )
+
+    gateway.submit(_write)
+
+
+def list_narratives(gateway: StorageGateway, scope: str) -> list[dict[str, Any]]:
+    """All narratives in a scope, newest period first."""
+    def _read(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+        rows = conn.execute(
+            "SELECT period, narrative, source_count, created_at FROM narratives "
+            "WHERE scope = ? ORDER BY period DESC",
+            (scope,),
+        ).fetchall()
+        return [
+            {"period": r[0], "narrative": r[1], "source_count": r[2], "created_at": r[3]}
+            for r in rows
+        ]
+
+    return gateway.read(_read)
+
+
+def get_narrative(gateway: StorageGateway, scope: str, period: str) -> str | None:
+    """The narrative text for one (scope, period), or ``None`` if not yet generated."""
+    def _read(conn: sqlite3.Connection) -> str | None:
+        row = conn.execute(
+            "SELECT narrative FROM narratives WHERE scope = ? AND period = ?", (scope, period)
+        ).fetchone()
+        return row[0] if row else None
+
+    return gateway.read(_read)
+
+
+def prune_narratives(gateway: StorageGateway, scope: str, keep: int) -> None:
+    """Keep only the ``keep`` newest periods in a scope (retention cap; older ones compress up)."""
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "DELETE FROM narratives WHERE scope = ? AND period NOT IN "
+            "(SELECT period FROM narratives WHERE scope = ? ORDER BY period DESC LIMIT ?)",
+            (scope, scope, keep),
         )
 
     gateway.submit(_write)

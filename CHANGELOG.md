@@ -65,6 +65,17 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **Temporal narratives — a hierarchical, lossy-by-design journal (brain slice 2; DESIGN §3a/§3e).**
+  The system now has a sense of *what happened* over time: `cognition/narratives.py` writes a
+  first-person **daily** entry, compresses dailies older than 3 days into a **weekly** summary, and
+  weeklies beyond the 5 newest into a **monthly** narrative — each tier lossier than the last (details
+  fade, patterns persist). Generated off the hot path in the consolidation/sleep pass from generic
+  sources only (the running summary + recent exchanges + facts learned that period — no integrations),
+  idempotent per period, retained per tier (10 / 5 / 13). The recent entries are injected as a
+  `[Recent history:]` prompt section (coarsest first), so a turn weeks later still has the shape of
+  what came before. New: schema v15 `narratives`, `repo.{save_narrative,list_narratives,get_narrative,
+  prune_narratives}`, `Mimir.generate_narratives()`, `build_context(recent_history=…)`; runs in
+  `Mimir.sleep()` and the periodic sleep task.
 - **Temporal grounding — the brain's clock/calendar sense (DESIGN §3e).** First slice of the
   thinking-components extraction from the home AI, stripped to a universal skeleton (no integrations).
   `cognition/temporal.py` injects a compact "It is Thursday, January 15 2026, 2:30 PM. Season: winter
