@@ -142,7 +142,19 @@ role), and the brain reads it. Test which models can do a job; don't assert it.
 | `reasoning` | sentinel + deliberation | clean **structured output**, reasoning |
 | `bake` | memory extraction | faithful extraction, no hallucination |
 | `embed` | embeddings | an embedding model |
-| `council` | persona pool | **auto-discovered** (see below) |
+| `background` | off-the-record reasoning | reasoning competence — **not** discipline-gated |
+| `council` | adversarial pool | reasoning + **diversity** (a spread of families) |
+
+**The second lineup (`background`, `council`).** These staff cognition that never speaks *as* the
+assistant — off-hot-path reasoning, inner deliberation — so they are deliberately **not**
+discipline/epistemics-gated: a capable model that "leaks" the identity is fine here, and the big/slow
+models a chat latency cap excludes are prime members. Both clear a reasoning-competence floor only.
+`background` resolves to a single best; `council` resolves to a **diverse pool** (families before
+depth — different families fail differently, so a council of five distinct families beats five of one;
+see *Council = auto-discovery* below). The brain harness staffs itself by **querying the roster** —
+`roster_for(role, n)` ("give me N models for role R") — honouring the same model/node vetoes as every
+other pick, rather than a human reading a view. The role gate is one predicate (`_bar_reason`), so the
+seated roster can never disagree with the eligibility the leaderboard renders.
 
 Each role entry carries its tuned params (context window, temperature, output budget). A per-model
 constraint worth knowing: the context-window size must stay consistent across callers of the same
@@ -250,7 +262,26 @@ inverts, the *qualifier* is broken → loud alarm, never a silent pass.
 - **Model gateway** — every call goes through it: priority tiers, retry/backoff, transient-fail
   signaling (so background tasks defer instead of corrupting state on a busy backend). Behind it, a
   **provider pool**: multiple endpoints, health-checked, tier-routed, graceful degradation — plus
-  single-endpoint and API adapters.
+  single-endpoint and API adapters. Routing is **speed- and health-aware** (below).
+
+**Speed-aware routing + ranked fallback (the live half of §4).** Qualification (§4) decides *which
+models are acceptable for a role*; routing decides *which model on which node answers a given call*:
+- **Live node speed, measured from real traffic.** Every real call is timed and folded into a
+  per-`(node, model)` latency estimate (EWMA, in the same "seconds per ~256-token turn" unit the
+  benchmark writes), so the pool learns each node's current speed **passively — no synthetic calls**.
+  A rare **idle heartbeat** (default ~30 min, decoupled from the faster health refresh) tops up nodes
+  that have gone quiet; real usage is the primary signal. Estimates **seed** from the catalogue's
+  qualification snapshot (informed from turn one) and are **written back** so the placement view shows
+  live, current speed — and a failed probe is recorded as *unmeasured*, never as fast.
+- **Route to the healthiest, fastest node.** Within the healthy tier a call goes to the node with the
+  lowest **expected wait** (`latency × current load`); the existing health gating (reachable /
+  saturated / disabled / model-aware) is unchanged. With nothing measured yet this reduces to
+  least-loaded — the prior behaviour.
+- **Ranked fallback per role.** A role resolves not to one model but to an **ordered chain of
+  acceptable models** (its qualified ranking, best first). Routing walks the chain: each model routes
+  to its fastest healthy node; if every node for it is down, routing falls to the next acceptable
+  model. So a **heterogeneous fleet** (Gemma only on node A, Qwen only on node B) still serves a role
+  — Gemma@A, then Qwen@B. A **pinned** model is honoured exactly: a pin is never substituted.
 - **Storage gateway** — one dedicated writer thread, priority queue, coalescing + batching. Reads
   stay direct (SQLite WAL allows many readers, one writer). Eliminates write-lock contention.
 - **Attention governor** — a generic "foreground beats background" scheduler driven by software

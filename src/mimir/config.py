@@ -58,6 +58,12 @@ class BackendConfig:
     scan_timeout_s: float = 0.5
     scan_concurrency: int = 64
     refresh_interval_s: float = 60.0  # active health/inventory refresh; 0 disables the prober
+    # Speed-aware routing (DESIGN §5). Node speed is learned PASSIVELY from real calls — no wasted
+    # synthetic calls — and only topped up by a rare idle heartbeat so quiet nodes don't go stale.
+    idle_probe_interval_s: float = 1800.0  # idle latency heartbeat (s); 0 disables it. Real traffic
+                                           # is the primary signal; this is a 30-min top-up,
+                                           # decoupled from the faster health refresh above.
+    latency_alpha: float = 0.3  # EWMA weight on the newest sample (higher = tracks current load)
     # Only the user knows their hardware + latency tolerance, so these are user knobs (UI fields):
     max_model_size_b: float = 30.0  # don't benchmark/route models bigger than this (params B)
     min_model_size_b: float = 0.0   # don't benchmark/route models SMALLER than this; 0 = off. On
@@ -180,6 +186,8 @@ def load_config(path: str | Path) -> Config:
             scan_timeout_s=float(backend_raw.get("scan_timeout_s", 0.5)),
             scan_concurrency=int(backend_raw.get("scan_concurrency", 64)),
             refresh_interval_s=float(backend_raw.get("refresh_interval_s", 60.0)),
+            idle_probe_interval_s=float(backend_raw.get("idle_probe_interval_s", 1800.0)),
+            latency_alpha=float(backend_raw.get("latency_alpha", 0.3)),
             max_model_size_b=float(backend_raw.get("max_model_size_b", 30.0)),
             min_model_size_b=float(backend_raw.get("min_model_size_b", 0.0)),
             max_latency_s=float(backend_raw.get("max_latency_s", 0.0)),

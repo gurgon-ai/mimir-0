@@ -77,6 +77,10 @@ host = "http://localhost:11434"
 # subnet = "192.168.1.0/24"         # CIDR to scan; omit to auto-detect the local /24
 # nodes = ["192.168.1.50:11434"]    # optional explicit nodes (always included)
 # refresh_interval_s = 60           # active health/inventory refresh; 0 disables the prober
+# idle_probe_interval_s = 1800      # live speed is learned passively from real calls; this rare idle
+#                                   # heartbeat (default 30 min, 0 = off) tops up nodes gone quiet.
+#                                   # Routing picks the healthiest, fastest node (latency × load).
+# latency_alpha = 0.3               # EWMA weight on the newest latency sample (higher tracks faster)
 # max_model_size_b = 30             # only YOU know your hardware: benchmark/route up to this many B
 # min_model_size_b = 0              # ...and a floor (0 = off): don't let a tiny model that scores
 #                                   # 'high enough' + wins on latency beat a bigger, better one

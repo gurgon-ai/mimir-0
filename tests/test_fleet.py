@@ -75,6 +75,72 @@ def test_unknown_model_falls_back_optimistically() -> None:
     assert out.startswith("A")
 
 
+# -- ranked fallback routing (heterogeneous fleet, DESIGN §4/§5) ----------------------
+
+
+class PickyFake:
+    """A node holding fixed models; optionally fails every chat (a 'down' node) — for failover."""
+
+    def __init__(self, name: str, models: list[str], *, fail: bool = False) -> None:
+        self.name = name
+        self._models = models
+        self.fail = fail
+        self.calls: list[str] = []
+
+    def chat(self, model: str, messages: list[Message], params: dict[str, object]) -> str:
+        if self.fail:
+            from mimir.errors import ProviderError
+            raise ProviderError(f"{self.name} down", transient=True)
+        self.calls.append(model)
+        return f"{self.name} answering with {model}"
+
+    def embed(self, model: str, texts: list[str]) -> list[list[float]]:
+        return [[0.0] for _ in texts]
+
+    def model_details(self) -> list[ModelInfo]:
+        return [ModelInfo(name=m, family="fam", params_b=1.0) for m in self._models]
+
+
+def test_role_falls_back_to_the_next_model_across_nodes() -> None:
+    # The heterogeneous case: node A has only gemma (and is down), node B has only qwen. The chat
+    # role's chain is [gemma, qwen]; gemma's only node fails → routing falls to qwen on node B.
+    a = PickyFake("A", ["gemma"], fail=True)
+    b = PickyFake("B", ["qwen"])
+    pool = ProviderPool([("A", a), ("B", b)], max_retries=0, sleep=lambda _: None)
+    pool.refresh()
+    gw = ModelGateway(pool, {"chat": RoleSpec("gemma")})
+    gw.set_role_fallbacks("chat", ["gemma", "qwen"])
+    out = gw.chat("chat", [], priority=Priority.CHAT_CRITICAL)
+    assert "qwen" in out and b.calls == ["qwen"]  # served by the fallback model on the other node
+
+
+def test_chain_is_pruned_to_reachable_models() -> None:
+    # A chain may name a model no live node has (qualified elsewhere/earlier). The prune keeps only
+    # models the cached inventory can run, so the first *reachable* preference wins immediately.
+    b = PickyFake("B", ["qwen"])
+    pool = ProviderPool([("B", b)], max_retries=0, sleep=lambda _: None)
+    pool.refresh()
+    gw = ModelGateway(pool, {"chat": RoleSpec("qwen")})
+    gw.set_role_fallbacks("chat", ["gemma", "qwen"])  # gemma isn't installed anywhere
+    out = gw.chat("chat", [], priority=Priority.CHAT_CRITICAL)
+    assert b.calls == ["qwen"]  # gemma pruned, qwen served — no wasted attempt on the absent model
+    assert out.endswith("qwen")
+
+
+def test_pinned_role_is_never_substituted() -> None:
+    # No fallback chain set → the role routes to exactly its model. A failure raises rather than
+    # silently swapping in another model (a pin is the operator's explicit choice; DESIGN §4).
+    import pytest
+
+    from mimir.errors import ProviderError
+    a = PickyFake("A", ["gemma"], fail=True)
+    pool = ProviderPool([("A", a)], max_retries=0, sleep=lambda _: None)
+    pool.refresh()
+    gw = ModelGateway(pool, {"chat": RoleSpec("gemma")})  # pinned, no chain
+    with pytest.raises(ProviderError):
+        gw.chat("chat", [], priority=Priority.CHAT_CRITICAL)
+
+
 # -- catalogue ------------------------------------------------------------------------
 
 

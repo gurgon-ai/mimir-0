@@ -28,6 +28,7 @@ from .cognition.benchmark import complete_speed_matrix as _complete_speed_matrix
 from .cognition.council import CouncilResult, deliberate
 from .cognition.epistemics import EpistemicResult, run_epistemics
 from .cognition.fleet import (
+    ROLE_NEEDS,
     FleetScanResult,
     council_roster,
     fleet_model_pool,
@@ -35,6 +36,7 @@ from .cognition.fleet import (
     placement_matrix,
     recommend_roles,
     resolve_auto_model,
+    roster_for,
     scan_fleet,
 )
 from .cognition.graph import render_triples, retrieve_connected
@@ -59,7 +61,7 @@ from .context.build import ContextBundle, build_context
 from .embed.base import Embedder, EmbeddingMode
 from .embed.endpoint import EndpointEmbedder, NullEmbedder
 from .embed.locality import LocalityHashEmbedder
-from .errors import ConfigError
+from .errors import ConfigError, StorageError
 from .model.discovery import discover_node_urls
 from .model.gateway import ModelGateway
 from .model.pool import ProviderPool
@@ -81,6 +83,7 @@ from .storage.repo import (
     record_access,
     set_model_enabled,
     set_node_enabled,
+    update_catalogue_speed,
 )
 
 log = logging.getLogger("mimir")
@@ -88,6 +91,22 @@ log = logging.getLogger("mimir")
 # How many memories the knowledge section may draw on per turn (pre-budget). Hardening
 # (adaptive top-k, SQL-side prefiltering) is a later session; v0 keeps it a simple constant.
 DEFAULT_TOP_K = 6
+
+# The idle latency heartbeat (DESIGN §5): a short generation forcing a real-length reply, so the
+# timed call reflects throughput, not just round-trip. Kept rare — real traffic is the main signal.
+_PROBE_PROMPT = [{"role": "user", "content": "In one or two sentences, say you are online."}]
+_PROBE_TIMEOUT_S = 20.0
+_PROBE_PREDICT = 64  # cap the probe generation — long enough to time throughput, still cheap
+_FALLBACK_DEPTH = 4  # how many acceptable models deep a role's fallback chain runs (best first)
+
+
+def _latency_staleness(info: dict[str, object] | None) -> float:
+    """How overdue a (node, model) is for a probe: ``inf`` if never measured, else its age in secs.
+    The idle heartbeat probes the highest-staleness model per node, so coverage rotates fairly."""
+    if info is None or not info.get("samples"):
+        return float("inf")
+    age = info.get("age_s")
+    return float(age) if age is not None else float("inf")
 
 
 @dataclass(slots=True)
@@ -118,7 +137,7 @@ def build_fleet_pool(backend: BackendConfig) -> ProviderPool:
     """
     urls = discover_node_urls(backend)
     endpoints: list[tuple[str, Provider]] = [(url, OllamaProvider(url)) for url in urls]
-    return ProviderPool(endpoints)
+    return ProviderPool(endpoints, latency_alpha=backend.latency_alpha)
 
 
 def make_embedder(config: Config, model: ModelGateway) -> Embedder:
@@ -163,6 +182,8 @@ class Mimir:
         self._pending: list[threading.Thread] = []
         self._last_sentinel_error: BaseException | None = None
         self._turn_count = 0
+        self._stop_idle = threading.Event()  # signals the idle latency heartbeat to stop
+        self._idle_prober: threading.Thread | None = None
 
         # Establish any identity anchors declared in config (idempotent upsert at boot), so a
         # non-interactive deployment is grounded without running the interactive interview.
@@ -183,8 +204,14 @@ class Mimir:
             self._model.refresh_inventory()
         except Exception as exc:  # never let fleet init crash the brain
             log.warning("fleet: initial inventory failed: %s", exc)
-        self._resolve_auto_roles()
+        try:
+            self._resolve_auto_roles()
+            self._seed_latency_from_catalogue()  # route informed by prior qualification from turn 1
+        except StorageError:  # background init raced a close() — the store is gone; just stop (§10)
+            log.info("fleet: init aborted — storage closed (shutting down)")
+            return
         self._model.start_prober(refresh_interval_s)
+        self._start_idle_prober()
 
     def _resolve_auto_roles(self) -> dict[str, str]:
         """Bind every `auto` role to a concrete model from the current fleet (DESIGN §4).
@@ -199,6 +226,7 @@ class Mimir:
         if not available:
             return {}
         disabled = disabled_models(self._storage)
+        vetoed_nodes = disabled_nodes(self._storage)
         resolved: dict[str, str] = {}
         for role in self._auto_roles:
             model = resolve_auto_model(
@@ -207,9 +235,91 @@ class Mimir:
             if model is not None:
                 self._model.set_role_model(role, model)
                 resolved[role] = model
+            # The ranked fallback chain: the role's acceptable models, best first, so a
+            # heterogeneous fleet still serves the role across nodes (DESIGN §4/§5). Empty until a
+            # benchmark exists (roster_for needs scores); the single resolve above carries routing
+            # until then. Filtered to reachable models so the chain lists nothing no live node runs.
+            if role in ROLE_NEEDS:
+                chain = [
+                    m["model"]
+                    for m in roster_for(
+                        self._storage, role, n=_FALLBACK_DEPTH,
+                        disabled=disabled, disabled_nodes=vetoed_nodes,
+                    )
+                    if m["model"] in available
+                ]
+                self._model.set_role_fallbacks(role, chain)
         if resolved:
             log.info("fleet: auto-resolved role(s) %s", resolved)
         return resolved
+
+    # -- live node speed / health (speed-aware routing, DESIGN §5) ---------------------
+
+    def _seed_latency_from_catalogue(self) -> None:
+        """Prime the pool's live latency from the catalogue's ``return_time`` so routing starts
+        informed, not cold. Real traffic overrides a seed for any pair it touches."""
+        seeds = {
+            (e.node, e.model): e.return_time
+            for e in list_catalogue(self._storage)
+            if e.return_time is not None
+        }
+        if seeds:
+            self._model.seed_latency(seeds)
+
+    def _start_idle_prober(self) -> None:
+        """Start the rare idle latency heartbeat (DESIGN §5). Real traffic is the primary signal; it
+        only tops up nodes that have gone quiet — a long interval, never on a busy node."""
+        interval = self.config.backend.idle_probe_interval_s if self.config.backend else 0.0
+        if interval <= 0 or self._idle_prober is not None:
+            return
+
+        def _loop() -> None:
+            while not self._stop_idle.wait(interval):
+                try:
+                    self._idle_latency_probe()
+                except Exception as exc:  # the heartbeat must never die (DESIGN §10)
+                    log.warning("fleet: idle latency probe failed: %s", exc)
+
+        self._idle_prober = threading.Thread(target=_loop, name="mimir-idle-prober", daemon=True)
+        self._idle_prober.start()
+
+    def _idle_latency_probe(self) -> None:
+        """One heartbeat pass: probe the stalest model on each idle node, then persist live speed.
+
+        Bounded to one probe per idle node per cycle (the model with the oldest/absent sample, so
+        coverage rotates), at the operational ``num_ctx`` so it doesn't trigger a KV-cache reload.
+        """
+        nodes = set(self._model.idle_nodes())
+        if not nodes:
+            return
+        snapshot = self._model.latency_snapshot()
+        by_node: dict[str, list[str]] = {}
+        for e in list_catalogue(self._storage):
+            if e.node in nodes and "embed" not in e.model.lower():
+                by_node.setdefault(e.node, []).append(e.model)
+        ctx = self.config.backend.benchmark_num_ctx if self.config.backend else 24576
+        params = {"num_ctx": ctx, "max_tokens": _PROBE_PREDICT, "__timeout_s__": _PROBE_TIMEOUT_S}
+        for node, models in by_node.items():
+            target = max(models, key=lambda m: _latency_staleness(snapshot.get((node, m))))
+            self._model.probe_latency(node, target, _PROBE_PROMPT, params)
+        self._persist_live_latency()
+
+    def _persist_live_latency(self) -> None:
+        """Write the live, real-traffic latency back to the catalogue so the placement matrix and
+        leaderboard reflect current speed (not the frozen benchmark). Only measured pairs are
+        written — a mere seed never overwrites the qualification number it came from."""
+        for (node, model), info in self._model.latency_snapshot().items():
+            if info.get("samples", 0) and info.get("return_time") is not None:
+                update_catalogue_speed(self._storage, node, model, float(info["return_time"]))
+
+    def node_health(self) -> dict[str, Any]:
+        """Live fleet health for introspection/UI: pool stats (reachable/saturated/load + fastest
+        per-node speed) plus the full per-(node, model) live latency snapshot (DESIGN §5)."""
+        snapshot = self._model.latency_snapshot()
+        return {
+            "pool": self._model.get_stats(),
+            "latency": {f"{node} · {model}": info for (node, model), info in snapshot.items()},
+        }
 
     @classmethod
     def from_config(cls, path: str) -> Mimir:
@@ -508,6 +618,7 @@ class Mimir:
         self._model.refresh_inventory()
         result = scan_fleet(self._model, self._storage)
         self._resolve_auto_roles()  # a rescan may surface a better model for an auto role
+        self._seed_latency_from_catalogue()  # pick up speed for any newly catalogued (node, model)
         return result
 
     def fleet_report(self) -> dict[str, Any]:
@@ -536,6 +647,33 @@ class Mimir:
             self._storage, disabled=disabled_models(self._storage),
             disabled_nodes=disabled_nodes(self._storage),
         )
+
+    # -- the harness query: staff a role from the qualified fleet (DESIGN §5a) ---------
+
+    def roster_for(self, role: str, *, n: int = 1) -> list[dict[str, Any]]:
+        """Staff a role from the qualified fleet — the brain harness's query into the catalogue.
+
+        "Give me N models for role R", honouring the user's model/node vetoes. Pool roles
+        (``council``) return a diversity-first spread of up to ``n`` models; every other role
+        returns up to ``n`` role-eligible models, best first. ``[]`` if nothing qualifies yet (run a
+        benchmark). This is the bridge the harness calls instead of a human reading a view.
+        """
+        return roster_for(
+            self._storage, role, n=n, disabled=disabled_models(self._storage),
+            disabled_nodes=disabled_nodes(self._storage),
+        )
+
+    def background_model(self) -> str | None:
+        """The single best model for off-hot-path reasoning (the loose, non-discipline-gated
+        ``background`` role) — what the harness routes background cognition to. ``None`` if nothing
+        is benchmarked yet."""
+        picks = self.roster_for("background", n=1)
+        return picks[0]["model"] if picks else None
+
+    def council_members(self, n: int = 5) -> list[str]:
+        """The seated council — a diverse spread of up to ``n`` model names for adversarial
+        deliberation (the second lineup). Convenience over ``roster_for('council', n=n)``."""
+        return [m["model"] for m in self.roster_for("council", n=n)]
 
     def tournament_finals(self, keep: set[str]) -> dict[str, Any]:
         """Per-role champions among the kept finalists only — ``recommend_roles`` with everything
@@ -792,6 +930,10 @@ class Mimir:
 
     def close(self) -> None:
         self._join_background()
+        self._stop_idle.set()
+        if self._idle_prober is not None:
+            self._idle_prober.join(timeout=5)
+            self._idle_prober = None
         self._model.stop_prober()
         self._storage.close()
 

@@ -73,7 +73,17 @@ ROLE_NEEDS: dict[str, tuple[tuple[str, ...], str]] = {
     "reasoning": (("discipline", "epistemics", "reasoning"), "quality"),
     "tools": (("tools",), "quality"),
     "code": (("code", "reasoning"), "quality"),
+    # The second lineup (DESIGN §5a): off-the-record cognition that never speaks AS the assistant,
+    # so it is deliberately NOT discipline/epistemics-gated — a capable model that "leaks" the
+    # identity is fine here. A reasoning-competence floor only. `background` staffs off-hot-path
+    # reasoning (one best); `council` staffs adversarial deliberation (a diverse pool, see
+    # `council_roster`). The brain harness queries these via `roster_for` to staff itself.
+    "background": (("reasoning",), "quality"),
+    "council": (("reasoning",), "quality"),
 }
+# Roles whose value is a DIVERSE POOL, not a single best — staffed by `council_roster`, not by the
+# single-best ranking. `roster_for` routes these to the diversity picker.
+_POOL_ROLES = frozenset({"council"})
 _CAPABILITY_FLOOR = 0.5
 
 
@@ -95,19 +105,15 @@ def _bar_reason(data: dict[str, Any], capabilities: tuple[str, ...]) -> str | No
     return None
 
 
-def recommend_roles(
-    storage: StorageGateway, *, disabled: set[str] | None = None,
-    disabled_nodes: set[str] | None = None,
-) -> dict[str, dict[str, Any] | None]:
-    """From the benchmarked catalogue, recommend the best model for each role (DESIGN §4).
+def _collapse_by_model(
+    storage: StorageGateway, disabled: set[str], disabled_nodes: set[str]
+) -> dict[str, dict[str, Any]]:
+    """One slot per model (capability is model-wide), tracking its fastest enabled node.
 
-    Recommend-only — it does not reassign roles. ``None`` for a role means nothing benchmarked
-    clears the capability floor yet (run a benchmark first). ``disabled`` models and
-    ``disabled_nodes`` (a user's enable/disable choices) are excluded — a model with no enabled node
-    can't be a champion, and a disabled node never wins the fastest-node pick.
+    Shared by every role query so they agree on the candidate set: ``disabled`` models and
+    ``disabled_nodes`` are excluded, and speed (per-``(node, model)``) collapses to the model's
+    fastest enabled node — the one a router would actually use.
     """
-    disabled = disabled or set()
-    disabled_nodes = disabled_nodes or set()
     by_model: dict[str, dict[str, Any]] = {}
     for entry in list_catalogue(storage):
         if entry.model in disabled or entry.node in disabled_nodes:
@@ -136,36 +142,89 @@ def recommend_roles(
         ):
             slot["return_time"] = entry.return_time
             slot["node"] = entry.node
+    return by_model
 
+
+def _rank_for_role(
+    by_model: dict[str, dict[str, Any]], role: str
+) -> list[tuple[str, dict[str, Any]]]:
+    """The role-eligible models, best first — the SINGLE ranking both single-best
+    (``recommend_roles``) and pooled (``roster_for``) staffing read, so a role's "best" never
+    disagrees with itself.
+
+    Eligibility is the shared ``_bar_reason`` gate (never a silent drop); order follows the role's
+    ``prefer``: ``fast`` → lowest latency; ``quality`` → highest quality, latency only breaking ties
+    (under the cap you've already decided the wait is worth it — no soft speed penalty; §4).
+    """
+    capabilities, prefer = ROLE_NEEDS[role]
+    candidates = [
+        (name, data)
+        for name, data in by_model.items()
+        if _bar_reason(data, capabilities) is None
+    ]
+    if prefer == "fast":
+        candidates.sort(key=lambda c: c[1]["return_time"] or 1e9)
+    else:
+        candidates.sort(key=lambda c: (-(c[1]["quality"] or 0.0), c[1]["return_time"] or 1e9))
+    return candidates
+
+
+def _as_pick(name: str, data: dict[str, Any], prefer: str) -> dict[str, Any]:
+    """A ranked candidate as the public pick shape (``recommend_roles``/``roster_for`` output)."""
+    return {
+        "model": name,
+        "family": data["family"],
+        "quality": data["quality"],
+        "return_time": data["return_time"],
+        "node": data["node"],  # the fastest node holding this model
+        "nodes": data["nodes"],
+        "prefer": prefer,
+    }
+
+
+def recommend_roles(
+    storage: StorageGateway, *, disabled: set[str] | None = None,
+    disabled_nodes: set[str] | None = None,
+) -> dict[str, dict[str, Any] | None]:
+    """From the benchmarked catalogue, recommend the best model for each role (DESIGN §4).
+
+    Recommend-only — it does not reassign roles. ``None`` for a role means nothing benchmarked
+    clears the capability floor yet (run a benchmark first). ``disabled`` models and
+    ``disabled_nodes`` (a user's enable/disable choices) are excluded — a model with no enabled node
+    can't be a champion, and a disabled node never wins the fastest-node pick. The pool roles
+    (``council``) appear here as their single strongest member; their diverse roster is
+    ``council_roster`` / ``roster_for``.
+    """
+    by_model = _collapse_by_model(storage, disabled or set(), disabled_nodes or set())
     recommendations: dict[str, dict[str, Any] | None] = {}
-    for role, (capabilities, prefer) in ROLE_NEEDS.items():
-        candidates = [
-            (name, data)
-            for name, data in by_model.items()
-            if _bar_reason(data, capabilities) is None
-        ]
-        if not candidates:
-            recommendations[role] = None
-            continue
-        if prefer == "fast":
-            name, data = min(candidates, key=lambda c: c[1]["return_time"] or 1e9)
-        else:  # "quality" — the objective: the best-scoring model we're willing to WAIT for. The
-            # latency cap already excluded anything too slow, so within it quality leads outright
-            # and return_time only breaks ties (a faster model wins when quality is equal). No
-            # soft speed penalty: under the cap, you've already decided the wait is worth it (§4).
-            name, data = max(
-                candidates, key=lambda c: (c[1]["quality"], -(c[1]["return_time"] or 1e9))
-            )
-        recommendations[role] = {
-            "model": name,
-            "family": data["family"],
-            "quality": data["quality"],
-            "return_time": data["return_time"],
-            "node": data["node"],  # the fastest node holding this model
-            "nodes": data["nodes"],
-            "prefer": prefer,
-        }
+    for role, (_caps, prefer) in ROLE_NEEDS.items():
+        ranked = _rank_for_role(by_model, role)
+        recommendations[role] = _as_pick(*ranked[0], prefer) if ranked else None
     return recommendations
+
+
+def roster_for(
+    storage: StorageGateway, role: str, *, n: int = 1,
+    disabled: set[str] | None = None, disabled_nodes: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Staff a role from the qualified fleet — the brain harness's single query into the catalogue.
+
+    The bridge from qualification → the harness (DESIGN §5a): the harness asks "give me N models for
+    role R" instead of a human reading a view. Pool roles (``council``) return a diversity-first
+    spread of up to ``n`` models (the second lineup — families before depth; ``council_roster``);
+    every other role returns up to ``n`` role-eligible models, best by the role's preference. The
+    loose roles (``background``, ``council``) are not discipline-gated. Returns ``[]`` when nothing
+    qualifies yet (run a benchmark) — an empty roster, never a silent stub. Unknown role raises.
+    """
+    if role in _POOL_ROLES:
+        return council_roster(
+            storage, size=n, disabled=disabled, disabled_nodes=disabled_nodes
+        )["roster"]
+    if role not in ROLE_NEEDS:
+        raise ValueError(f"unknown role {role!r}; known: {sorted(ROLE_NEEDS)}")
+    by_model = _collapse_by_model(storage, disabled or set(), disabled_nodes or set())
+    _caps, prefer = ROLE_NEEDS[role]
+    return [_as_pick(name, data, prefer) for name, data in _rank_for_role(by_model, role)[:n]]
 
 
 # Per-role ideal size (params_b) for the pre-benchmark heuristic — a defensible first guess only;
@@ -388,6 +447,11 @@ def council_roster(
         if "embed" in e.model.lower() or e.model in disabled:
             continue
         if e.quality is None or e.quality < min_quality:
+            continue
+        # Membership = the shared `council` role gate (a reasoning floor, NOT discipline-gated), so
+        # the seated roster can't disagree with the eligibility the board shows (DESIGN §10).
+        gateable = {"quality": e.quality, "reasoning": e.reasoning}
+        if _bar_reason(gateable, ROLE_NEEDS["council"][0]):
             continue
         slot = by_model.setdefault(e.model, {
             "model": e.model, "family": e.family or "?", "quality": e.quality,
