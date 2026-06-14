@@ -298,8 +298,11 @@ class Mimir:
                 except Exception as exc:  # the heartbeat must never die (DESIGN §10)
                     log.warning("fleet: idle latency probe failed: %s", exc)
 
-        self._idle_prober = threading.Thread(target=_loop, name="mimir-idle-prober", daemon=True)
-        self._idle_prober.start()
+        # Start before publishing the handle, so close() can never join an unstarted thread (the
+        # prober is launched from the background fleet-init thread, racing a quick close()).
+        prober = threading.Thread(target=_loop, name="mimir-idle-prober", daemon=True)
+        prober.start()
+        self._idle_prober = prober
 
     def _idle_latency_probe(self) -> None:
         """One heartbeat pass: probe the stalest model on each idle node, then persist live speed.
