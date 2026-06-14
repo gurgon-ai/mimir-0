@@ -23,6 +23,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..cognition.temporal import relative_age
 from ..embed.base import EmbeddingMode
 from ..prompts import RECALL_CLOSE, RECALL_OPEN, uncertainty_flag
 from ..retrieval.hybrid import ScoredMemory
@@ -75,19 +76,23 @@ class ContextBundle:
         }
 
 
-def _memory_line(mem: Memory) -> str:
-    """Render one recalled fact, attributed to its tier and source (never flattened).
+def _memory_line(mem: Memory, now_ts: float | None = None) -> str:
+    """Render one recalled fact, attributed to its tier, source, and **age** (never flattened).
 
     Internal whitespace/newlines are collapsed so each memory stays a single line — the
     ``<RECALL>`` block is one-memory-per-line, and multi-line content (e.g. a document chunk)
-    must not break that contract.
+    must not break that contract. With ``now_ts`` the fact carries a relative-age tag ("3 days ago")
+    so the model can reason about recency instead of guessing (DESIGN §3e).
     """
     text = " ".join(mem.text.split())
-    return f"- {text} [tier={mem.evidence_tier.key}; source={mem.provenance}]"
+    tags = f"tier={mem.evidence_tier.key}; source={mem.provenance}"
+    if now_ts is not None and mem.created_at:
+        tags += f"; {relative_age(mem.created_at, now_ts)}"
+    return f"- {text} [{tags}]"
 
 
 def _build_knowledge_section(
-    retrieved: list[ScoredMemory], budget_tokens: int
+    retrieved: list[ScoredMemory], budget_tokens: int, now_ts: float | None = None
 ) -> tuple[Section | None, list[int]]:
     """Assemble the attributed knowledge section within its token budget.
 
@@ -103,7 +108,7 @@ def _build_knowledge_section(
         "reply and attribute in plain words when it matters; do NOT copy the bracketed "
         "[tier=...; source=...] tags into your response:"
     )
-    all_lines = [_memory_line(s.memory) for s in retrieved]
+    all_lines = [_memory_line(s.memory, now_ts) for s in retrieved]
     # Requested = the section as if everything fit (for honest accounting).
     full_body = f"{RECALL_OPEN}\n" + "\n".join(all_lines) + f"\n{RECALL_CLOSE}"
     requested = estimate_tokens(f"{title}\n{full_body}")
@@ -149,6 +154,8 @@ def build_context(
     working_memory: str | None = None,
     graph_facts: list[str] | None = None,
     procedures: list[str] | None = None,
+    time_context: str | None = None,
+    now_ts: float | None = None,
     extra_sections: list[Section] | None = None,
 ) -> ContextBundle:
     """Assemble the epistemic prompt for one turn. Pure: no I/O, no model calls.
@@ -187,8 +194,23 @@ def build_context(
     )
     sections.append(identity_section)
 
+    # 2a. Temporal grounding — the clock/calendar line, always-on, so the model can reason about
+    #     recency and dates instead of guessing (DESIGN §3e). Small, high-tier, never truncated.
+    time_section: Section | None = None
+    if time_context:
+        time_section = Section(
+            name="time",
+            title="The current moment:",
+            body=time_context,
+            tier=SectionTier.HIGH,
+            requested_tokens=estimate_tokens(time_context),
+            admitted_tokens=estimate_tokens(time_context),
+        )
+        sections.append(time_section)
+
     # Reserve budget for the always-present pieces, then give the rest to knowledge.
     self_model_tokens = self_model_section.admitted_tokens if self_model_section else 0
+    time_tokens = time_section.admitted_tokens if time_section else 0
     graph_body = "\n".join(f"- {f}" for f in (graph_facts or []))
     graph_tokens = estimate_tokens(graph_body) + 8 if graph_facts else 0
     procedures_body = "\n".join(f"- {p}" for p in (procedures or []))
@@ -203,6 +225,7 @@ def build_context(
         budget_tokens
         - self_model_tokens
         - identity_section.admitted_tokens
+        - time_tokens
         - graph_tokens
         - procedures_tokens
         - working_memory_tokens
@@ -212,7 +235,9 @@ def build_context(
     )
 
     # 2. Typed knowledge (the memory layer in v0).
-    knowledge_section, retrieved_ids = _build_knowledge_section(retrieved, knowledge_budget)
+    knowledge_section, retrieved_ids = _build_knowledge_section(
+        retrieved, knowledge_budget, now_ts
+    )
     if knowledge_section is not None:
         sections.append(knowledge_section)
         if knowledge_section.truncated:
