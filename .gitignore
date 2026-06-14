@@ -47,3 +47,7 @@ htmlcov/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Local scratch — screenshots, scratch notes (never part of the public repo)
+Screenshot*.png
+*.local.md

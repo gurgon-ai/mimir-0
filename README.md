@@ -8,11 +8,13 @@ it's assembled into the prompt with an explicit epistemic structure. You tell it
 later it recalls that fact, cites where it came from, and tells you when it's reasoning from
 thin evidence instead of confabulating.
 
-> **Status: pre-alpha — feature-complete.** The whole architecture in [`DESIGN.md`](DESIGN.md) is
-> implemented and verified end-to-end against a live multi-node LAN: the acceptance loop, every
-> typed knowledge layer, the async cognition, and the distributed model fleet. It is **not yet
-> hardened or tuned** — APIs and schema may change. Setup lives in [`docs/SETUP.md`](docs/SETUP.md);
-> see [`CHANGELOG.md`](CHANGELOG.md) for what's in `0.1.0`.
+> **Status: pre-alpha — feature-complete, actively evolving (snapshot 2026-06-13; subject to
+> change).** The whole architecture in [`DESIGN.md`](DESIGN.md) is implemented and verified
+> end-to-end against a live multi-node LAN: the acceptance loop, every typed knowledge layer, the
+> async cognition, and the distributed model fleet. The **fleet qualification surface in particular
+> is being actively built out and tuned** — the feature list below is a current snapshot, and APIs,
+> schema, scores, and UI may shift between commits. It is **not yet hardened**. Setup lives in
+> [`docs/SETUP.md`](docs/SETUP.md); see [`CHANGELOG.md`](CHANGELOG.md) for the running log.
 
 ## What's included vs. what you provide
 
@@ -81,10 +83,21 @@ uncertainty gate — and routes it through two disciplined gateways. On top of t
 - **Distributed fleet + qualifying tournament** — point it at your LAN and it discovers every
   `ollama serve` (zero setup on those machines), routes each request to a node that has the model,
   and **qualifies** them on a measured battery (talk, tools, code, reasoning, discipline, and an
-  epistemic-framework gauntlet — tier-deference under noise, context grounding, long-context recall).
-  Run it as a staged, human-veto **tournament** that narrows the fleet round by round and points each
-  role at the best model *you're willing to wait for*. Run the brain on a Raspberry Pi and borrow GPUs
-  over the network.
+  epistemic-framework gauntlet — tier-deference under noise, context grounding, long-context recall
+  that scales with your deployment window). Run it as a staged, human-veto **tournament** that
+  narrows the fleet round by round. Qualification is **distributed and concurrent** (one worker per
+  node), and it qualifies at your **operational context window**, not a toy one. Then:
+  - a **per-node placement matrix** — every model on every node it runs on, that node's measured
+    speed, and each node's **winner** (best quality, speed breaking ties) and ⚡ fastest;
+  - a **diversity-first "second lineup"** — an adversarial council roster that favours a *spread of
+    model families* over raw ranking (different families fail differently), graded with the
+    user-facing size/latency caps **off** so the big, slow, brilliant models a chat cap excludes
+    still earn a council seat;
+  - a **self-explaining leaderboard** — it shows *why* a model is barred from a role
+    (`discipline 0.25 < 0.50`), not just who won, and frames scores as *operational fitness for this
+    system on this hardware* — best **for you**, not "best model in the world."
+
+  Run the brain on a Raspberry Pi and borrow GPUs over the network.
 - **Reference web UI** — a zero-dependency stdlib server for all of the above.
 
 ## Runtime contract
