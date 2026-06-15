@@ -8,6 +8,17 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Changed
+- **A Sleep tab with live schedule + timezone settings (no config edit needed).** The sleep window,
+  enable toggle, and timezone are now editable in the web UI (new **Sleep** tab) and take effect
+  live — they persist as runtime overrides in the `kv` store, layered over the `[sleep]`/`[locale]`
+  config defaults (config stays the headless default; the UI is the live preference). The scheduler
+  reads the effective settings each tick, so a change applies without a restart. The interview ends
+  with a quick "when are you usually asleep/away?" step that seeds the window + timezone. `Run sleep
+  now` moved here too. New: `Mimir.settings()`/`update_settings()`/`available_timezones()`,
+  `GET/POST /api/settings`, `GET /api/timezones`. **Timezone** drives all wall-clock reads (storage
+  is already epoch-UTC; only display shifts); IANA zones need the OS tz database or the optional
+  `tzdata` extra (`pip install mimir-0[timezone]`) — without it the core degrades to host-local **and
+  says so** in the status line, never silently.
 - **The chat UI wears the assistant's chosen name.** The onboarding "what would you like to call me?"
   answer (the `name` identity anchor) now drives the chat input placeholder ("Say something to …") and
   the speaker label on the assistant's bubbles, instead of a hard-coded "Mimir". Applied on load and

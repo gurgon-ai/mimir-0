@@ -455,3 +455,25 @@ def test_sleep_status_endpoint(base_url: str) -> None:
     assert "in_window" in data
     _, html = _get_html(base_url + "/")
     assert 'id="sleepStatus"' in html  # the Mind-tab sleep panel
+
+
+def test_settings_endpoints(base_url: str) -> None:
+    status, data = _json("GET", base_url + "/api/settings")
+    assert status == 200 and "sleep_window_start" in data
+    status, updated = _json("POST", base_url + "/api/settings",
+                            {"settings": {"sleep_window_start": "01:15"}})
+    assert status == 200 and updated["sleep_window_start"] == "01:15"
+    # a bad value comes back as a clean error, not a 500 stack
+    status, err = _json("POST", base_url + "/api/settings",
+                        {"settings": {"timezone": "Not/AZone"}})
+    assert status >= 400 and "error" in err
+
+
+def test_timezones_endpoint(base_url: str) -> None:
+    status, data = _json("GET", base_url + "/api/timezones")
+    assert status == 200 and isinstance(data["zones"], list) and len(data["zones"]) > 0
+
+
+def test_sleep_tab_present(base_url: str) -> None:
+    _, html = _get_html(base_url + "/")
+    assert 'data-tab="sleep"' in html and 'id="setTz"' in html

@@ -144,6 +144,41 @@ def test_failed_phase_does_not_abort_cycle() -> None:
 
 # -- brain integration ---------------------------------------------------------------
 
+def test_settings_override_config(brain: Mimir) -> None:
+    base = brain.settings()
+    assert base["sleep_window_start"] == "02:00"  # config default
+    assert base["overridden"] == []
+    updated = brain.update_settings({"sleep_window_start": "23:30", "sleep_enabled": False})
+    assert updated["sleep_window_start"] == "23:30"
+    assert updated["sleep_enabled"] is False
+    assert "sleep_window_start" in updated["overridden"]
+    # the effective window the scheduler/status read reflects the override
+    status = brain.sleep_cycle_status()
+    assert status["window_start"] == "23:30" and status["enabled"] is False
+
+
+def test_settings_reject_bad_values(brain: Mimir) -> None:
+    import pytest
+
+    from mimir.errors import ConfigError
+    with pytest.raises((ConfigError, ValueError)):
+        brain.update_settings({"sleep_window_start": "9999"})
+    with pytest.raises((ConfigError, ValueError)):
+        brain.update_settings({"timezone": "Not/AZone"})
+    with pytest.raises(ConfigError):
+        brain.update_settings({"bogus_key": "x"})
+
+
+def test_timezone_setting_persists(brain: Mimir) -> None:
+    # "UTC" is always offered (real zoneinfo list or the curated fallback when tzdata is absent),
+    # so it is accepted and stored regardless of whether the host has a tz database.
+    brain.update_settings({"timezone": "UTC"})
+    status = brain.sleep_cycle_status()
+    assert status["timezone"] == "UTC"
+    assert "timezone_active" in status  # reports whether tzdata actually resolved it
+    assert "UTC" in brain.available_timezones()
+
+
 def test_brain_manual_sleep_cycle(brain: Mimir) -> None:
     status_before = brain.sleep_cycle_status()
     assert status_before["last_cycle_date"] is None
