@@ -1342,7 +1342,7 @@ $("sessionNew").addEventListener("click", async () => {
 // --- memory graph: a drifting galaxy of memory blobs + entities (zoom/pan, click to review/edit) ---
 const GNS = "http://www.w3.org/2000/svg";
 const graph = { on: false, nodes: [], links: [], byId: {}, raf: 0, sel: null,
-                w: 600, h: 500, k: 1, px: 0, py: 0, root: null };
+                w: 600, h: 500, k: 1, px: 0, py: 0, root: null, frozen: false, phase: 0 };
 
 function escapeHtml(s) {
   return (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -1402,6 +1402,7 @@ async function loadGraphMap() {
   $("graphLegend").innerHTML =
     `${graph.nodes.length} nodes · ${graph.links.length} links — click a blob to edit` +
     `<br><span style="opacity:.7;">scroll = zoom · drag = pan · double-click = reset</span>`;
+  graph.frozen = false; graph.phase = 0;
   cancelAnimationFrame(graph.raf); graphTick();
 }
 
@@ -1439,7 +1440,10 @@ function buildGraphSvg() {
 
 function graphTick() {
   const n = graph.nodes, L = graph.links, cx = graph.w / 2, cy = graph.h / 2;
-  const SPIN = 0.0008;  // very slow galaxy rotation (~5°/s) — never fast enough to fight a click
+  const SPIN = 0.0004;  // very slow galaxy rotation (~2.5°/s) — easy to click
+  // Gentle "breathing": the target ring radius drifts in/out by a few percent on a slow sine.
+  const breathe = 1 + 0.045 * Math.sin(graph.phase * 0.0045);
+  graph.phase++;
   for (let i = 0; i < n.length; i++) {
     for (let j = i + 1; j < n.length; j++) {
       const a = n[i], b = n[j]; const dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy + 0.01;
@@ -1455,7 +1459,7 @@ function graphTick() {
   const cs = Math.cos(SPIN), sn = Math.sin(SPIN);
   n.forEach(p => {
     const dx = p.x - cx, dy = p.y - cy, r = Math.sqrt(dx * dx + dy * dy) + 1e-3;
-    const fr = (p.tr - r) * 0.02;                 // pull toward this node's target ring
+    const fr = (p.tr * breathe - r) * 0.02;       // pull toward this node's (breathing) target ring
     p.vx += dx / r * fr; p.vy += dy / r * fr;
     p.vx *= 0.9; p.vy *= 0.9;
     let nx = p.x + p.vx, ny = p.y + p.vy;
@@ -1467,15 +1471,17 @@ function graphTick() {
     l.el.setAttribute("x1", l.source.x.toFixed(1)); l.el.setAttribute("y1", l.source.y.toFixed(1));
     l.el.setAttribute("x2", l.target.x.toFixed(1)); l.el.setAttribute("y2", l.target.y.toFixed(1));
   });
-  if (graph.on) graph.raf = requestAnimationFrame(graphTick);  // continuous, gentle drift
+  if (graph.on && !graph.frozen) graph.raf = requestAnimationFrame(graphTick);  // freeze on select
 }
 
 function graphDeselect() {
   $("graphInspect").style.display = "none";
   if (graph.sel && graph.sel.el) { graph.sel.el.classList.remove("sel"); graph.sel = null; }
+  if (graph.frozen) { graph.frozen = false; cancelAnimationFrame(graph.raf); graphTick(); }  // resume drift
 }
 
 function selectNode(n) {
+  graph.frozen = true; cancelAnimationFrame(graph.raf);  // freeze the galaxy while you inspect/edit
   if (graph.sel && graph.sel.el) graph.sel.el.classList.remove("sel");
   graph.sel = n; n.el.classList.add("sel");
   const box = $("graphInspect"); box.style.display = "block"; box.innerHTML = "";
