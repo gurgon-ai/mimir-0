@@ -101,6 +101,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **Offline encyclopedia as a live reference layer (Kiwix/ZIM, DESIGN §9) — zero new dependency.**
+  Point a `[wiki]` config block at a running `kiwix-serve` over any ZIM (Wikipedia nopic, a medical
+  wiki, a top-50k slice, …) and each turn's query is searched live; the top articles' lead text is
+  injected as an attributed `Reference — … (Wikipedia)` section that counts as grounding. Mimir talks
+  to Kiwix over **stdlib HTTP** (no `libzim`, no compiled wheel, no GPL in the tree — the user runs a
+  static binary, like Ollama), so the whole encyclopedia "populates" the knowledge layer at no ingest
+  cost. Fully optional and **fail-open** (a missing/slow server yields no section, never an error or
+  stall); trivial turns skip the lookup. `cognition/wiki.py` (`WikiSource`, stdlib `urllib` +
+  `html.parser`), `WikiConfig`, `build_context(wiki_context=…)`.
 - **Empty recall is stated, not silent (DESIGN §3d).** When memory recall comes up empty,
   `build_context()` now renders the knowledge section anyway — "No stored memory is relevant to this…
   say you have no memory of it, do not guess" — so the model answers "I don't have any memory of this"

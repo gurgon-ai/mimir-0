@@ -30,6 +30,7 @@ keeps the repo fully distributable and your install footprint minimal.
 | The library + reference web UI — **pure Python, zero runtime dependencies** | **[Ollama](https://ollama.com)** (or any chat/embeddings endpoint) — for real model inference |
 | **SQLite** storage — bundled with Python; no install, no server, no daemon | **Open model(s)** — `ollama pull` whatever you like (each under its own license) |
 | A deterministic **mock provider + stdlib embedder** so the core runs with *nothing* installed | *(optional)* `pypdf` — only for PDF ingestion (the `[documents]` extra) |
+| The wiki integration — **pure stdlib HTTP**, no library | *(optional)* **[Kiwix](https://kiwix.org)** `kiwix-serve` + any **ZIM** — only if you want offline Wikipedia as a reference layer |
 
 **Core runtime dependencies: none.** Python's standard library (including SQLite) is the entire
 floor — the mock provider and bootstrap embedder run the full acceptance loop on Python alone. You
@@ -79,6 +80,10 @@ On top of that:
 
 - **Document ingestion** — `ingest()` for text/markdown (PDF via the `[documents]` extra) into a
   document-tier layer with file/section provenance.
+- **Offline encyclopedia (optional)** — point a `[wiki]` block at a local **Kiwix server** over any
+  **ZIM** (Wikipedia nopic, a medical wiki, top-50k, …) and the model gets a live, attributed
+  reference layer — **zero Python dependency** (stdlib HTTP, like talking to Ollama), nothing to
+  ingest, fail-open.
 - **Entity graph** — subject–relation–object triples with 1–2 hop traversal.
 - **Working memory & self-model** — rolling salient context, and an evolving generic identity
   seeded by the **seeding interview** (a re-runnable, ~12-essential + 7-optional get-to-know-you whose

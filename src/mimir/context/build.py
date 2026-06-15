@@ -169,6 +169,7 @@ def build_context(
     temporal_awareness: str | None = None,
     recent_history: str | None = None,
     background_notes: str | None = None,
+    wiki_context: str | None = None,
     now_ts: float | None = None,
     extra_sections: list[Section] | None = None,
 ) -> ContextBundle:
@@ -246,6 +247,7 @@ def build_context(
     awareness_tokens = estimate_tokens(temporal_awareness) + 8 if temporal_awareness else 0
     history_tokens = estimate_tokens(recent_history) + 8 if recent_history else 0
     notes_tokens = estimate_tokens(background_notes) + 8 if background_notes else 0
+    wiki_tokens = estimate_tokens(wiki_context) + 8 if wiki_context else 0
     sentinel_tokens = (
         estimate_tokens(sentinel_note.text) + 8 if sentinel_note is not None else 0
     )
@@ -263,6 +265,7 @@ def build_context(
         - awareness_tokens
         - history_tokens
         - notes_tokens
+        - wiki_tokens
         - sentinel_tokens
         - extra_reserved
         - _UNCERTAINTY_RESERVE,
@@ -278,6 +281,23 @@ def build_context(
             msg = "knowledge section truncated: a high-tier fact may have been dropped"
             warnings.append(msg)
             log.warning(msg)
+
+    # 2b. Reference — live lookups from the offline encyclopedia (Kiwix/ZIM), attributed and clearly
+    #     external, so the model can cite "per Wikipedia" apart from its own memory (DESIGN §9).
+    wiki_count = 0
+    if wiki_context:
+        wiki_count = wiki_context.count("\n\n") + 1
+        sections.append(
+            Section(
+                name="reference",
+                title="Reference — from your offline encyclopedia (attribute as Wikipedia):",
+                body=wiki_context,
+                tier=SectionTier.MEDIUM,
+                substantive=True,
+                requested_tokens=estimate_tokens(wiki_context),
+                admitted_tokens=estimate_tokens(wiki_context),
+            )
+        )
 
     # 3. Entity graph — connected facts, a second typed knowledge layer (DESIGN §3a).
     if graph_facts:
@@ -313,7 +333,7 @@ def build_context(
 
     # source_count = how much substantive typed knowledge fed this turn (DESIGN §3d): admitted
     # memory facts plus connected graph edges — two independent grounding layers.
-    source_count = len(retrieved_ids) + len(graph_facts or [])
+    source_count = len(retrieved_ids) + len(graph_facts or []) + wiki_count
 
     # 3c. Recent history — the temporal-narrative arc (month → week → lately), longer-horizon
     #     context before working memory's recency (DESIGN §3a/§3e). Lossy summaries, not facts.

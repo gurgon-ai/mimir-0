@@ -61,6 +61,7 @@ from .cognition.self_model import synthesize_self_model
 from .cognition.sentinel import run_sentinel
 from .cognition.sleep import SleepReport, consolidate
 from .cognition.temporal import answer_time_query, gap_insight, local_now, time_prefix
+from .cognition.wiki import WikiSource
 from .cognition.working_memory import (
     current_working_memory,
     record_exchange,
@@ -202,6 +203,13 @@ class Mimir:
         self._last_sentinel_error: BaseException | None = None
         self._turn_count = 0
         self._session_id: str | None = None  # the current conversation; resolved lazily on turn 1
+        # Optional offline encyclopedia (Kiwix/ZIM over HTTP) — a live, attributed reference layer.
+        wcfg = config.wiki
+        self._wiki = (
+            WikiSource(url=wcfg.url, book=wcfg.book, max_articles=wcfg.max_articles,
+                       max_chars=wcfg.max_chars, timeout_s=wcfg.timeout_s)
+            if wcfg and wcfg.enabled and wcfg.book else None
+        )
         self._turn_active = False  # True while a turn is generating — background yields to it (§5a)
         # The burst worker: all post-response cognition (sentinel, self-model, working memory,
         # sleep) is scheduled through it — priority-ordered, slot-capped, interruptible — instead of
@@ -379,6 +387,15 @@ class Mimir:
         """The temporal-narrative arc (month → week → lately) for the prompt, or ``None``."""
         return render_recent_history(self._storage)
 
+    def _wiki_context(self, text: str) -> str | None:
+        """A live reference lookup from the offline encyclopedia, or ``None`` (disabled / smalltalk
+        / no hit / unreachable). Skips trivial turns so a greeting doesn't trigger a search."""
+        if self._wiki is None:
+            return None
+        if len(text.split()) < 3 and not text.rstrip().endswith("?"):
+            return None
+        return self._wiki.context(text)
+
     def _history_messages(self, user: str | None, session_id: str) -> list[dict[str, str]]:
         """The current session's recent exchanges as real chat messages, so the model has genuine
         continuity (not just summarized text) — scoped to this conversation so a new one starts
@@ -515,6 +532,7 @@ class Mimir:
                 temporal_awareness=awareness,
                 recent_history=self._recent_history(),
                 background_notes="\n".join(notes) if notes else None,
+                wiki_context=self._wiki_context(text),
                 now_ts=now,
             )
 
@@ -613,6 +631,7 @@ class Mimir:
                 temporal_awareness=awareness,
                 recent_history=self._recent_history(),
                 background_notes="\n".join(notes) if notes else None,
+                wiki_context=self._wiki_context(text),
                 now_ts=now,
             )
             messages = [
