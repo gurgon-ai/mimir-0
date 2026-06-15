@@ -6,7 +6,7 @@ from __future__ import annotations
 from mimir.brain import Mimir
 from mimir.config import Config
 from mimir.storage.gateway import StorageGateway
-from mimir.storage.repo import recent_conversation, record_conversation_turn
+from mimir.storage.repo import list_sessions, recent_conversation, record_conversation_turn
 
 
 def test_conversation_log_round_trips_and_prunes(db_path: str) -> None:
@@ -50,6 +50,21 @@ def test_new_session_starts_a_clean_context(brain: Mimir) -> None:
     assert brain._history_messages("operator", brain._resolve_session()) == []
     sessions = brain.sessions(user="operator")
     assert sessions and "the gate is broken" in (sessions[-1]["summary"] or "")
+
+
+def test_sessions_are_grouped_and_restorable(db_path: str) -> None:
+    # The shape the UI dropdown reads: distinct sessions with a summary + count, each filterable —
+    # including the backfilled "legacy" group, so an old conversation is restorable (not value="").
+    sg = StorageGateway(db_path)
+    try:
+        record_conversation_turn(sg, user="op", user_text="old", reply="ok", session_id="legacy")
+        record_conversation_turn(sg, user="op", user_text="recent", reply="ok2", session_id="s1")
+        ids = {s["session_id"] for s in list_sessions(sg, user="op")}
+        assert ids == {"legacy", "s1"} and None not in ids  # no unselectable NULL session
+        legacy = recent_conversation(sg, user="op", session_id="legacy")
+        assert [t["user_text"] for t in legacy] == ["old"]  # restore returns only its turns
+    finally:
+        sg.close()
 
 
 def test_intercept_turns_are_logged_too(brain: Mimir) -> None:
