@@ -437,3 +437,11 @@ def test_graph_map_and_memory_edit_delete(base_url: str) -> None:
 def test_page_has_graph_view(base_url: str) -> None:
     _, html = _get_html(base_url + "/")
     assert 'id="graphSvg"' in html and 'id="graphToggle"' in html
+
+
+def test_wiki_status_endpoint(base_url: str) -> None:
+    # The mock config has no [wiki] block → disabled (the status line shows "not configured").
+    status, data = _json("GET", base_url + "/api/wiki/status")
+    assert status == 200 and data == {"enabled": False}
+    _, html = _get_html(base_url + "/")
+    assert 'id="wikiStatus"' in html  # the Docs-tab status line

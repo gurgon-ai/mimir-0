@@ -118,6 +118,18 @@ class WikiSource:
                 break
         return out
 
+    def status(self) -> dict[str, object]:
+        """Reachability for the UI: ``{reachable, url, book, error?}`` — never raises."""
+        info: dict[str, object] = {"url": self._url, "book": self._book}
+        if not self._book:
+            return {**info, "reachable": False, "error": "no book configured"}
+        try:
+            raw = self._fetch(f"/suggest?content={urllib.parse.quote(self._book)}&term=mimir")
+            json.loads(raw.decode("utf-8", "replace"))
+            return {**info, "reachable": True}
+        except Exception as exc:
+            return {**info, "reachable": False, "error": str(exc)}
+
     def context(self, query: str) -> str | None:
         """The reference-section body for ``query`` (one short block per article), or ``None``."""
         results = self.search(query)

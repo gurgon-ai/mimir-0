@@ -387,6 +387,12 @@ class Mimir:
         """The temporal-narrative arc (month → week → lately) for the prompt, or ``None``."""
         return render_recent_history(self._storage)
 
+    def wiki_status(self) -> dict[str, Any]:
+        """Whether the offline encyclopedia is configured and reachable (for the UI status line)."""
+        if self._wiki is None:
+            return {"enabled": False}
+        return {"enabled": True, **self._wiki.status()}
+
     def _wiki_context(self, text: str) -> str | None:
         """A live reference lookup from the offline encyclopedia, or ``None`` (disabled / smalltalk
         / no hit / unreachable). Skips trivial turns so a greeting doesn't trigger a search."""
