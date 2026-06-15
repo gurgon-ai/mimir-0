@@ -8,6 +8,14 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Changed
+- **Timezone works without a package — UTC offsets + a cleaner host-local default.** Setting an IANA
+  zone (e.g. `America/Vancouver`) needs a tz database, which bare Windows lacks — so Mimir now also
+  accepts **UTC offsets** (`UTC`, `UTC-08:00`, `GMT+5:30`), resolved with pure stdlib arithmetic, no
+  `tzdata`. The picker leads with offsets and a **"System local time (recommended)"** default, and the
+  status line shows the actual offset in use (`system local time, UTC-07:00`) instead of an alarming
+  "timezone not resolved" warning — it only notes the `tzdata` extra (or suggests an offset) when an
+  IANA name genuinely can't resolve. For the common home case (the machine is in your timezone),
+  leaving it blank is correct and silent. New `temporal.resolve_timezone()`.
 - **The inner council fans across the whole fleet (DESIGN §5).** Council personas (user-convened or
   the sleep-cycle's self-deliberation) are now **pinned one-per-node** across every reachable machine
   instead of piling onto the best node for a model — so a deliberation lights up the entire fleet in

@@ -1165,7 +1165,7 @@ _HTML = """<!doctype html>
         timezone; everything is stored in UTC and shifted to it.</div>
       <div class="field">
         <label>Timezone</label>
-        <select id="setTz"><option value="">(host local)</option></select>
+        <select id="setTz"><option value="">System local time (recommended)</option></select>
       </div>
       <div class="field" style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap;">
         <div><label>Quiet hours start</label><input type="time" id="setStart"/></div>
@@ -1906,18 +1906,21 @@ async function loadSleepStatus() {
       const phases = Object.entries(s.phases || {}).map(([k,v]) => `${k}: ${v}`).join(", ");
       last = `last: ${s.last_cycle_date}${s.completed ? " ✓" : " (partial)"}${phases ? " — " + phases : ""}`;
     }
-    const clock = `Now ${s.now_local}${s.timezone ? " (" + s.timezone + ")" : " (host local)"}`;
-    const tzWarn = (s.timezone && s.timezone_active === false)
-      ? ' <span style="color:#e0a0a0;">— timezone not resolved (install the optional <code>tzdata</code> package); using host local</span>'
-      : "";
-    el.innerHTML = `${sched}. ${last}. ${clock}.${tzWarn}`;
+    const off = s.utc_offset ? "UTC" + s.utc_offset.replace(/(\\d{2})(\\d{2})$/, "$1:$2") : "";
+    const sys = `system local time${off ? ", " + off : ""}`;
+    let clock;
+    if (!s.timezone) clock = `Now ${s.now_local} (${sys})`;
+    else if (s.timezone_active) clock = `Now ${s.now_local} (${escapeHtml(s.timezone)})`;
+    else clock = `Now ${s.now_local} (${sys}) <span class="hint">— “${escapeHtml(s.timezone)}” ` +
+      `needs the <code>tzdata</code> extra; or pick a UTC offset for a zero-dep zone</span>`;
+    el.innerHTML = `${sched}. ${last}. ${clock}.`;
   } catch (e) { el.textContent = "error: " + e.message; }
 }
 
 let _tzZones = null;
 async function fillTz(sel, current) {
   if (!_tzZones) { _tzZones = (await api("GET", "/api/timezones")).zones || []; }
-  sel.innerHTML = '<option value="">(host local)</option>';
+  sel.innerHTML = '<option value="">System local time (recommended)</option>';
   _tzZones.forEach(z => { const o = document.createElement("option"); o.value = z; o.textContent = z; sel.appendChild(o); });
   sel.value = current || "";
 }

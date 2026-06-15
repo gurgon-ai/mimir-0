@@ -65,7 +65,13 @@ from .cognition.sentinel import run_sentinel
 from .cognition.sleep import SleepReport, consolidate
 from .cognition.sleep_cycle import CycleReport, in_window, run_cycle
 from .cognition.sleep_cycle import Phase as SleepPhase
-from .cognition.temporal import answer_time_query, gap_insight, local_now, time_prefix
+from .cognition.temporal import (
+    answer_time_query,
+    gap_insight,
+    local_now,
+    resolve_timezone,
+    time_prefix,
+)
 from .cognition.wiki import WikiSource
 from .cognition.working_memory import (
     current_working_memory,
@@ -982,16 +988,9 @@ class Mimir:
 
     @staticmethod
     def _tz_resolves(tz: str | None) -> bool:
-        """Whether ``tz`` actually loads. Needs the OS tz database or the optional `tzdata` package;
-        on a host without either (bare Windows) IANA zones don't resolve and we use host-local."""
-        if not tz:
-            return True  # None = host-local, always available
-        try:
-            from zoneinfo import ZoneInfo
-            ZoneInfo(tz)
-            return True
-        except Exception:
-            return False
+        """Whether ``tz`` resolves to a real zone. UTC offsets always do (pure arithmetic); IANA
+        names need the OS tz db or the `tzdata` extra. ``None`` = host-local, always fine."""
+        return not tz or resolve_timezone(tz) is not None
 
     def _effective_window(self) -> tuple[bool, str, str]:
         """(enabled, window_start, window_end) for the sleep cycle, override → config."""
@@ -1002,23 +1001,30 @@ class Mimir:
             o.get("sleep_window_end", self.config.sleep_window_end),
         )
 
+    # Fixed UTC offsets always work (no tz database); they lead the picker so there's a zero-dep way
+    # to pin a zone even without `tzdata`. (Offsets don't track DST — fine for a sleep window.)
+    _UTC_OFFSETS = ["UTC"] + [
+        f"UTC{sign}{h:02d}:00" for sign in ("-", "+") for h in range(1, 13)
+    ]
+
     def available_timezones(self) -> list[str]:
-        """A sorted list of IANA zones for the UI picker; a small curated fallback if tzdata is
-        absent (zoneinfo returns nothing without the system db or the `tzdata` package)."""
+        """Zones for the UI picker: UTC offsets first (always available), then IANA names from the
+        system tz db / `tzdata` extra if present, else a small curated IANA fallback."""
+        iana: list[str] = []
         try:
             from zoneinfo import available_timezones
-            zones = sorted(available_timezones())
-            if zones:
-                return zones
+            iana = sorted(available_timezones())
         except Exception:  # pragma: no cover - platform without tzdata
-            pass
-        return [
-            "UTC", "America/Vancouver", "America/Los_Angeles", "America/Denver",
-            "America/Chicago", "America/New_York", "America/Toronto", "America/Sao_Paulo",
-            "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Moscow",
-            "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Shanghai",
-            "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland",
-        ]
+            iana = []
+        if not iana:
+            iana = [
+                "America/Vancouver", "America/Los_Angeles", "America/Denver", "America/Chicago",
+                "America/New_York", "America/Toronto", "America/Sao_Paulo", "Europe/London",
+                "Europe/Paris", "Europe/Berlin", "Europe/Moscow", "Asia/Dubai", "Asia/Kolkata",
+                "Asia/Singapore", "Asia/Shanghai", "Asia/Tokyo", "Australia/Sydney",
+                "Pacific/Auckland",
+            ]
+        return self._UTC_OFFSETS + iana
 
     # -- the wall-clock sleep cycle (DESIGN §5a) --------------------------------------
 
@@ -1076,8 +1082,9 @@ class Mimir:
             "window_end": end,
             "in_window": in_window(now, start, end),
             "now_local": now.strftime("%Y-%m-%d %H:%M"),
+            "utc_offset": now.strftime("%z") or "",  # the offset actually in use (e.g. -0700)
             "timezone": self._tz(),
-            "timezone_active": self._tz_resolves(self._tz()),  # False → set but tzdata missing
+            "timezone_active": self._tz_resolves(self._tz()),  # False → set but unresolved → host
             "last_cycle_date": state.get("date"),
             "completed": state.get("completed", False),
             "phases": state.get("phases", {}),
