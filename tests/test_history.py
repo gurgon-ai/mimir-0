@@ -37,10 +37,19 @@ def test_history_persists_across_a_restart(mock_config: Config) -> None:
 
 def test_recent_turns_replay_to_the_model_as_messages(brain: Mimir) -> None:
     brain.turn("first thing I said", user="operator")
-    msgs = brain._history_messages("operator")
+    msgs = brain._history_messages("operator", brain._resolve_session())
     assert len(msgs) >= 2
     assert msgs[0] == {"role": "user", "content": "first thing I said"}
     assert msgs[1]["role"] == "assistant"  # the reply, as a real assistant message
+
+
+def test_new_session_starts_a_clean_context(brain: Mimir) -> None:
+    brain.turn("the gate is broken", user="operator")
+    brain.start_new_session()
+    # A fresh conversation replays nothing from the previous one.
+    assert brain._history_messages("operator", brain._resolve_session()) == []
+    sessions = brain.sessions(user="operator")
+    assert sessions and "the gate is broken" in (sessions[-1]["summary"] or "")
 
 
 def test_intercept_turns_are_logged_too(brain: Mimir) -> None:

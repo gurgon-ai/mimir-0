@@ -258,6 +258,17 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "CREATE INDEX idx_conversation_created ON conversation(created_at)",
         ],
     ),
+    (
+        17,
+        [
+            # Sessions: tag each conversation turn with the session (distinct conversation) it's in,
+            # so the UI can list past conversations in a dropdown and restore/continue one. A new
+            # session starts on a long idle gap or an explicit "new conversation". Legacy rows
+            # (NULL) read as one early session. Just a grouping key — no separate table needed.
+            "ALTER TABLE conversation ADD COLUMN session_id TEXT",
+            "CREATE INDEX idx_conversation_session ON conversation(session_id)",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -329,5 +340,5 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
     "node_prefs": {"node", "enabled", "updated_at"},
     "interactions": {"id", "ts", "user"},
     "narratives": {"id", "scope", "period", "narrative", "source_count", "created_at"},
-    "conversation": {"id", "user", "user_text", "reply", "created_at"},
+    "conversation": {"id", "user", "user_text", "reply", "created_at", "session_id"},
 }

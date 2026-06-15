@@ -192,18 +192,20 @@ def prune_narratives(gateway: StorageGateway, scope: str, keep: int) -> None:
 
 def record_conversation_turn(
     gateway: StorageGateway, *, user: str | None, user_text: str, reply: str,
-    keep: int = 500, created_at: float | None = None,
+    session_id: str | None = None, keep: int = 500, created_at: float | None = None,
 ) -> None:
     """Append one exchange to the durable conversation log, pruning to the most recent ``keep``.
 
     This is the lasting turn history (for UI restore + model continuity), distinct from the capped
-    EXCHANGE recency buffer that working-memory compression clears."""
+    EXCHANGE recency buffer that working-memory compression clears. ``session_id`` groups it into a
+    distinct conversation."""
     ts = time.time() if created_at is None else created_at
 
     def _write(conn: sqlite3.Connection) -> None:
         conn.execute(
-            "INSERT INTO conversation (user, user_text, reply, created_at) VALUES (?, ?, ?, ?)",
-            (user, user_text, reply, ts),
+            "INSERT INTO conversation (user, user_text, reply, created_at, session_id) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user, user_text, reply, ts, session_id),
         )
         conn.execute(
             "DELETE FROM conversation WHERE id NOT IN "
@@ -215,23 +217,66 @@ def record_conversation_turn(
 
 
 def recent_conversation(
-    gateway: StorageGateway, *, user: str | None = None, limit: int = 20
+    gateway: StorageGateway, *, user: str | None = None, limit: int = 20,
+    session_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """The most recent exchanges, oldest→newest (for restore + replaying to the model). With a
-    ``user``, includes user-agnostic rows too (matching the store's user scoping)."""
+    ``user``, includes user-agnostic rows too. With ``session_id``, only that conversation."""
+    where, params = [], []
+    if user is not None:
+        where.append("(user = ? OR user IS NULL)")
+        params.append(user)
+    if session_id is not None:
+        where.append("session_id = ?")
+        params.append(session_id)
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+
     def _read(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-        if user is None:
-            rows = conn.execute(
-                "SELECT user_text, reply, created_at FROM conversation ORDER BY id DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT user_text, reply, created_at FROM conversation "
-                "WHERE user = ? OR user IS NULL ORDER BY id DESC LIMIT ?",
-                (user, limit),
-            ).fetchall()
+        rows = conn.execute(
+            f"SELECT user_text, reply, created_at FROM conversation{clause} "
+            "ORDER BY id DESC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
         return [{"user_text": r[0], "reply": r[1], "created_at": r[2]} for r in reversed(rows)]
+
+    return gateway.read(_read)
+
+
+def last_conversation_meta(gateway: StorageGateway) -> dict[str, Any] | None:
+    """The newest turn's ``session_id`` + ``created_at`` (or ``None``) — for deciding whether to
+    continue the last session or start a new one after a gap/restart."""
+    def _read(conn: sqlite3.Connection) -> dict[str, Any] | None:
+        row = conn.execute(
+            "SELECT session_id, created_at FROM conversation ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return {"session_id": row[0], "created_at": row[1]} if row else None
+
+    return gateway.read(_read)
+
+
+def list_sessions(
+    gateway: StorageGateway, *, user: str | None = None, limit: int = 50
+) -> list[dict[str, Any]]:
+    """Distinct conversations, most recent first: ``session_id``, a one-line ``summary`` (the
+    session's first user message), ``started``/``last`` timestamps, and turn ``count``."""
+    scope = "WHERE (user = ? OR user IS NULL)" if user is not None else ""
+    args: tuple[Any, ...] = (user,) if user is not None else ()
+
+    def _read(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+        rows = conn.execute(
+            f"""
+            SELECT session_id, COUNT(*) AS n, MIN(created_at) AS started, MAX(created_at) AS last,
+                   (SELECT user_text FROM conversation c2
+                    WHERE c2.session_id IS s.session_id ORDER BY c2.id ASC LIMIT 1) AS summary
+            FROM conversation s {scope}
+            GROUP BY session_id ORDER BY last DESC LIMIT ?
+            """,
+            (*args, limit),
+        ).fetchall()
+        return [
+            {"session_id": r[0], "count": r[1], "started": r[2], "last": r[3], "summary": r[4]}
+            for r in rows
+        ]
 
     return gateway.read(_read)
 
