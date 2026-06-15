@@ -234,3 +234,22 @@ def test_chat_on_falls_back_when_node_missing() -> None:
     pool.refresh()
     # node "Z" doesn't exist → fall back to ordinary routing (lands on A), persona not lost
     assert pool.chat_on("Z", "m", [], {}, priority=Priority.BACKGROUND) == "reply-from-A"
+
+
+def test_role_node_pin_routes_to_that_node() -> None:
+    from mimir.config import RoleSpec
+    from mimir.model.gateway import ModelGateway
+
+    a = FleetProvider("A", ["m"])
+    b = FleetProvider("B", ["m"])
+    pool = ProviderPool([("A", a), ("B", b)], sleep=_noop_sleep)
+    pool.refresh()
+    gw = ModelGateway(pool, {"chat": RoleSpec(model="m")})
+
+    gw.set_role_model("chat", "m", node="B")          # pin chat onto node B
+    assert gw.role_nodes() == {"chat": "B"}
+    assert gw.chat("chat", []) == "reply-from-B"
+    assert b.calls >= 1 and a.calls == 0              # ran on B, never touched A
+
+    gw.set_role_model("chat", "m", node=None)         # clear the pin → routes freely again
+    assert gw.role_nodes() == {}

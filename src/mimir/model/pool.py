@@ -201,17 +201,25 @@ class ProviderPool:
         return placements
 
     def chat_stream(
-        self, model: str, messages: list[Message], params: dict[str, object], *, priority: Priority
+        self, model: str, messages: list[Message], params: dict[str, object], *, priority: Priority,
+        node: str | None = None,
     ) -> Iterator[str]:
         """Stream a chat completion from a healthy endpoint.
 
         Failover happens only *before the first token* (peeking it). Once a stream has started
         we are committed to that endpoint — a mid-stream failure propagates rather than silently
         restarting on another backend (which would duplicate output). No mid-stream retry.
+
+        ``node`` (a pinned-role override) is *preferred* — that endpoint is tried first — with the
+        other nodes kept as fallback so a down edge never hard-fails the turn (disable the node to
+        exclude it outright).
         """
         with self._lock:
             self._stats["calls"] += 1
         candidates = self._candidates(priority, model)
+        if node:  # prefer the pinned node, keep the rest as pre-first-token fallback
+            candidates = ([c for c in candidates if c[0].name == node]
+                          + [c for c in candidates if c[0].name != node])
         if not candidates:
             with self._lock:
                 self._stats["transient_fails"] += 1
