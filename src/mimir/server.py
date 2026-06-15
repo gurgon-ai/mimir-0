@@ -1407,14 +1407,25 @@ async function loadGraphMap() {
 
 function buildGraphSvg() {
   const svg = $("graphSvg"); svg.innerHTML = "";
+  // A shared white radial-gradient for the glow: opaque-ish near the core, fading to transparent at
+  // the rim (objectBoundingBox units, so it scales to each halo). A thin, white, gradient halo.
+  const defs = document.createElementNS(GNS, "defs");
+  const grad = document.createElementNS(GNS, "radialGradient"); grad.setAttribute("id", "memGlow");
+  [["0%", "#ffffff", "0.75"], ["60%", "#ffffff", "0.4"], ["100%", "#eaf6ff", "0"]].forEach(([o, c, op]) => {
+    const st = document.createElementNS(GNS, "stop");
+    st.setAttribute("offset", o); st.setAttribute("stop-color", c); st.setAttribute("stop-opacity", op);
+    grad.appendChild(st);
+  });
+  defs.appendChild(grad); svg.appendChild(defs);
   const root = document.createElementNS(GNS, "g"); svg.appendChild(root); graph.root = root;
   graph.links.forEach(l => { l.el = document.createElementNS(GNS, "line"); root.appendChild(l.el); });
   graph.nodes.forEach(n => {
     const g = document.createElementNS(GNS, "g"); g.setAttribute("class", "node");
     const col = glowColor(n.impN);
     const halo = document.createElementNS(GNS, "circle");
-    halo.setAttribute("class", "halo"); halo.setAttribute("r", (n.rad * 2.6).toFixed(1));
-    halo.setAttribute("fill", col); halo.setAttribute("opacity", 0.16); g.appendChild(halo);
+    halo.setAttribute("class", "halo");        // thin white glow: ~4–10px beyond the core, gradient-faded
+    halo.setAttribute("r", (n.rad + 4 + n.impN * 6).toFixed(1));
+    halo.setAttribute("fill", "url(#memGlow)"); g.appendChild(halo);
     const c = document.createElementNS(GNS, "circle");
     c.setAttribute("class", "core"); c.setAttribute("r", n.rad.toFixed(1)); c.setAttribute("fill", col);
     g.appendChild(c);
