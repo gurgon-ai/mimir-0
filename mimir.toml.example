@@ -76,6 +76,11 @@ every = 0
 enabled = true
 limit = 3                    # max conflicts argued per cycle (each is several model calls)
 
+[self_knowledge]
+# Bake a doc describing what the system is and how it works into memory in the nightly cycle, so it
+# can answer about itself. Content-hashed (re-embeds only on change). Empty/unset disables it.
+doc = "README.md"
+
 [diagnostics]
 # Self-observability (DESIGN §10): the system surfaces its own recent errors into the turn's context
 # ("I've had an error") and digests them in the nightly cycle's health phase. Fail-loud + fail-aware.

@@ -158,6 +158,10 @@ class Config:
     surface_errors: bool = True
     error_context_window_s: float = 1800.0  # an error this recent shows in context (30 min)
     error_context_max: int = 5              # max errors shown in the context section
+    # Self-knowledge: a doc describing what the system is and how it works, baked into memory in the
+    # nightly cycle (content-hashed, so it re-embeds only when the doc changes) so it can answer
+    # about itself. Empty disables. Path is relative to the working directory (the repo root).
+    self_knowledge_doc: str | None = "README.md"
     # Procedural memory: how many matching procedures to inject, and the minimum trigger match.
     procedural_top_k: int = 3
     procedural_min_match: float = 0.3
@@ -318,6 +322,7 @@ def load_config(path: str | Path) -> Config:
             raw.get("diagnostics", {}).get("error_context_window_s", 1800.0)
         ),
         error_context_max=int(raw.get("diagnostics", {}).get("error_context_max", 5)),
+        self_knowledge_doc=(raw.get("self_knowledge", {}).get("doc", "README.md") or None),
         procedural_top_k=int(raw.get("procedural", {}).get("top_k", 3)),
         procedural_min_match=float(raw.get("procedural", {}).get("min_match", 0.3)),
         timezone=(str(raw["locale"]["timezone"]) if raw.get("locale", {}).get("timezone")

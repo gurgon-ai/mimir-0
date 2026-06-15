@@ -25,6 +25,7 @@ def mock_config(db_path: str) -> Config:
         roles={"chat": role, "bake": role, "reasoning": role},
         provider=ProviderSpec(type="mock"),
         embed_mode=EmbeddingMode.BOOTSTRAP,
+        self_knowledge_doc=None,  # hermetic: don't bake the real README in unrelated tests
     )
 
 
