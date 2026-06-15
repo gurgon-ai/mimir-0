@@ -484,3 +484,17 @@ def test_deliberate_endpoint(base_url: str) -> None:
     assert status == 200 and "ran" in data  # no conflicts seeded → empty but well-formed
     _, html = _get_html(base_url + "/")
     assert 'id="delibBtn"' in html and 'id="setDeliberate"' in html
+
+
+def test_forum_endpoints(base_url: str) -> None:
+    status, data = _json("GET", base_url + "/api/forum")
+    assert status == 200 and data["threads"] == []  # nothing deliberated yet
+    # "ask the council" creates a thread (mock model), then it's listed + fetchable
+    status, asked = _json("POST", base_url + "/api/forum", {"action": "ask", "question": "Why?"})
+    assert status == 200 and asked["thread_id"]
+    _, listed = _json("GET", base_url + "/api/forum")
+    assert len(listed["threads"]) == 1
+    status, thread = _json("GET", base_url + "/api/forum/thread?id=" + str(asked["thread_id"]))
+    assert status == 200 and thread["question"] == "Why?" and thread["posts"]
+    _, html = _get_html(base_url + "/")
+    assert 'id="forumToggle"' in html and 'id="forumView"' in html

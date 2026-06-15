@@ -107,7 +107,9 @@ On top of that:
 - **Inner council** — adversarial deliberation across whatever models are installed. Convene it on a
   question yourself, or let it run **self-directed during sleep**: the system surfaces its own
   conflicts (graph tensions, divergent memories), a curator picks the few worth arguing, and the
-  verdicts become recallable understanding (DESIGN §5a).
+  verdicts become recallable understanding (DESIGN §5a). Personas **fan across the whole fleet** (one
+  node each, in parallel), and every debate persists to a **forum** view (toggle over the chat, like
+  the graph) you can read, comment on, and keep house in.
 - **Distributed fleet + qualifying tournament** — point it at your LAN and it discovers every
   `ollama serve` (zero setup on those machines), routes each request to a node that has the model,
   and **qualifies** them on a measured battery (talk, tools, code, reasoning, discipline, and an

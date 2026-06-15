@@ -401,6 +401,14 @@ the council; the verdict is stored as recallable understanding (`provenance="sle
 Conflicts argued recently are skipped so it doesn't loop. This is the public-clean analogue of the
 home-AI's nightly BBS/deliberation forum (its 16-persona forum + curator → our council + curator).
 
+**The forum — deliberations made legible + governable. [landed]** Council runs (convened, asked, or
+self-initiated in sleep) persist as **threads**: one post per persona (tagged with the node+model that
+argued it — the fleet fan-out, visible), the verdict, and user comments (`forum_threads`/`forum_posts`,
+schema v20). A `🏛 Forum` view toggles over the chat panel (like the memory graph) with full-admin
+housekeeping — comment, close/reopen, delete a post or a whole thread — and an "Ask the council" box.
+Comments are annotations, not inputs to the reasoning. This makes the system's adversarial reasoning
+something the operator can *read and curate*, not a black box.
+
 > A concrete **build sketch** mapping the *rest* of §5a onto Mimir-0's parts (the bidirectional-RAG
 > tasks, idle takeover, the phased plan B1–B4) is parked in
 > [`docs/BURST_WORKER.md`](docs/BURST_WORKER.md) — not scheduled; do the inference-engine phases first.
