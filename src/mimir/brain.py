@@ -378,14 +378,14 @@ class Mimir:
 
     def _time_context(self) -> str:
         """The clock/calendar line injected each turn, in the configured zone + hemisphere."""
-        return time_prefix(local_now(self.config.timezone), self.config.hemisphere)
+        return time_prefix(local_now(self._tz()), self.config.hemisphere)
 
     def maybe_time_answer(self, text: str) -> str | None:
         """A direct, model-free answer to an explicit time/date/season question, or ``None``.
 
         The deterministic intercept (DESIGN §3e) — exposed so a host (CLI, server, voice) can short-
         circuit before a model call. ``turn`` uses it automatically."""
-        return answer_time_query(text, local_now(self.config.timezone), self.config.hemisphere)
+        return answer_time_query(text, local_now(self._tz()), self.config.hemisphere)
 
     def _temporal_awareness(self, user: str | None, now_ts: float) -> str | None:
         """A deterministic 'you've been away longer than usual' note from the interaction log, or
@@ -484,7 +484,7 @@ class Mimir:
         Normally runs off the hot path in the consolidation pass; this is the explicit hook (DESIGN
         §3a/§3e). Idempotent per period — re-running the same day reuses today's entry."""
         return run_narrative_cycle(
-            self._model, self._storage, now=local_now(self.config.timezone)
+            self._model, self._storage, now=local_now(self._tz())
         )
 
     # -- the turn ---------------------------------------------------------------------
@@ -889,7 +889,7 @@ class Mimir:
             try:
                 consolidate(self._storage)
                 run_narrative_cycle(
-                    self._model, self._storage, now=local_now(self.config.timezone)
+                    self._model, self._storage, now=local_now(self._tz())
                 )
             except BaseException as exc:
                 log.error("consolidation failed (turn unaffected): %s", exc, exc_info=True)
@@ -907,6 +907,109 @@ class Mimir:
         except Exception as exc:  # narratives are enrichment — never fail consolidation (§10)
             log.error("narrative cycle failed during sleep (consolidation unaffected): %s", exc)
         return report
+
+    # -- runtime settings (UI-editable; override config defaults) ---------------------
+
+    _SETTINGS_KEY = "settings"
+
+    def _settings_defaults(self) -> dict[str, Any]:
+        """The settable keys and their config-supplied defaults. Config is the headless default;
+        these overrides are the live, UI-set preference (stored in kv, so no TOML mutation)."""
+        return {
+            "timezone": self.config.timezone,                    # IANA name, or None = host local
+            "sleep_enabled": self.config.sleep_enabled,
+            "sleep_window_start": self.config.sleep_window_start,
+            "sleep_window_end": self.config.sleep_window_end,
+        }
+
+    def _overrides(self) -> dict[str, Any]:
+        raw = kv_get(self._storage, self._SETTINGS_KEY)
+        if not raw:
+            return {}
+        try:
+            value = json.loads(raw)
+            return value if isinstance(value, dict) else {}
+        except (ValueError, TypeError):  # corrupt blob — fall back to config defaults, never crash
+            return {}
+
+    def settings(self) -> dict[str, Any]:
+        """Effective settings (override → config default) plus the list of keys the user has set."""
+        defaults = self._settings_defaults()
+        overrides = self._overrides()
+        effective = {k: overrides.get(k, d) for k, d in defaults.items()}
+        effective["overridden"] = sorted(k for k in overrides if k in defaults)
+        return effective
+
+    def update_settings(self, changes: dict[str, Any]) -> dict[str, Any]:
+        """Validate + persist setting overrides (loud on a bad value); return new effective.
+        The sleep scheduler reads these each tick, so a change takes effect without a restart."""
+        defaults = self._settings_defaults()
+        overrides = self._overrides()
+        for key, val in changes.items():
+            if key not in defaults:
+                raise ConfigError(f"unknown setting: {key!r}")
+            if key in ("sleep_window_start", "sleep_window_end"):
+                h, m = (int(p) for p in str(val).split(":"))  # raises ValueError → caught upstream
+                if not (0 <= h < 24 and 0 <= m < 60):
+                    raise ConfigError(f"{key} out of range: {val!r}")
+                val = f"{h:02d}:{m:02d}"
+            elif key == "timezone":
+                val = str(val) if val else None
+                known = val and (self._tz_resolves(val) or val in set(self.available_timezones()))
+                if val and not known:
+                    raise ConfigError(
+                        f"unknown timezone: {val!r} (install the optional `tzdata` package "
+                        f"for full IANA support)"
+                    )
+            elif key == "sleep_enabled":
+                val = bool(val)
+            overrides[key] = val
+        kv_set(self._storage, self._SETTINGS_KEY, json.dumps(overrides))
+        return self.settings()
+
+    def _tz(self) -> str | None:
+        """The effective timezone for all wall-clock reads (override → config)."""
+        return self._overrides().get("timezone", self.config.timezone)
+
+    @staticmethod
+    def _tz_resolves(tz: str | None) -> bool:
+        """Whether ``tz`` actually loads. Needs the OS tz database or the optional `tzdata` package;
+        on a host without either (bare Windows) IANA zones don't resolve and we use host-local."""
+        if not tz:
+            return True  # None = host-local, always available
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(tz)
+            return True
+        except Exception:
+            return False
+
+    def _effective_window(self) -> tuple[bool, str, str]:
+        """(enabled, window_start, window_end) for the sleep cycle, override → config."""
+        o = self._overrides()
+        return (
+            bool(o.get("sleep_enabled", self.config.sleep_enabled)),
+            o.get("sleep_window_start", self.config.sleep_window_start),
+            o.get("sleep_window_end", self.config.sleep_window_end),
+        )
+
+    def available_timezones(self) -> list[str]:
+        """A sorted list of IANA zones for the UI picker; a small curated fallback if tzdata is
+        absent (zoneinfo returns nothing without the system db or the `tzdata` package)."""
+        try:
+            from zoneinfo import available_timezones
+            zones = sorted(available_timezones())
+            if zones:
+                return zones
+        except Exception:  # pragma: no cover - platform without tzdata
+            pass
+        return [
+            "UTC", "America/Vancouver", "America/Los_Angeles", "America/Denver",
+            "America/Chicago", "America/New_York", "America/Toronto", "America/Sao_Paulo",
+            "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Moscow",
+            "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Shanghai",
+            "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland",
+        ]
 
     # -- the wall-clock sleep cycle (DESIGN §5a) --------------------------------------
 
@@ -939,12 +1042,13 @@ class Mimir:
 
     def run_sleep_cycle(self, force: bool = False) -> CycleReport:
         """Run the windowed sleep cycle now. ``force=True`` ignores the window + once-a-day guard —
-        the manual "run sleep" path. Otherwise honours the configured window and phase budgets."""
+        the manual "run sleep" path. Otherwise honours the effective window and phase budgets."""
+        _enabled, start, end = self._effective_window()
         return run_cycle(
             self._sleep_phases(),
-            clock=lambda: local_now(self.config.timezone),
-            window_start=self.config.sleep_window_start,
-            window_end=self.config.sleep_window_end,
+            clock=lambda: local_now(self._tz()),
+            window_start=start,
+            window_end=end,
             load_state=self._load_sleep_state,
             save_state=self._save_sleep_state,
             is_busy=lambda: self._turn_active,
@@ -952,33 +1056,41 @@ class Mimir:
         )
 
     def sleep_cycle_status(self) -> dict[str, Any]:
-        """Window config + today's checkpoint, for the UI's sleep panel."""
+        """Effective window + today's checkpoint, for the UI's sleep panel."""
         state = self._load_sleep_state()
-        now = local_now(self.config.timezone)
+        enabled, start, end = self._effective_window()
+        now = local_now(self._tz())
         return {
-            "enabled": self.config.sleep_enabled,
-            "window_start": self.config.sleep_window_start,
-            "window_end": self.config.sleep_window_end,
-            "in_window": in_window(now, self.config.sleep_window_start,
-                                   self.config.sleep_window_end),
+            "enabled": enabled,
+            "window_start": start,
+            "window_end": end,
+            "in_window": in_window(now, start, end),
+            "now_local": now.strftime("%Y-%m-%d %H:%M"),
+            "timezone": self._tz(),
+            "timezone_active": self._tz_resolves(self._tz()),  # False → set but tzdata missing
             "last_cycle_date": state.get("date"),
             "completed": state.get("completed", False),
             "phases": state.get("phases", {}),
         }
 
     def _start_sleep_scheduler(self) -> None:
-        """Daemon: every check interval, if inside the window (and not done today, not mid-turn) run
-        the cycle. Catch-up before noon covers a window missed to a powered-off/restarted host."""
-        if not self.config.sleep_enabled or self._sleep_scheduler is not None:
+        """Daemon: every check interval, if enabled + inside the window (and not done today, not
+        mid-turn) run the cycle. Catch-up before noon covers a window missed to an off host.
+
+        Always started (unless the interval is disabled): it reads *effective* settings each tick,
+        so the UI toggle/window take effect live without a restart."""
+        if self._sleep_scheduler is not None or self.config.sleep_check_interval_s <= 0:
             return
         interval = max(60.0, self.config.sleep_check_interval_s)
-        start, end = self.config.sleep_window_start, self.config.sleep_window_end
 
         def _loop() -> None:
-            log.info("sleep: scheduler started (window %s–%s, every %.0fs)", start, end, interval)
+            log.info("sleep: scheduler started (every %.0fs)", interval)
             while not self._stop_sleep.wait(timeout=interval):
                 try:
-                    now = local_now(self.config.timezone)
+                    enabled, start, end = self._effective_window()
+                    if not enabled:
+                        continue
+                    now = local_now(self._tz())
                     state = self._load_sleep_state()
                     done_today = (state.get("date") == now.strftime("%Y-%m-%d")
                                   and state.get("completed"))

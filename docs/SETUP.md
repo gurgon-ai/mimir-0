@@ -407,7 +407,10 @@ top_k = 3                       # max matching learned habits injected per turn
 min_match = 0.3                 # minimum trigger relevance before a habit fires
 
 [locale]                        # temporal grounding — clock/calendar sense injected each turn
-# timezone = "America/Vancouver"  # IANA name; omit to use the host's local zone
+# timezone = "America/Vancouver"  # IANA name; omit to use the host's local zone. Also settable
+                                  # live in the web UI's Sleep tab. IANA zones need the OS tz database
+                                  # or `pip install 'mimir-0[timezone]'`; without it Mimir falls back
+                                  # to host-local and says so (it never silently ignores the setting).
 hemisphere = "north"            # "north" | "south" — which way the seasons run
 
 [provider]

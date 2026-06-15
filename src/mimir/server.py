@@ -35,7 +35,7 @@ from urllib.parse import parse_qs, urlparse
 from .brain import Mimir
 from .cognition.self_model import gather_signals
 from .cognition.working_memory import current_working_memory
-from .errors import IngestError, MimirError
+from .errors import ConfigError, IngestError, MimirError
 from .storage.models import Memory, MemoryKind, Procedure, Triple
 from .storage.repo import (
     browse_memories,
@@ -171,6 +171,10 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self.server.brain.wiki_status())  # lock-free (quick external check)
             elif route == "/api/sleep/status":
                 self._send_json(self.server.brain.sleep_cycle_status())  # lock-free (reads state)
+            elif route == "/api/settings":
+                self._send_json(self.server.brain.settings())  # lock-free (kv read)
+            elif route == "/api/timezones":
+                self._send_json({"zones": self.server.brain.available_timezones()})
             elif route == "/api/procedures":
                 self._send_json(self._procedures())
             elif route == "/api/fleet":
@@ -227,6 +231,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._ingest(body))
             elif route == "/api/sleep":
                 self._send_json(self._sleep())
+            elif route == "/api/settings":
+                self._send_json(self._update_settings(body))
             elif route == "/api/council":
                 self._send_json(self._council(body))
             elif route == "/api/procedures":
@@ -781,6 +787,15 @@ class _Handler(BaseHTTPRequestHandler):
             })
         return out
 
+    def _update_settings(self, body: dict[str, Any]) -> dict[str, Any]:
+        changes = body.get("settings", body)  # accept {"settings": {...}} or a bare {...}
+        if not isinstance(changes, dict):
+            raise MimirError("settings must be an object")
+        try:
+            return self.server.brain.update_settings(changes)
+        except (ConfigError, ValueError) as exc:  # bad tz / time → a clean 400-style message
+            raise MimirError(str(exc)) from exc
+
     def _mind(self) -> dict[str, Any]:
         brain = self.server.brain
         with self.server.brain_lock:
@@ -1054,6 +1069,7 @@ _HTML = """<!doctype html>
       <button data-tab="identity" class="active">Identity</button>
       <button data-tab="profile">Profile</button>
       <button data-tab="mind">Mind</button>
+      <button data-tab="sleep">Sleep</button>
       <button data-tab="memories">Memories</button>
       <button data-tab="graph">Graph</button>
       <button data-tab="procedures">Habits</button>
@@ -1088,14 +1104,33 @@ _HTML = """<!doctype html>
       <h2>Self-model</h2>
       <div class="selfmodel" id="selfModel">—</div>
       <div class="stats" id="mindStats"></div>
-      <h2>Sleep cycle</h2>
-      <div id="sleepStatus" class="hint">—</div>
-      <button class="secondary" id="sleepBtn" type="button">Run sleep now</button>
-      <div id="sleepResult" class="hint"></div>
       <h2>Working memory</h2>
       <div class="selfmodel" id="workingMemory">—</div>
       <h2>Recent reflections</h2>
       <div id="reflections"></div>
+    </div>
+
+    <div class="tabpane hidden" id="tab-sleep">
+      <h2>Sleep cycle</h2>
+      <div class="hint" style="margin-bottom:10px;">When you're away, Mimir does its heavy upkeep —
+        consolidating memory, resolving contradictions, writing its journal (and, soon, reasoning
+        adversarially over its own open questions). Set the quiet window below. All times are in your
+        timezone; everything is stored in UTC and shifted to it.</div>
+      <div class="field">
+        <label>Timezone</label>
+        <select id="setTz"><option value="">(host local)</option></select>
+      </div>
+      <div class="field" style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap;">
+        <div><label>Quiet hours start</label><input type="time" id="setStart"/></div>
+        <div><label>Quiet hours end</label><input type="time" id="setEnd"/></div>
+        <label style="font-weight:normal;"><input type="checkbox" id="setEnabled"/> Enabled</label>
+      </div>
+      <button id="saveSleep" type="button">Save schedule</button>
+      <span id="settingsMsg" class="hint" style="margin-left:10px;"></span>
+      <h2 style="margin-top:18px;">Status</h2>
+      <div id="sleepStatus" class="hint">—</div>
+      <button class="secondary" id="sleepBtn" type="button">Run sleep now</button>
+      <div id="sleepResult" class="hint"></div>
     </div>
 
     <div class="tabpane hidden" id="tab-memories">
@@ -1614,7 +1649,7 @@ async function loadWikiStatus() {
 $("wikiRecheck").addEventListener("click", loadWikiStatus);
 
 // --- tabs ---
-const loaders = { mind: loadMind, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet, docs: loadWikiStatus };
+const loaders = { mind: loadMind, sleep: loadSleepTab, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet, docs: loadWikiStatus };
 document.querySelectorAll(".tabs button").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));
@@ -1647,7 +1682,6 @@ async function loadMind() {
       refl.appendChild(d);
     });
     if (!(m.recent_reflections||[]).length) refl.innerHTML = '<div class="hint">No reflections yet.</div>';
-    loadSleepStatus();
   } catch (e) { $("selfModel").textContent = "error: " + e.message; }
 }
 
@@ -1697,16 +1731,54 @@ async function loadSleepStatus() {
     const s = await api("GET", "/api/sleep/status");
     const win = `${s.window_start}–${s.window_end}`;
     const sched = s.enabled
-      ? `Nightly window <b>${win}</b>${s.in_window ? ' <span style="color:#7fd17f;">(open now)</span>' : ''}`
+      ? `Quiet window <b>${win}</b>${s.in_window ? ' <span style="color:#7fd17f;">(open now)</span>' : ''}`
       : `Scheduler <b>off</b> — manual only`;
     let last = "never run";
     if (s.last_cycle_date) {
       const phases = Object.entries(s.phases || {}).map(([k,v]) => `${k}: ${v}`).join(", ");
       last = `last: ${s.last_cycle_date}${s.completed ? " ✓" : " (partial)"}${phases ? " — " + phases : ""}`;
     }
-    el.innerHTML = `${sched}. ${last}. Set the window in <code>[sleep]</code> in mimir.toml.`;
+    const clock = `Now ${s.now_local}${s.timezone ? " (" + s.timezone + ")" : " (host local)"}`;
+    const tzWarn = (s.timezone && s.timezone_active === false)
+      ? ' <span style="color:#e0a0a0;">— timezone not resolved (install the optional <code>tzdata</code> package); using host local</span>'
+      : "";
+    el.innerHTML = `${sched}. ${last}. ${clock}.${tzWarn}`;
   } catch (e) { el.textContent = "error: " + e.message; }
 }
+
+let _tzZones = null;
+async function fillTz(sel, current) {
+  if (!_tzZones) { _tzZones = (await api("GET", "/api/timezones")).zones || []; }
+  sel.innerHTML = '<option value="">(host local)</option>';
+  _tzZones.forEach(z => { const o = document.createElement("option"); o.value = z; o.textContent = z; sel.appendChild(o); });
+  sel.value = current || "";
+}
+
+async function loadSleepTab() {
+  try {
+    const s = await api("GET", "/api/settings");
+    await fillTz($("setTz"), s.timezone);
+    $("setStart").value = s.sleep_window_start || "02:00";
+    $("setEnd").value = s.sleep_window_end || "06:00";
+    $("setEnabled").checked = !!s.sleep_enabled;
+  } catch (e) { $("settingsMsg").textContent = "error: " + e.message; }
+  loadSleepStatus();
+}
+
+$("saveSleep").addEventListener("click", async () => {
+  $("settingsMsg").textContent = "Saving…";
+  try {
+    await api("POST", "/api/settings", { settings: {
+      timezone: $("setTz").value,
+      sleep_window_start: $("setStart").value,
+      sleep_window_end: $("setEnd").value,
+      sleep_enabled: $("setEnabled").checked,
+    }});
+    $("settingsMsg").textContent = "Saved.";
+    setTimeout(() => $("settingsMsg").textContent = "", 1500);
+    loadSleepStatus();
+  } catch (e) { $("settingsMsg").textContent = "Error: " + e.message; }
+});
 
 $("sleepBtn").addEventListener("click", async () => {
   $("sleepResult").textContent = "Running sleep cycle…";
@@ -2446,11 +2518,8 @@ function renderOfframp() {
 function renderInterviewQ() {
   const q = ivState.queue[ivState.i];
   if (q && q.core === false && !ivState.offramped) { renderOfframp(); return; }
-  if (!q) {  // finished the queue
-    $("ivQ").textContent = "All set — thank you. You can edit any of this anytime in the Profile tab.";
-    $("ivForm").style.display = "none"; $("ivSkip").style.display = "none";
-    $("ivProgressTop").textContent = ""; $("ivProgress").textContent = "";
-    $("ivDone").style.display = ""; $("ivDone").textContent = "Close";
+  if (!q) {  // finished the queue → offer a quick schedule/timezone setup
+    renderInterviewSchedule();
     return;
   }
   $("ivForm").style.display = ""; $("ivSkip").style.display = "";
@@ -2460,6 +2529,37 @@ function renderInterviewQ() {
   $("ivProgressTop").textContent = `${ivState.i + 1} / ${ivState.queue.length}`;
   $("ivProgress").textContent = "Press Enter to save · skippable · stored as your highest-trust facts.";
   $("ivInput").focus();
+}
+
+function renderInterviewSchedule() {
+  // The final interview step: timezone + quiet hours, written to settings (not a memory).
+  $("ivForm").style.display = "none"; $("ivSkip").style.display = "none";
+  $("ivProgressTop").textContent = "";
+  $("ivQ").textContent = "Last thing — when are you usually asleep or away? I'll do my background " +
+    "upkeep then. (Change this anytime in the Sleep tab.)";
+  $("ivProgress").innerHTML =
+    '<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-top:6px;">' +
+    '<div><label style="display:block;font-size:11px;">Timezone</label><select id="ivTz"></select></div>' +
+    '<div><label style="display:block;font-size:11px;">Quiet start</label><input type="time" id="ivStart" value="02:00"/></div>' +
+    '<div><label style="display:block;font-size:11px;">Quiet end</label><input type="time" id="ivEnd" value="06:00"/></div>' +
+    '<button class="secondary" type="button" id="ivSchedSave" style="padding:3px 10px;">Save</button>' +
+    '<span id="ivSchedMsg" class="hint"></span></div>';
+  $("ivDone").style.display = ""; $("ivDone").textContent = "Done";
+  api("GET", "/api/settings").then(s => {
+    fillTz($("ivTz"), s.timezone);
+    $("ivStart").value = s.sleep_window_start || "02:00";
+    $("ivEnd").value = s.sleep_window_end || "06:00";
+  }).catch(() => fillTz($("ivTz"), ""));
+  $("ivSchedSave").addEventListener("click", async () => {
+    $("ivSchedMsg").textContent = "Saving…";
+    try {
+      await api("POST", "/api/settings", { settings: {
+        timezone: $("ivTz").value, sleep_window_start: $("ivStart").value,
+        sleep_window_end: $("ivEnd").value, sleep_enabled: true,
+      }});
+      $("ivSchedMsg").textContent = "Saved ✓ — all set.";
+    } catch (e) { $("ivSchedMsg").textContent = "Error: " + e.message; }
+  });
 }
 
 async function submitInterviewAnswer() {
