@@ -94,3 +94,27 @@ def test_build_context_emits_system_health_section() -> None:
         system_health="- [error] sentinel: boom",
     )
     assert any(s.name == "system_health" for s in bundle.sections)
+
+
+def test_backend_health_single_provider_is_quiet(brain: Mimir) -> None:
+    # Single local provider → no fleet health line, but pool_health still works.
+    assert brain._backend_health_line() is None
+    assert brain.pool_health()["nodes"] >= 1
+
+
+def test_backend_degraded_surfaces_in_context(brain: Mimir) -> None:
+    from tests.test_model_pool import DownProvider, FleetProvider
+
+    from mimir.config import RoleSpec
+    from mimir.model.gateway import ModelGateway
+    from mimir.model.pool import ProviderPool
+
+    a = FleetProvider("A", ["m"])
+    b = DownProvider("B", ["m"])
+    pool = ProviderPool([("A", a), ("B", b)], sleep=lambda _: None)
+    pool.refresh()
+    brain._model = ModelGateway(pool, {"chat": RoleSpec(model="m")})
+    line, degraded = brain._backend_health_line()
+    assert degraded and "1/2 nodes up" in line and "down: B" in line
+    ctx = brain._error_context()                      # degraded backend shows even with no errors
+    assert ctx and "Backend:" in ctx and "down: B" in ctx

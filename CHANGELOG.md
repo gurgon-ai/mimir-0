@@ -153,7 +153,10 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   **system-health section in the turn's context** lists recent errors (within a window, capped) so the
   model knows when it's degraded and can say "I've had an error" instead of carrying on oblivious;
   (2) a **`health` phase in the sleep cycle** digests the period's errors (counts + samples) to `kv`
-  so the nightly cycle reviews what went wrong and it survives a restart. Also shown in the Mind tab.
+  so the nightly cycle reviews what went wrong and it survives a restart. The context block also
+  carries **backend pool health + per-node speeds** (nodes up/down, saturation, s/turn) when the
+  fleet is degraded — so the model knows "node …189 is down, …190 at 6.1s" — and the Mind tab shows
+  it live (`Mimir.pool_health()`, `get_stats()` now lists down nodes).
   Config: `[diagnostics] surface_errors` (default on), `error_context_window_s` (30 min),
   `error_context_max`. New: `Mimir.recent_errors()`/`digest_errors()`/`health_digest()`.
 - **The council forum — deliberations you can read, comment on, and keep house in (DESIGN §5a).** A

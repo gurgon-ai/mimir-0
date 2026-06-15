@@ -869,6 +869,7 @@ class _Handler(BaseHTTPRequestHandler):
             "recent_reflections": signals.recent_reflections,
             "recent_errors": brain.recent_errors(limit=8),
             "error_counts": brain._errors.counts(),
+            "pool_health": brain.pool_health(),
         }
 
     def _memories(self, params: dict[str, list[str]]) -> dict[str, Any]:
@@ -1867,11 +1868,26 @@ async function loadMind() {
     const errs = m.recent_errors || [];
     const counts = m.error_counts || {};
     const sh = $("systemHealth");
+    // Backend pool health + per-node speeds (shown first, always — it's live status).
+    let backend = "";
+    const ph = m.pool_health;
+    if (ph && ph.nodes) {
+      const up = ph.nodes_up < ph.nodes
+        ? `<span style="color:#e0a0a0;">${ph.nodes_up}/${ph.nodes} nodes up</span>`
+        : `<span style="color:#7fd17f;">${ph.nodes_up}/${ph.nodes} nodes up</span>`;
+      const down = (ph.down || []).length ? ` · down: ${ph.down.map(shortNode).join(", ")}` : "";
+      const sat = Object.keys(ph.saturated || {}).length
+        ? ` · saturated: ${Object.entries(ph.saturated).map(([n,s]) => `${shortNode(n)} (${Math.round(s)}s)`).join(", ")}` : "";
+      const speeds = Object.entries(ph.latency || {}).sort((a,b)=>a[1]-b[1])
+        .map(([n,t]) => `${shortNode(n)} ${t.toFixed(1)}s`).join(" · ");
+      backend = `<div style="margin-bottom:8px;"><b>Backend:</b> ${up}${down}${sat}` +
+        (speeds ? `<div class="meta" style="margin-top:2px;">${speeds}</div>` : "") + `</div>`;
+    }
     if (!errs.length) {
-      sh.innerHTML = '<span style="color:#7fd17f;">✓ no errors logged this session</span>';
+      sh.innerHTML = backend + '<span style="color:#7fd17f;">✓ no errors logged this session</span>';
     } else {
       const tally = Object.entries(counts).map(([k,v]) => `${k.toLowerCase()}: ${v}`).join(" · ");
-      sh.innerHTML = `<div style="margin-bottom:6px;">${tally} (this session)</div>` +
+      sh.innerHTML = backend + `<div style="margin-bottom:6px;">${tally} (this session)</div>` +
         errs.slice().reverse().map(e => {
           const when = e.ts ? new Date(e.ts * 1000).toLocaleTimeString() : "";
           const lg = (e.logger || "").replace(/^mimir\\./, "");

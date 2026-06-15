@@ -253,3 +253,20 @@ def test_role_node_pin_routes_to_that_node() -> None:
 
     gw.set_role_model("chat", "m", node=None)         # clear the pin → routes freely again
     assert gw.role_nodes() == {}
+
+
+class DownProvider(FleetProvider):
+    """An endpoint that fails inventory — refresh() marks it unreachable (down)."""
+
+    def list_models(self) -> list[str]:
+        raise ProviderError(f"{self.name} unreachable", transient=True)
+
+
+def test_get_stats_reports_down_nodes() -> None:
+    a = FleetProvider("A", ["m"])
+    b = DownProvider("B", ["m"])
+    pool = ProviderPool([("A", a), ("B", b)], sleep=_noop_sleep)
+    pool.refresh()
+    stats = pool.get_stats()
+    assert stats["nodes_up"] == 1
+    assert stats["down"] == ["B"]

@@ -316,6 +316,7 @@ class ProviderPool:
                 **self._stats,
                 "endpoints": [e.name for e in self._endpoints],
                 "nodes_up": sum(1 for e in self._endpoints if e.reachable),
+                "down": [e.name for e in self._endpoints if not e.reachable],
                 "saturated": {
                     e.name: round(e.saturated_until - now, 1)
                     for e in self._endpoints
