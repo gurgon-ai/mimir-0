@@ -406,6 +406,11 @@ every = 0                       # legacy turn-cadence path (superseded by the wi
 enabled = true                  # also toggle live in the Sleep tab; "Deliberate now" triggers it manually
 limit = 3                       # max conflicts argued per cycle (each is several model calls)
 
+[diagnostics]                   # self-observability: the system sees its own recent errors (§10)
+surface_errors = true           # inject a "recent errors" block into the turn's context
+error_context_window_s = 1800   # an error this recent (seconds) shows in context; older ones fade
+error_context_max = 5           # max errors shown in that block
+
 [procedural]
 top_k = 3                       # max matching learned habits injected per turn
 min_match = 0.3                 # minimum trigger relevance before a habit fires

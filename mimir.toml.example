@@ -74,6 +74,13 @@ every = 0
 enabled = true
 limit = 3                    # max conflicts argued per cycle (each is several model calls)
 
+[diagnostics]
+# Self-observability (DESIGN §10): the system surfaces its own recent errors into the turn's context
+# ("I've had an error") and digests them in the nightly cycle's health phase. Fail-loud + fail-aware.
+surface_errors = true
+error_context_window_s = 1800   # an error this recent (s) shows in context; older ones fade out
+error_context_max = 5
+
 [procedural]
 # Learned reasoning habits (trigger → procedure). When a turn matches a habit's trigger, the
 # procedure is injected as guidance. Teach habits via brain.learn_procedure() or the web UI.

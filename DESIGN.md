@@ -538,6 +538,12 @@ be the least-fragile, loudest-failing, self-testing part of the system.
   whether truncation occurred; truncating a high-tier section is a warning, not silence. An
   introspection call exposes "what's in the prompt and how big," so "why did it forget X?" is
   debuggable without reading internals.
+- **The system sees its own failures (`diagnostics.py`)** — fail-loud is only half the loop; the
+  other half is fail-*aware*. A bounded ring captures `WARNING`+ off the `mimir` logger, and two
+  surfaces consume it: a **system-health section in the turn's context** (recent errors, windowed +
+  capped) so the model knows when it's degraded and owns it ("my last sentinel pass failed") instead
+  of carrying on oblivious, and a **`health` phase in the sleep cycle** that digests the period's
+  errors so the nightly pass reviews what went wrong and the summary survives a restart.
 - **Budgeted section registry** — every registered context source declares a budget + priority; the
   core caps or disables a misbehaving source without starving core sections.
 - **Internal scaffolding never leaks** — the provenance tags and epistemic flags that structure the

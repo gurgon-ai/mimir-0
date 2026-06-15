@@ -147,6 +147,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **Self-observability — the system sees its own recent errors (DESIGN §10).** The doctrine was
+  fail-*loud* (every downgrade logged); now it's also fail-*aware*. A bounded ring
+  (`diagnostics.py`) captures `WARNING`+ off the `mimir` logger, and two surfaces use it: (1) a
+  **system-health section in the turn's context** lists recent errors (within a window, capped) so the
+  model knows when it's degraded and can say "I've had an error" instead of carrying on oblivious;
+  (2) a **`health` phase in the sleep cycle** digests the period's errors (counts + samples) to `kv`
+  so the nightly cycle reviews what went wrong and it survives a restart. Also shown in the Mind tab.
+  Config: `[diagnostics] surface_errors` (default on), `error_context_window_s` (30 min),
+  `error_context_max`. New: `Mimir.recent_errors()`/`digest_errors()`/`health_digest()`.
 - **The council forum — deliberations you can read, comment on, and keep house in (DESIGN §5a).** A
   `🏛 Forum` toggle swaps the chat panel for a forum (like the graph view): every deliberation —
   whether you convened it, asked from the forum, or the sleep cycle self-initiated it — now persists

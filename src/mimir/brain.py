@@ -80,6 +80,7 @@ from .cognition.working_memory import (
 )
 from .config import AUTO_MODEL, BackendConfig, Config, ProviderSpec, RoleSpec, load_config
 from .context.build import ContextBundle, build_context
+from .diagnostics import install_error_capture, render_errors
 from .embed.base import Embedder, EmbeddingMode
 from .embed.endpoint import EndpointEmbedder, NullEmbedder
 from .embed.locality import LocalityHashEmbedder
@@ -195,6 +196,9 @@ class Mimir:
     def __init__(self, config: Config, *, provider: Provider | None = None) -> None:
         config.validate()
         self.config = config
+        # Capture WARNING+ off the `mimir` logger into a ring, so the system can see its own recent
+        # failures — surfaced into context each turn and digested in the sleep cycle (DESIGN §10).
+        self._errors = install_error_capture()
         # Roles the user left to automatic selection (model = "auto" or omitted) — resolved from
         # the fleet once inventory is available, and re-resolved on rescan (DESIGN §4).
         self._auto_roles = {r for r, s in config.roles.items() if s.model == AUTO_MODEL}
@@ -563,6 +567,7 @@ class Mimir:
                 recent_history=self._recent_history(),
                 background_notes="\n".join(notes) if notes else None,
                 wiki_context=self._wiki_context(text),
+                system_health=self._error_context(),
                 now_ts=now,
             )
 
@@ -662,6 +667,7 @@ class Mimir:
                 recent_history=self._recent_history(),
                 background_notes="\n".join(notes) if notes else None,
                 wiki_context=self._wiki_context(text),
+                system_health=self._error_context(),
                 now_ts=now,
             )
             messages = [
@@ -1042,6 +1048,7 @@ class Mimir:
             SleepPhase("consolidate", min_minutes=2.0, run=_consolidate),
             SleepPhase("deliberate", min_minutes=15.0, run=self.deliberate_open_questions),
             SleepPhase("narratives", min_minutes=10.0, run=self.generate_narratives),
+            SleepPhase("health", min_minutes=1.0, run=self.digest_errors),  # cheap, no model
         ]
 
     def _load_sleep_state(self) -> dict:
@@ -1126,6 +1133,55 @@ class Mimir:
         scheduler = threading.Thread(target=_loop, name="mimir-sleep-cycle", daemon=True)
         scheduler.start()
         self._sleep_scheduler = scheduler
+
+    # -- self-observability: recent errors into context + a nightly digest (DESIGN §10) ----
+
+    _HEALTH_DIGEST_KEY = "health_digest"
+
+    def recent_errors(self, *, limit: int = 10, min_level: str = "WARNING") -> list[dict[str, Any]]:
+        """Recent captured errors (WARNING+), oldest-first — for the UI and introspection."""
+        return [r.as_dict() for r in self._errors.recent(limit=limit, min_level=min_level)]
+
+    def _error_context(self) -> str | None:
+        """The 'recent errors' block for this turn's prompt, or None when nothing's wrong lately.
+
+        Only errors inside the configured recency window are shown (so a fixed problem fades from
+        the prompt), capped — self-observability without drowning the context (DESIGN §10)."""
+        if not self.config.surface_errors:
+            return None
+        recent = self._errors.within(
+            self.config.error_context_window_s, time.time(), limit=self.config.error_context_max
+        )
+        return render_errors(recent) if recent else None
+
+    def digest_errors(self) -> dict[str, Any]:
+        """The sleep cycle's health pass: summarize the period's errors and record the digest (kv),
+        so the nightly cycle 'reviews' what went wrong and it survives a restart. Returns it.
+        """
+        counts = self._errors.counts()
+        samples = [r.as_dict() for r in self._errors.recent(limit=10, min_level="WARNING")]
+        digest = {
+            "date": local_now(self._tz()).strftime("%Y-%m-%d"),
+            "counts": counts,
+            "total": sum(counts.values()),
+            "samples": samples,
+            "generated_at": time.time(),
+        }
+        kv_set(self._storage, self._HEALTH_DIGEST_KEY, json.dumps(digest))
+        log.info("sleep: health digest — %d issue(s) logged this session (%s)",
+                 digest["total"],
+                 ", ".join(f"{k}:{v}" for k, v in sorted(counts.items())) or "none")
+        return digest
+
+    def health_digest(self) -> dict[str, Any] | None:
+        """The last nightly health digest (kv), or None if the sleep cycle hasn't run one yet."""
+        raw = kv_get(self._storage, self._HEALTH_DIGEST_KEY)
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return None
 
     # -- self-directed deliberation (the council, on the system's own conflicts; DESIGN §5a) --
 

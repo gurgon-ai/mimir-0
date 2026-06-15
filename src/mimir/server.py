@@ -867,6 +867,8 @@ class _Handler(BaseHTTPRequestHandler):
                 "by_tier": signals.tier_counts,
             },
             "recent_reflections": signals.recent_reflections,
+            "recent_errors": brain.recent_errors(limit=8),
+            "error_counts": brain._errors.counts(),
         }
 
     def _memories(self, params: dict[str, list[str]]) -> dict[str, Any]:
@@ -1163,6 +1165,8 @@ _HTML = """<!doctype html>
       <div class="stats" id="mindStats"></div>
       <h2>Working memory</h2>
       <div class="selfmodel" id="workingMemory">—</div>
+      <h2>System health</h2>
+      <div id="systemHealth" class="hint">—</div>
       <h2>Recent reflections</h2>
       <div id="reflections"></div>
     </div>
@@ -1860,6 +1864,22 @@ async function loadMind() {
       refl.appendChild(d);
     });
     if (!(m.recent_reflections||[]).length) refl.innerHTML = '<div class="hint">No reflections yet.</div>';
+    const errs = m.recent_errors || [];
+    const counts = m.error_counts || {};
+    const sh = $("systemHealth");
+    if (!errs.length) {
+      sh.innerHTML = '<span style="color:#7fd17f;">✓ no errors logged this session</span>';
+    } else {
+      const tally = Object.entries(counts).map(([k,v]) => `${k.toLowerCase()}: ${v}`).join(" · ");
+      sh.innerHTML = `<div style="margin-bottom:6px;">${tally} (this session)</div>` +
+        errs.slice().reverse().map(e => {
+          const when = e.ts ? new Date(e.ts * 1000).toLocaleTimeString() : "";
+          const lg = (e.logger || "").replace(/^mimir\\./, "");
+          const col = e.level === "WARNING" ? "#e0c07f" : "#e0a0a0";
+          return `<div class="mem"><div class="meta"><span style="color:${col};">${e.level}</span> · ${lg} · ${when}</div>` +
+            `<div class="text">${escapeHtml(e.message || "")}</div></div>`;
+        }).join("");
+    }
   } catch (e) { $("selfModel").textContent = "error: " + e.message; }
 }
 
