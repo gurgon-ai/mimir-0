@@ -75,6 +75,7 @@ from .cognition.temporal import (
 from .cognition.wiki import WikiSource
 from .cognition.working_memory import (
     current_working_memory,
+    exchange_count,
     record_exchange,
     synthesize_working_memory,
 )
@@ -866,8 +867,10 @@ class Mimir:
             every = self.config.self_model_refresh_every
             return every > 0 and (self._turn_count == 1 or self._turn_count % every == 0)
         if which == "working_memory":
-            every = self.config.working_memory_refresh_every
-            return every > 0 and self._turn_count % every == 0
+            # Count-based: fold once enough raw exchanges have accumulated (after the model has
+            # streamed its reply and the user is composing — a few seconds, off the hot path).
+            threshold = self.config.working_memory_fold_threshold
+            return threshold > 0 and exchange_count(self._storage) >= threshold
         if which == "sleep":
             every = self.config.sleep_every
             return every > 0 and self._turn_count % every == 0
@@ -898,7 +901,11 @@ class Mimir:
     def _working_memory_task(self, ctx: ResponseContext) -> Callable[[], BurstResult]:
         def run() -> BurstResult:
             try:
-                synthesize_working_memory(self._model, self._storage)
+                synthesize_working_memory(
+                    self._model, self._storage,
+                    fold_threshold=self.config.working_memory_fold_threshold,
+                    keep_recent=self.config.working_memory_keep_recent,
+                )
             except BaseException as exc:
                 log.error("working-memory refresh failed (turn unaffected): %s", exc, exc_info=True)
             return BurstResult()

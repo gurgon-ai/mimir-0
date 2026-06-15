@@ -387,9 +387,10 @@ budget_tokens = 4096            # per-turn prompt budget for assembly + accounti
 [self_model]
 refresh_every = 5               # turns between self-model re-synthesis; 0 disables (seed only)
 
-[working_memory]
-refresh_every = 4               # turns between folding recent exchanges into the rolling summary;
-                                # 0 disables compression (recency-only)
+[working_memory]                # rolling compression: fold oldest exchanges, keep recent ones raw
+fold_threshold = 10             # fold once this many raw exchanges accumulate; 0 disables compression
+keep_recent = 4                 # raw exchanges kept verbatim after a fold (the rest become summary)
+# refresh_every = 4             # deprecated turn-cadence trigger (superseded by fold_threshold)
 
 [entity_graph]
 hops = 2                        # how far to traverse from a turn's entities (1–2); 0 disables

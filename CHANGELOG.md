@@ -8,6 +8,18 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Changed
+- **Working memory now keeps recent turns raw and folds only the oldest (true rolling compression).**
+  Previously a fold summarized *all* buffered exchanges and **deleted every one**, so right after a
+  compression the prompt had only the summary and no recent verbatim turns. Now, once
+  `fold_threshold` (default 10) exchanges accumulate, it folds the **oldest** into the rolling summary
+  (the prior summary folded in too — older material compressed harder each pass) and **keeps the most
+  recent `keep_recent` (default 4) raw**. The trigger is **count-based** (fires when enough have
+  built up) instead of a fixed turn cadence, and it runs off the hot path in the burst worker right
+  after the reply streams — so the extra LLM call lands while you're composing, not in the reply
+  latency. The summary is now a short couple of paragraphs (was three sentences). It stays
+  cross-session and already feeds the daily narratives. Matches the home-AI's compress-keep-recent
+  scheme. New config: `[working_memory] fold_threshold`, `keep_recent` (the old `refresh_every` is
+  deprecated/back-compat only).
 - **Timezone works without a package — UTC offsets + a cleaner host-local default.** Setting an IANA
   zone (e.g. `America/Vancouver`) needs a tz database, which bare Windows lacks — so Mimir now also
   accepts **UTC offsets** (`UTC`, `UTC-08:00`, `GMT+5:30`), resolved with pure stdlib arithmetic, no

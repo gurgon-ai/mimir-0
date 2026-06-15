@@ -124,8 +124,12 @@ class Config:
     # How often (in turns) the self-model is re-synthesized off the hot path. 0 disables it
     # (the seed identity is then the whole self-model). The first turn always seeds one.
     self_model_refresh_every: int = 5
-    # How often (in turns) working memory's rolling summary is re-synthesized (folding the
-    # accumulated exchanges). 0 disables compression (recency-only working memory).
+    # Working memory's rolling compression: once ``fold_threshold`` raw exchanges have accumulated,
+    # fold the oldest ones into the rolling summary (the previous summary folded in too — compressed
+    # harder the further back), keeping the most recent ``keep_recent`` raw. 0 disables compression.
+    working_memory_fold_threshold: int = 10
+    working_memory_keep_recent: int = 4
+    # Deprecated turn-cadence trigger (superseded by the count-based fold above); kept for compat.
     working_memory_refresh_every: int = 4
     # Entity-graph traversal: how many hops from the query's entities, and the max connected
     # facts to inject. hops=0 disables graph retrieval (triples are still extracted/stored).
@@ -293,6 +297,12 @@ def load_config(path: str | Path) -> Config:
         ),
         working_memory_refresh_every=int(
             raw.get("working_memory", {}).get("refresh_every", 4)
+        ),
+        working_memory_fold_threshold=int(
+            raw.get("working_memory", {}).get("fold_threshold", 10)
+        ),
+        working_memory_keep_recent=int(
+            raw.get("working_memory", {}).get("keep_recent", 4)
         ),
         graph_hops=int(raw.get("entity_graph", {}).get("hops", 2)),
         graph_max_facts=int(raw.get("entity_graph", {}).get("max_facts", 8)),

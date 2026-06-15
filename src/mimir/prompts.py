@@ -68,11 +68,13 @@ COUNCIL_SYNTH_SYSTEM = (
 
 WORKING_MEMORY_MARKER = "Update the working memory"
 WORKING_MEMORY_SYSTEM = (
-    f"{WORKING_MEMORY_MARKER} — a compact running summary of the recent conversation that carries "
-    "forward what is currently salient (open threads, the user's current focus, anything to keep "
-    "in mind next). Given the previous working memory and the latest exchanges below, write an "
-    "updated summary in three sentences or fewer. Keep concrete specifics, drop stale detail. "
-    "Respond with the summary text only."
+    f"{WORKING_MEMORY_MARKER} — a compact ROLLING summary of the conversation so far that carries "
+    "forward what is currently salient (open threads, the user's current focus, decisions, things "
+    "to keep in mind next). Given the previous working memory and the latest exchanges below, FOLD "
+    "them into one updated summary: integrate the new exchanges, and compress the older material "
+    "from the previous summary harder the further back it goes (recent specifics stay; old detail "
+    "becomes gist). Keep it to a short couple of paragraphs at most. Preserve concrete specifics, "
+    "open threads; drop the stale and the trivial. Respond with the summary text only."
 )
 
 SELF_MODEL_MARKER = "Write a brief self-description"

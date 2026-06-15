@@ -41,9 +41,11 @@ budget_tokens = 4096
 refresh_every = 5
 
 [working_memory]
-# How often (in turns) the rolling working-memory summary is re-synthesized, folding the recent
-# exchanges into a compact summary. 0 disables compression (recency-only working memory).
-refresh_every = 4
+# Rolling compression: once `fold_threshold` raw exchanges accumulate, fold the OLDEST into the
+# rolling summary (the previous summary folded in too, compressed harder the further back) and keep
+# the most recent `keep_recent` verbatim. Runs off the hot path in the burst worker after the reply.
+fold_threshold = 10   # 0 disables compression (recency-only working memory)
+keep_recent = 4
 
 [entity_graph]
 # Connected-knowledge retrieval: how many hops to traverse from the entities named in a turn,
