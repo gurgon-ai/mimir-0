@@ -1121,6 +1121,17 @@ _HTML = """<!doctype html>
     </div>
 
     <div class="tabpane hidden" id="tab-fleet">
+      <h2 style="margin-top:0;">Role assignment</h2>
+      <div class="hint" style="margin-bottom:8px;">Pick the model for each role, or leave it on <b>auto</b> (the system picks the best-qualified). Setting one manually <b>pins</b> it — a rescan won't change it.</div>
+      <div id="roleAssign"></div>
+      <div id="roleMsg" class="hint" style="min-height:14px;"></div>
+
+      <h2 style="margin-top:22px;">Models</h2>
+      <div id="poolBackend" class="hint"></div>
+      <div id="poolMsg" class="hint">Models Mimir can route to. A checked box keeps a model in the automatic pool; uncheck to exclude it. ✓ = passed the qualification gate.</div>
+      <div id="poolList"></div>
+
+      <h2 style="margin-top:22px;">Qualify your fleet</h2>
       <details class="hint" style="margin-bottom:10px; border:1px solid #333; border-radius:6px; padding:6px 10px;">
         <summary style="cursor:pointer;">ℹ️ What these scores mean — <b>best for <em>this</em> system, not the world</b></summary>
         <div style="margin-top:6px; line-height:1.5;">
@@ -1150,16 +1161,6 @@ _HTML = """<!doctype html>
       </div>
       <div id="fleetMsg" class="hint">Press <b>1 · Find models</b> to inventory the fleet, then <b>2 · Benchmark</b> to score them.</div>
       <div id="fleetList"></div>
-
-      <h2 style="margin-top:20px;">Role assignment</h2>
-      <div class="hint" style="margin-bottom:8px;">Pick the model for each role, or leave it on <b>auto</b> (the system picks the best-qualified). Setting one manually <b>pins</b> it — a rescan won't change it.</div>
-      <div id="roleAssign"></div>
-      <div id="roleMsg" class="hint" style="min-height:14px;"></div>
-
-      <h2 style="margin-top:20px;">Models</h2>
-      <div id="poolBackend" class="hint"></div>
-      <div id="poolMsg" class="hint">Models Mimir can route to. A checked box keeps a model in the automatic pool; uncheck to exclude it. ✓ = passed the qualification gate.</div>
-      <div id="poolList"></div>
     </div>
 
     <div class="tabpane hidden" id="tab-docs">
