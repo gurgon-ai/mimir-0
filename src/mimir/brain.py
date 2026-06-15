@@ -1287,20 +1287,25 @@ class Mimir:
             auto_roles=self._auto_roles,
         )
 
-    def set_role(self, role: str, model: str) -> dict[str, str]:
+    def set_role(self, role: str, model: str, node: str | None = None) -> dict[str, str]:
         """Pin a role to a specific model — a manual override of `auto` selection (DESIGN §4).
 
         Routing then uses exactly this model (its fallback chain is cleared — a pin is never
-        substituted) and the role leaves the auto set, so a later rescan won't reassign it. Returns
-        the full role→model map after the change.
+        substituted) and the role leaves the auto set, so a later rescan won't reassign it. An
+        optional ``node`` also pins *where* it runs (e.g. an edge box, off the local beast); routing
+        prefers that node and falls back only if it's down. Returns the full role→model map.
         """
-        self._model.set_role_model(role, model)
+        self._model.set_role_model(role, model, node)
         existing = self.config.roles.get(role)
         self.config.roles[role] = RoleSpec(model=model, params=existing.params if existing else {})
         self._auto_roles.discard(role)
         self._model.set_role_fallbacks(role, [])
-        log.info("role %r manually pinned to %s", role, model)
+        log.info("role %r manually pinned to %s%s", role, model, f" on {node}" if node else "")
         return {r: s.model for r, s in self._model.roles_view().items()}
+
+    def role_nodes(self) -> dict[str, str]:
+        """The per-role node pins (role → node) the gateway is honouring, for the UI."""
+        return self._model.role_nodes()
 
     def _apply_role_recs(self, recs: dict[str, Any]) -> dict[str, str]:
         """Re-point the real roles (chat/bake/reasoning) at the given recommendations. Shared by

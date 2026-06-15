@@ -717,15 +717,20 @@ class _Handler(BaseHTTPRequestHandler):
             pool["max_latency_s"] = be.max_latency_s if be else 0.0
             # Live model names, so the role-assignment dropdown has options even before a benchmark.
             pool["available"] = sorted(brain._model.available_models())
+            # Per-(node, model) placements + current node pins, so manual override can target a
+            # specific edge node — a model on several nodes is selectable per node, not collapsed.
+            pool["placement"] = brain.placement_matrix()
+            pool["role_nodes"] = brain.role_nodes()
         return pool
 
     def _set_role(self, body: dict[str, Any]) -> dict[str, Any]:
         role = str(body.get("role", "")).strip()
         model = str(body.get("model", "")).strip()
+        node = str(body.get("node", "")).strip() or None  # optional: pin to a specific fleet node
         if not role or not model:
             raise ValueError("'role' and 'model' are required")
         with self.server.brain_lock:
-            return {"roles": self.server.brain.set_role(role, model)}
+            return {"roles": self.server.brain.set_role(role, model, node)}
 
     def _set_model_enabled(self, body: dict[str, Any]) -> dict[str, Any]:
         model = str(body.get("model", "")).strip()
@@ -2505,26 +2510,31 @@ function ipTag(node) {
 }
 
 function renderRoleAssign(data) {
-  // Per-role model picker: a dropdown per role, "auto" plus every known model. Each option shows the
-  // node it runs fastest on (last IP octet) and its last measured time, so the choice is informed.
-  // Choosing a concrete model pins the role (POST /api/fleet/role).
+  // Per-role model picker. "auto" + EVERY (node, model) placement, grouped by model — so a model
+  // that lives on several nodes is selectable per node (pin a role onto an edge box, off the beast).
+  // Each per-node option shows the IP octet + that node's measured time. Choosing one pins the role
+  // (POST /api/fleet/role with {model, node}); "<model> · any node" pins the model, routed live.
   const wrap = $("roleAssign"); if (!wrap) return;
   wrap.innerHTML = "";
   const active = data.active_roles || {};
   const autoRoles = new Set(data.auto_roles || []);
-  const meta = {};  // model → {node, t} from the benchmarked pool
-  (data.models || []).forEach(m => { meta[m.model] = { node: m.node, t: m.return_time }; });
-  const names = new Set([...(data.available || []), ...Object.keys(meta)]);
-  Object.values(active).forEach(v => { if (v && v !== "auto") names.add(v); });
-  const label = (m) => {
-    const info = meta[m]; if (!info) return m;
-    const ip = ipTag(info.node); const t = (info.t != null) ? ` · ${info.t}s` : "";
-    return `${m}${ip ? ` · ${ip}` : ""}${t}`;
-  };
+  const roleNodes = data.role_nodes || {};
+  // model → [{node, t}], from the per-node placement matrix (the real per-(node,model) truth).
+  const byModel = {};
+  Object.entries((data.placement && data.placement.by_node) || {}).forEach(([node, models]) => {
+    (models || []).forEach(m => {
+      (byModel[m.model] = byModel[m.model] || []).push({ node, t: m.return_time });
+    });
+  });
+  // Models discovered live but not yet in the catalogue still get an "any node" option.
+  (data.available || []).forEach(m => { byModel[m] = byModel[m] || []; });
+  Object.values(active).forEach(v => { if (v && v !== "auto") byModel[v] = byModel[v] || []; });
   const roles = Object.keys(active);
   if (!roles.length) { wrap.innerHTML = '<div class="hint">No roles configured.</div>'; return; }
+  const enc = (m, n) => JSON.stringify({ m, n });
   roles.sort().forEach(role => {
-    const current = active[role] || "auto";
+    const curModel = active[role] || "auto";
+    const curNode = roleNodes[role] || "";
     const isAuto = autoRoles.has(role);
     const row = document.createElement("div"); row.className = "field";
     row.style.display = "flex"; row.style.alignItems = "center"; row.style.gap = "10px";
@@ -2532,29 +2542,45 @@ function renderRoleAssign(data) {
     lab.textContent = role;
     const sel = document.createElement("select");
     const autoOpt = document.createElement("option");
-    autoOpt.value = "auto";
-    autoOpt.textContent = isAuto ? `auto → ${label(current)}` : "auto (pick best)";
+    autoOpt.value = "auto"; autoOpt.textContent = isAuto ? "auto (pick best)" : "auto (pick best)";
     sel.appendChild(autoOpt);
-    [...names].sort().forEach(m => {
-      const o = document.createElement("option"); o.value = m; o.textContent = label(m);
-      if (!isAuto && m === current) o.selected = true;
-      sel.appendChild(o);
+    Object.keys(byModel).sort().forEach(m => {
+      const nodes = byModel[m];
+      const grp = document.createElement("optgroup"); grp.label = m;
+      const any = document.createElement("option");
+      any.value = enc(m, ""); any.textContent = `${m} · any node`;
+      if (!isAuto && m === curModel && !curNode) any.selected = true;
+      grp.appendChild(any);
+      nodes.slice().sort((a, b) => (a.t ?? 1e9) - (b.t ?? 1e9)).forEach(({ node, t }) => {
+        const o = document.createElement("option");
+        const ip = ipTag(node); const ts = (t != null) ? ` · ${t}s` : " · untimed";
+        o.value = enc(m, node); o.textContent = `${m} · ${ip || node}${ts}`;
+        if (!isAuto && m === curModel && node === curNode) o.selected = true;
+        grp.appendChild(o);
+      });
+      sel.appendChild(grp);
     });
     if (isAuto) sel.value = "auto";
-    sel.addEventListener("change", () => { if (sel.value && sel.value !== "auto") setRole(role, sel.value); });
+    sel.addEventListener("change", () => {
+      if (!sel.value || sel.value === "auto") return;
+      const { m, n } = JSON.parse(sel.value);
+      setRole(role, m, n);
+    });
     const tag = document.createElement("span"); tag.className = "tag";
-    tag.textContent = isAuto ? "auto" : "pinned"; tag.title = isAuto
-      ? "the system picks the best-qualified model for this role" : "manually fixed to one model";
+    tag.textContent = isAuto ? "auto" : (curNode ? `pinned · ${ipTag(curNode) || curNode}` : "pinned");
+    tag.title = isAuto ? "the system picks the best-qualified model for this role"
+      : (curNode ? "fixed to one model on one node" : "fixed to one model, routed to its live-best node");
     row.appendChild(lab); row.appendChild(sel); row.appendChild(tag);
     wrap.appendChild(row);
   });
 }
 
-async function setRole(role, model) {
-  $("roleMsg").textContent = `Setting ${role} → ${model}…`;
+async function setRole(role, model, node) {
+  const where = node ? ` on ${ipTag(node) || node}` : "";
+  $("roleMsg").textContent = `Setting ${role} → ${model}${where}…`;
   try {
-    await api("POST", "/api/fleet/role", { role, model });
-    $("roleMsg").textContent = `${role} pinned to ${model}.`;
+    await api("POST", "/api/fleet/role", { role, model, node: node || "" });
+    $("roleMsg").textContent = `${role} pinned to ${model}${where}.`;
     loadModels(); refreshState();
     setTimeout(() => { $("roleMsg").textContent = ""; }, 2500);
   } catch (e) { $("roleMsg").textContent = "Error: " + e.message; }

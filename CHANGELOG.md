@@ -69,6 +69,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   before any benchmark.
 
 ### Fixed
+- **Manual role override can now target a specific edge node — not just a model.** The role dropdown
+  collapsed to one entry per model name (routed to its fastest node, usually the local beast), so you
+  couldn't pin a role onto an edge box, and a model living on several nodes showed only once. The
+  picker now lists **every `(node, model)` placement**, grouped per model (`gemma3:12b · .189 · 4.2s`,
+  `… · .190 · 6.1s`, plus a `· any node` option), built from the per-node placement matrix. Choosing
+  a node **pins the role to that machine** (`set_role(role, model, node)` → `chat_on_node`), preferred
+  with fallback to routing if it's down — so you can keep inference on the edge and off the beast
+  (pair with the node disable toggle for a hard exclude). Streaming honours the pin too. New:
+  `ModelGateway.role_nodes()`, node arg on `set_role`/`set_role_model`, `pool.chat_stream(node=…)`.
 - **Interview wording: the values question read backwards.** "What principles or values should guide
   how you act?" implied the *operator* acts; it's asking what should guide *Mimir* → "…how I act?"
 - **The model greeted the operator by name every turn.** Each turn is sent as just `[system, user]`

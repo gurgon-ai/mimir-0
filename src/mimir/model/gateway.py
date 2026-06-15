@@ -36,6 +36,9 @@ class ModelGateway:
         # fleet (Gemma on node A, Qwen on node B) still serves the role by falling Gemma → Qwen.
         # Empty for a pinned role: a pin is honoured exactly, never substituted.
         self._fallbacks: dict[str, list[str]] = {}
+        # Optional per-role *node* pin: route a role to a specific fleet node (e.g. keep it on an
+        # edge box, off the local beast). Preferred, with fallback to routing if it's down.
+        self._role_nodes: dict[str, str] = {}
         if isinstance(provider, ProviderPool):
             self._pool = provider
         elif isinstance(provider, list):
@@ -46,11 +49,23 @@ class ModelGateway:
         else:
             self._pool = ProviderPool([(getattr(provider, "name", "endpoint-0"), provider)])
 
-    def set_role_model(self, role: str, model: str) -> None:
-        """Re-point a role at a different model, keeping its tuned params (for auto-apply)."""
+    def set_role_model(self, role: str, model: str, node: str | None = None) -> None:
+        """Re-point a role at a different model, keeping its tuned params (for auto-apply).
+
+        ``node`` optionally pins the role to one fleet node (off the local beast, say); ``None``
+        clears any node pin so the role routes to the live-fastest node for its model again.
+        """
         existing = self._roles.get(role)
         params = existing.params if existing is not None else {}
         self._roles[role] = RoleSpec(model=model, params=params)
+        if node:
+            self._role_nodes[role] = node
+        else:
+            self._role_nodes.pop(role, None)
+
+    def role_nodes(self) -> dict[str, str]:
+        """A snapshot of the per-role node pins (role → node), for introspection / the UI."""
+        return dict(self._role_nodes)
 
     def set_role_fallbacks(self, role: str, models: list[str]) -> None:
         """Set a role's ordered acceptable-model chain (best first) — routing walks it on failure.
@@ -126,9 +141,12 @@ class ModelGateway:
         """
         models, params = self._ordered_models(role)
         prio = self._priority(role, priority)
+        node = self._role_nodes.get(role)
         last: ProviderError | None = None
         for model in models:
             try:
+                if node:  # pinned to a specific node (chat_on falls back to routing if it's down)
+                    return self._pool.chat_on(node, model, messages, params, priority=prio)
                 return self._pool.chat(model, messages, params, priority=prio)
             except ProviderError as exc:
                 last = exc
@@ -146,11 +164,14 @@ class ModelGateway:
         """
         models, params = self._ordered_models(role)
         prio = self._priority(role, priority)
+        node = self._role_nodes.get(role)
         last: ProviderError | None = None
         for model in models:
             started = False
             try:
-                for token in self._pool.chat_stream(model, messages, params, priority=prio):
+                for token in self._pool.chat_stream(
+                    model, messages, params, priority=prio, node=node
+                ):
                     started = True
                     yield token
                 return
