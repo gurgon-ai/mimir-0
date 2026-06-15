@@ -375,8 +375,22 @@ memory) **[partial]**. The general burst-window scheduler (two classes, pent-up 
 idle takeover) and output-side bidirectional RAG are **[proposed]** — and compose directly with the
 inference engine, which is *built* to be distributed-and-idle-aware rather than single-shot.
 
-> A concrete **build sketch** mapping this onto Mimir-0's parts (the scheduler, the data model, the
-> bidirectional-RAG tasks, the phased plan B1–B4) is parked in
+**The wall-clock sleep cycle — heavy maintenance needs a real window, not scraps. [landed]** The
+burst worker's premise is that the model idles while the user reads the reply. Two things break it:
+**streaming** keeps the model busy until the last token, and on a **slow machine** a single turn can
+consume the whole post-response window. So the heavy, model-touching maintenance — consolidation
+(dedup, decay, archive, contradiction hygiene) + temporal-narrative roll-ups — gets its **own
+wall-clock window** when nobody's around (`cognition/sleep_cycle.py`, the analogue of sleep). A
+daemon checks the clock against a user-set `[sleep]` window; inside it (and not already done today,
+and not mid-turn) it runs the phases **in order, skipping any that won't fit the minutes left** —
+graceful degradation on a slow box rather than starting work it can't finish. Each phase is
+checkpointed per-day in a generic `kv` table, so a same-night restart **resumes** and the cycle
+**never runs twice a day**, with **catch-up before noon** if the window was missed (a powered-off or
+restarted host). It always yields to a live turn, and a manual "run sleep now" forces the full cycle
+any time. This is the pattern lifted (clean) from the private home-AI's nightly cycle.
+
+> A concrete **build sketch** mapping the *rest* of §5a onto Mimir-0's parts (the bidirectional-RAG
+> tasks, idle takeover, the phased plan B1–B4) is parked in
 > [`docs/BURST_WORKER.md`](docs/BURST_WORKER.md) — not scheduled; do the inference-engine phases first.
 
 ---

@@ -278,6 +278,20 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "UPDATE conversation SET session_id = 'legacy' WHERE session_id IS NULL",
         ],
     ),
+    (
+        19,
+        [
+            # A tiny generic key→value store for small bits of durable cognition state that don't
+            # warrant their own table. First user: the sleep cycle's per-day checkpoint (the phases
+            # run on each date), so a wall-clock maintenance window can resume after a same-night
+            # restart and never run twice in a day (DESIGN §5a). Value is opaque JSON text.
+            "CREATE TABLE kv ("
+            "  key TEXT PRIMARY KEY,"
+            "  value TEXT NOT NULL,"
+            "  updated_at REAL NOT NULL"
+            ")",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -350,4 +364,5 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
     "interactions": {"id", "ts", "user"},
     "narratives": {"id", "scope", "period", "narrative", "source_count", "created_at"},
     "conversation": {"id", "user", "user_text", "reply", "created_at", "session_id"},
+    "kv": {"key", "value", "updated_at"},
 }

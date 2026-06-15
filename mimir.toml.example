@@ -52,9 +52,18 @@ hops = 2
 max_facts = 8
 
 [sleep]
-# How often (in turns) consolidation runs off the hot path: dedup, salience/confidence decay,
-# archival of stale provisionals, contradiction resolution. 0 = manual only (brain.sleep() or the
-# web UI "Consolidate now" button, or an external scheduler / nightly cron).
+# The sleep cycle: heavy maintenance (dedup, salience/confidence decay, archival of stale
+# provisionals, contradiction resolution) + temporal-narrative roll-ups. With streaming chat on a
+# slow machine the post-turn burst window is too short, so this runs in its own wall-clock window
+# when nobody's around. A daemon checks the clock; inside the window (and not already done today,
+# not mid-turn) it runs the phases in order, skipping any that won't fit the time left, resuming a
+# same-night restart, with catch-up before noon if the window was missed. "Run sleep now" any time.
+enabled = true               # the window scheduler (recommended on); false = manual / turn-cadence only
+window_start = "02:00"       # local HH:MM the window opens
+window_end = "06:00"         # local HH:MM it closes (may cross midnight, e.g. start 23:00, end 06:00)
+check_interval_s = 900       # how often the daemon checks the clock (15 min)
+# Legacy turn-cadence path (superseded by the window above). 0 = off; N = also consolidate every N
+# turns off the hot path. Left for back-compat / headless setups without a steady clock.
 every = 0
 
 [procedural]

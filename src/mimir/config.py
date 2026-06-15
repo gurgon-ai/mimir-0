@@ -132,8 +132,18 @@ class Config:
     graph_hops: int = 2
     graph_max_facts: int = 8
     # How often (in turns) consolidation (sleep) runs off the hot path. 0 = manual only
-    # (call brain.sleep() or the web UI button / scheduler).
+    # (call brain.sleep() or the web UI button / scheduler). Superseded for most setups by the
+    # wall-clock sleep window below — with streaming chat on a slow machine the post-turn burst
+    # never gets real idle time, so heavy maintenance wants its own quiet window (DESIGN §5a).
     sleep_every: int = 0
+    # The wall-clock sleep cycle (DESIGN §5a): a nightly maintenance window when nobody's around.
+    # A daemon checks every ``sleep_check_interval_s``; inside the window (and not already done
+    # today, and not mid-turn) it runs consolidation + narratives phase-by-phase, skipping any phase
+    # that won't fit the time left, with catch-up before noon if the window was missed. Manual too.
+    sleep_enabled: bool = True             # the window scheduler; False = manual/turn-cadence only
+    sleep_window_start: str = "02:00"      # local HH:MM the window opens
+    sleep_window_end: str = "06:00"        # local HH:MM it closes (may cross midnight, e.g. 23:00)
+    sleep_check_interval_s: float = 900.0  # how often the daemon checks the clock (15 min)
     # Procedural memory: how many matching procedures to inject, and the minimum trigger match.
     procedural_top_k: int = 3
     procedural_min_match: float = 0.3
@@ -159,6 +169,13 @@ class Config:
             )
         if self.embed_dim <= 0:
             raise ConfigError(f"embeddings.dim must be positive, got {self.embed_dim}")
+        for label, value in (("start", self.sleep_window_start), ("end", self.sleep_window_end)):
+            try:
+                h, m = (int(p) for p in value.split(":"))
+            except ValueError:
+                raise ConfigError(f"sleep.window_{label} must be 'HH:MM', got {value!r}") from None
+            if not (0 <= h < 24 and 0 <= m < 60):
+                raise ConfigError(f"sleep.window_{label} out of range: {value!r}")
 
 
 def _parse_roles(raw: dict[str, Any]) -> dict[str, RoleSpec]:
@@ -270,6 +287,10 @@ def load_config(path: str | Path) -> Config:
         graph_hops=int(raw.get("entity_graph", {}).get("hops", 2)),
         graph_max_facts=int(raw.get("entity_graph", {}).get("max_facts", 8)),
         sleep_every=int(raw.get("sleep", {}).get("every", 0)),
+        sleep_enabled=bool(raw.get("sleep", {}).get("enabled", True)),
+        sleep_window_start=str(raw.get("sleep", {}).get("window_start", "02:00")),
+        sleep_window_end=str(raw.get("sleep", {}).get("window_end", "06:00")),
+        sleep_check_interval_s=float(raw.get("sleep", {}).get("check_interval_s", 900.0)),
         procedural_top_k=int(raw.get("procedural", {}).get("top_k", 3)),
         procedural_min_match=float(raw.get("procedural", {}).get("min_match", 0.3)),
         timezone=(str(raw["locale"]["timezone"]) if raw.get("locale", {}).get("timezone")
