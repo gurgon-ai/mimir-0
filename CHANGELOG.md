@@ -8,6 +8,10 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Changed
+- **The chat UI wears the assistant's chosen name.** The onboarding "what would you like to call me?"
+  answer (the `name` identity anchor) now drives the chat input placeholder ("Say something to …") and
+  the speaker label on the assistant's bubbles, instead of a hard-coded "Mimir". Applied on load and
+  re-applied the moment the name is set/revised (interview strip, Profile panel, or Identity tab).
 - **Seeding interview expanded to 19 questions, with a Core-12 off-ramp.** Padded the get-to-know-you
   with the Core + Expanded items from `docs/mimir_foundational_interview.md` §8 — mission/purpose,
   values, voice, answer style, uncertainty handling, hard limits, memory policy, and local grounding

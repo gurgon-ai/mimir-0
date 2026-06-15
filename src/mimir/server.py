@@ -1184,6 +1184,14 @@ _HTML = """<!doctype html>
 <script>
 const $ = (id) => document.getElementById(id);
 let reviseMode = false;
+// The assistant's chosen name (onboarding "what would you like to call me?" → the `name` anchor).
+// Drives the chat input placeholder and the speaker label on its bubbles; defaults until loaded.
+let ASSISTANT_NAME = "Mimir";
+function applyAssistantName(name) {
+  ASSISTANT_NAME = (name && name.trim()) || "Mimir";
+  $("text").placeholder = "Say something to " + ASSISTANT_NAME + "…";
+  document.querySelectorAll(".msg.mimir .who").forEach(el => { el.textContent = ASSISTANT_NAME; });
+}
 
 async function api(method, path, body) {
   const opt = { method, headers: {} };
@@ -1198,7 +1206,7 @@ function addMsg(who, body, meta) {
   const div = document.createElement("div");
   div.className = "msg " + (who === "you" ? "user" : "mimir");
   div.innerHTML = '<div class="who"></div><div class="body"></div>';
-  div.querySelector(".who").textContent = who;
+  div.querySelector(".who").textContent = who === "you" ? "you" : ASSISTANT_NAME;
   div.querySelector(".body").textContent = body;
   if (meta) { const m = document.createElement("div"); m.className = "meta"; m.textContent = meta; div.appendChild(m); }
   $("log").appendChild(div);
@@ -1250,6 +1258,7 @@ async function refreshState() {
 
 async function loadIdentity() {
   const data = await api("GET", "/api/identity");
+  applyAssistantName(data.anchors && data.anchors.name);
   const fields = $("identFields");
   fields.innerHTML = "";
   const show = reviseMode ? null : data.pending;  // revise → show all; else only pending
@@ -2424,6 +2433,7 @@ async function submitInterviewAnswer() {
     try { await api("POST", "/api/onboarding/answer", { key: q.key, answer }); }
     catch (e) { $("ivProgress").textContent = "Error: " + e.message; return; }
     refreshState();
+    if (q.key === "assistant_name") applyAssistantName(answer);  // re-label the chat at once
     if (!$("tab-profile").classList.contains("hidden")) loadProfile();
   }
   ivState.i++; renderInterviewQ();
@@ -2453,6 +2463,7 @@ async function loadProfile() {
     inp.addEventListener("change", async () => {
       try {
         await api("POST", "/api/onboarding/answer", { key: q.key, answer: inp.value });
+        if (q.key === "assistant_name") applyAssistantName(inp.value);
         $("profileMsg").textContent = "Saved."; refreshState();
         setTimeout(() => $("profileMsg").textContent = "", 1500);
       } catch (e) { $("profileMsg").textContent = "Error: " + e.message; }
