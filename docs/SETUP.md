@@ -63,8 +63,9 @@ This is the place to start. It needs nothing but Python.
 ## 3b. Talk to Mimir in a browser (the web UI)
 
 The core is a library; the **reference web UI** is a thin adapter built on Python's stdlib
-`http.server` — **no extra dependencies, no Node, no build step**. It's where a human chats, runs
-the identity interview, and ingests documents.
+`http.server` — **no extra dependencies, no Node, no build step**. It's where a human chats (with
+streaming + a thinking indicator), switches between past conversations, browses the **memory graph**,
+runs the seeding interview, and ingests documents.
 
 ```bash
 python -m mimir.server --config mimir.toml          # then open http://127.0.0.1:8765
@@ -75,13 +76,17 @@ The server logs to the console **and** to a rotating file (`mimir.log` by defaul
 backups) so a long run leaves a reviewable trail — point `--log-file` elsewhere, or pass
 `--log-file ""` for console only.
 
-The page has three panels: a **chat** box (each reply shows its source count and embedding mode,
-and flags thin evidence), an **Identity** panel (fill in pending anchors or click *Revise all* to
-change existing ones), and a **document ingest** field. It binds to localhost by default; it's a
-reference adapter, not a hardened public service — put a reverse proxy in front if you expose it.
+The **chat pane** streams replies (each shows its source count and embedding mode, and flags thin
+evidence) with a conversation dropdown on top (**Restore** a past conversation or **+ New** one) and a
+**🕸 Graph** toggle that flips it to a drifting galaxy of memory blobs + entities — click any blob to
+review/edit it. The side tabs cover **Profile** (the seeding interview / your orienting facts),
+**Mind**, **Memories**, **Graph**, **Habits**, **Council**, **Fleet** (role assignment → qualify →
+models), and **Docs**. It binds to localhost by default; it's a reference adapter, not a hardened
+public service — put a reverse proxy in front if you expose it.
 
-Under the hood it's a small JSON API (`/api/turn`, `/api/identity`, `/api/ingest`, `/api/state`),
-so you can build your own front-end against the same endpoints.
+Under the hood it's a small JSON API (`/api/turn` + `/api/turn/stream`, `/api/identity`,
+`/api/onboarding`, `/api/sessions` + `/api/history`, `/api/graph/map` + `/api/memory`, `/api/fleet/*`,
+`/api/ingest`, `/api/state`), so you can build your own front-end against the same endpoints.
 
 ## 4. The three embedding modes (decide before real use)
 

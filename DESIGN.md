@@ -449,6 +449,17 @@ needs.
   question living in one place, name/operator/location mirrored into the identity anchors. The
   LLM parse pass (one answer → several typed facts + triples, review-before-commit) is Phase 2)_,
   the qualification battery.
+- **v0.1+ — the extracted thinking layers** (the home AI's highest-leverage cognition, public-clean;
+  see §3e/§5a): ~~temporal grounding~~ _(landed: clock/calendar line + per-fact age + no-LLM time
+  intercept + interaction-gap awareness baselines)_, ~~temporal narratives~~ _(landed: hierarchical
+  daily→weekly→monthly journal, lossy by design, written in the consolidation pass, injected as recent
+  history)_, ~~the burst worker~~ _(landed: the idle-window scheduler that runs all post-response
+  cognition — pent-up priority, two task classes, interruptible, surfaces; turn() signals, next turn
+  settles)_, ~~session history~~ _(landed: a durable, restorable conversation log replayed to the model
+  for real continuity, grouped into selectable sessions)_, ~~the visual memory graph~~ _(landed: the
+  chat pane flips to a drifting force-directed galaxy of memory blobs + entities — importance to the
+  centre, click to review/edit)_. Output-triggered (bidirectional) RAG + idle-takeover are the open §5a
+  extensions.
 - **Adapters (separate extras/packages):** ~~a reference HTTP server~~ _(landed: a stdlib,
   zero-dependency reference web server + single-page UI — chat, the identity interview, document
   ingest; `python -m mimir.server`)_, streaming, an optional voice adapter, and example plugins
