@@ -28,16 +28,19 @@ def test_recency_log_is_chronological_and_capped(brain: Mimir) -> None:
     assert f"msg{MAX_EXCHANGES + 2}" in chron[-1].text  # newest last
 
 
-def test_synthesis_folds_exchanges_and_clears_them(brain: Mimir) -> None:
-    for i in range(3):
+def test_synthesis_folds_oldest_keeps_recent(brain: Mimir) -> None:
+    for i in range(10):
         record_exchange(brain._storage, user="g", user_text=f"point {i}", reply="noted")
-    mem = synthesize_working_memory(brain._model, brain._storage)
+    mem = synthesize_working_memory(brain._model, brain._storage, fold_threshold=10, keep_recent=4)
     assert mem is not None and mem.kind is MemoryKind.WORKING_MEMORY
-    assert "Working summary" in mem.text  # the mock's deterministic summary
-    assert count_memories(brain._storage, kind=MemoryKind.EXCHANGE) == 0  # folded → cleared
+    # the oldest 6 folded into the rolling summary; the most recent 4 stay raw
+    assert count_memories(brain._storage, kind=MemoryKind.EXCHANGE) == 4
+    kept = recent_exchanges(brain._storage, 100)
+    assert "point 9" in kept[-1].text                              # newest retained
+    assert all("point 0" not in e.text for e in kept)             # oldest folded away
     assert latest_working_memory(brain._storage) is not None
-    # nothing left to fold → no-op
-    assert synthesize_working_memory(brain._model, brain._storage) is None
+    # below threshold now (only 4 left) → no-op
+    assert synthesize_working_memory(brain._model, brain._storage, fold_threshold=10) is None
 
 
 def test_current_working_memory_composition(brain: Mimir) -> None:
@@ -79,22 +82,23 @@ def test_brain_carries_recent_context_forward(brain: Mimir) -> None:
     assert "teal" in wm.body.lower()  # the prior exchange is carried into this turn
 
 
-def test_compression_fires_on_cadence(mock_config: Config) -> None:
-    mock_config.working_memory_refresh_every = 2
+def test_compression_fires_on_threshold(mock_config: Config) -> None:
+    mock_config.working_memory_fold_threshold = 3
+    mock_config.working_memory_keep_recent = 1
     with Mimir(mock_config) as m:
-        m.turn("first thing", user="g")
-        m.wait_for_sentinel()
-        m.turn("second thing", user="g")  # turn 2 → folds
-        m.wait_for_sentinel()
+        for i in range(3):
+            m.turn(f"thing {i}", user="g")  # the 3rd turn crosses the threshold → folds
+            m.wait_for_sentinel()
         assert latest_working_memory(m._storage) is not None
-        assert count_memories(m._storage, kind=MemoryKind.EXCHANGE) == 0  # cleared after fold
+        # folded the oldest, kept the most recent 1 raw
+        assert count_memories(m._storage, kind=MemoryKind.EXCHANGE) == 1
 
 
 def test_compression_can_be_disabled(mock_config: Config) -> None:
-    mock_config.working_memory_refresh_every = 0
+    mock_config.working_memory_fold_threshold = 0
     with Mimir(mock_config) as m:
-        m.turn("hello", user="g")
-        m.wait_for_sentinel()
+        for i in range(4):
+            m.turn(f"hello {i}", user="g")
+            m.wait_for_sentinel()
         assert latest_working_memory(m._storage) is None  # no compression
-        # but recency still works
-        assert count_memories(m._storage, kind=MemoryKind.EXCHANGE) >= 1
+        assert count_memories(m._storage, kind=MemoryKind.EXCHANGE) >= 1  # recency still works

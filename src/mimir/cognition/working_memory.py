@@ -22,12 +22,14 @@ from ..model.gateway import ModelGateway
 from ..prompts import WORKING_MEMORY_SYSTEM
 from ..storage.gateway import StorageGateway
 from ..storage.models import EvidenceTier, Memory, MemoryKind
-from ..storage.repo import delete_kind, prune_kind, recent_by_kind, save_memory
+from ..storage.repo import count_memories, delete_memories, prune_kind, recent_by_kind, save_memory
 
 log = logging.getLogger("mimir.working_memory")
 
-MAX_EXCHANGES = 12  # hard cap on the recency log (safety net if compression is disabled)
-DISPLAY_RECENT = 6  # how many raw exchanges to show in the prompt
+MAX_EXCHANGES = 20    # hard cap on the recency log (safety net if compression is disabled/lagging)
+DISPLAY_RECENT = 6    # how many raw exchanges to show in the prompt
+FOLD_THRESHOLD = 10   # fold once this many raw exchanges have accumulated
+KEEP_RECENT = 4       # raw exchanges kept verbatim after a fold (the rest become summary)
 
 
 def record_exchange(
@@ -63,21 +65,33 @@ def latest_working_memory(storage: StorageGateway) -> Memory | None:
     return rows[0] if rows else None
 
 
-def synthesize_working_memory(model: ModelGateway, storage: StorageGateway) -> Memory | None:
-    """Fold the accumulated exchanges (and prior summary) into a fresh rolling summary.
+def synthesize_working_memory(
+    model: ModelGateway, storage: StorageGateway, *,
+    fold_threshold: int = FOLD_THRESHOLD, keep_recent: int = KEEP_RECENT,
+) -> Memory | None:
+    """Fold the OLDEST accumulated exchanges (and the prior summary) into a fresh rolling summary,
+    keeping the most recent ``keep_recent`` raw. A no-op until ``fold_threshold`` have accumulated.
 
-    Clears the folded exchanges afterward. Returns the new summary, or ``None`` if there was
-    nothing to fold. Off-hot-path; a failure here must never break the turn.
+    This is the rolling-compression scheme: recent turns stay verbatim, older ones become a short
+    couple-paragraph summary that itself folds into the next one — older material compressed harder
+    each pass. Returns the new summary, or ``None`` if there wasn't enough to fold. Off-hot-path; a
+    failure here must never break the turn.
     """
-    exchanges = recent_exchanges(storage, MAX_EXCHANGES)
-    if not exchanges:
+    if fold_threshold <= 0:
+        return None  # compression disabled — recency-only working memory
+    exchanges = recent_exchanges(storage, MAX_EXCHANGES)  # oldest → newest
+    if len(exchanges) < fold_threshold:
+        return None  # not enough has built up yet — wait
+
+    to_fold = exchanges[: -keep_recent] if keep_recent > 0 else exchanges
+    if not to_fold:
         return None
 
     prior = latest_working_memory(storage)
     brief_parts: list[str] = []
     if prior:
         brief_parts.append(f"Previous working memory:\n{prior.text}")
-    brief_parts.append("Latest exchanges:\n" + "\n\n".join(e.text for e in exchanges))
+    brief_parts.append("Older exchanges to fold in:\n" + "\n\n".join(e.text for e in to_fold))
     brief = "\n\n".join(brief_parts)
 
     summary = model.chat(
@@ -99,9 +113,16 @@ def synthesize_working_memory(model: ModelGateway, storage: StorageGateway) -> M
         user=None,
     )
     save_memory(storage, mem)
-    delete_kind(storage, MemoryKind.EXCHANGE)  # now captured in the summary
-    log.info("working-memory: folded %d exchange(s) into the rolling summary", len(exchanges))
+    # Drop only the folded (oldest) exchanges — the most recent `keep_recent` stay raw.
+    delete_memories(storage, [e.id for e in to_fold if e.id is not None])
+    log.info("working-memory: folded %d oldest exchange(s), kept %d raw",
+             len(to_fold), len(exchanges) - len(to_fold))
     return mem
+
+
+def exchange_count(storage: StorageGateway) -> int:
+    """How many raw exchanges are currently buffered (drives the count-based fold trigger)."""
+    return count_memories(storage, kind=MemoryKind.EXCHANGE)
 
 
 def current_working_memory(storage: StorageGateway) -> str | None:
