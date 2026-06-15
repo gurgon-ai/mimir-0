@@ -8,12 +8,15 @@ it's assembled into the prompt with an explicit epistemic structure. You tell it
 later it recalls that fact, cites where it came from, and tells you when it's reasoning from
 thin evidence instead of confabulating.
 
-> **Status: pre-alpha — feature-complete, actively evolving (snapshot 2026-06-13; subject to
+> **Status: pre-alpha — feature-rich, actively evolving (snapshot 2026-06-14; subject to
 > change).** The whole architecture in [`DESIGN.md`](DESIGN.md) is implemented and verified
 > end-to-end against a live multi-node LAN: the acceptance loop, every typed knowledge layer, the
-> async cognition, and the distributed model fleet. The **fleet qualification surface in particular
-> is being actively built out and tuned** — the feature list below is a current snapshot, and APIs,
-> schema, scores, and UI may shift between commits. It is **not yet hardened**. Setup lives in
+> async cognition, and the distributed model fleet. On top of the spine, the **highest-leverage
+> thinking layers** from the larger private home-AI have been extracted public-clean — temporal
+> grounding, hierarchical memory narratives, the idle-window burst worker, durable session history,
+> and a visual memory graph — alongside the **fleet qualification** surface, which is still being
+> actively tuned. The feature list below is a current snapshot; APIs, schema, scores, and UI may
+> shift between commits, and it is **not yet hardened**. Setup lives in
 > [`docs/SETUP.md`](docs/SETUP.md); see [`CHANGELOG.md`](CHANGELOG.md) for the running log.
 
 ## What's included vs. what you provide
@@ -68,15 +71,30 @@ Most memory libraries store text in a vector blob and retrieve by similarity. Mi
 
 ## What's inside
 
-Every turn assembles an epistemic prompt — self-model → identity → persona → attributed knowledge
-(memory + documents + entity graph) → learned procedures → working memory → sentinel note →
-uncertainty gate — and routes it through two disciplined gateways. On top of that:
+Every turn assembles an epistemic prompt — self-model → identity → persona → **the current moment**
+→ attributed knowledge (memory + documents + entity graph, **each fact tagged with its age**) →
+learned procedures → **recent history (journal)** → working memory → **temporal awareness** →
+background notes → sentinel note → uncertainty gate — and routes it through two disciplined gateways.
+On top of that:
 
 - **Document ingestion** — `ingest()` for text/markdown (PDF via the `[documents]` extra) into a
   document-tier layer with file/section provenance.
 - **Entity graph** — subject–relation–object triples with 1–2 hop traversal.
 - **Working memory & self-model** — rolling salient context, and an evolving generic identity
-  seeded by a short **identity interview**.
+  seeded by the **seeding interview** (a re-runnable, ~12-essential + 7-optional get-to-know-you whose
+  answers become the operator's highest-provenance orienting facts).
+- **Temporal grounding** — an always-on clock/calendar sense (date, season, "3 days ago" on recalled
+  facts), a zero-cost intercept for plain time questions, and an awareness baseline that notices when
+  you've been away longer than usual *for your own rhythm*.
+- **Temporal narratives** — a hierarchical daily → weekly → monthly journal, lossy by design (details
+  fade, patterns persist), written off the hot path and injected as recent history.
+- **The burst worker** — post-response cognition (sentinel, self-model, working memory, sleep,
+  narratives) scheduled into the idle window after each reply: pent-up-demand priority, interruptible,
+  with results that can surface into the next turn (DESIGN §5a).
+- **Session history** — a durable, restorable conversation log; the web UI switches between past
+  conversations and the model replays the active one for real continuity.
+- **Visual memory graph** — the chat pane flips to a drifting "galaxy" of memory blobs + entities
+  (foundational facts brightest and central); click any blob to review/edit it.
 - **Sleep / consolidation** — dedup, decay, archival, and contradiction resolution, so memory
   maintains itself.
 - **Inner council** — adversarial deliberation across whatever models are installed.
