@@ -76,6 +76,13 @@ every = 0
 enabled = true
 limit = 3                    # max conflicts argued per cycle (each is several model calls)
 
+[server]
+# Reference web server / integration API (see docs/API.md). Auth is off by default (open localhost).
+# Set a token to require `Authorization: Bearer <token>` on every /api/* route — or use the env var
+# MIMIR_API_TOKEN, which overrides this (keeps secrets out of the file).
+# api_token = "a-long-random-string"
+# cors_origins = ["https://my-avatar.local"]   # browser origins allowed to call the API; ["*"] = any
+
 [self_knowledge]
 # Bake a doc describing what the system is and how it works into memory in the nightly cycle, so it
 # can answer about itself. Content-hashed (re-embeds only on change). Empty/unset disables it.

@@ -505,3 +505,53 @@ def test_mind_exposes_recent_errors(base_url: str) -> None:
     assert status == 200 and "recent_errors" in data and "error_counts" in data
     _, html = _get_html(base_url + "/")
     assert 'id="systemHealth"' in html  # the Mind-tab system-health readout
+
+
+@pytest.fixture
+def secured_url(mock_config: Config) -> Iterator[str]:
+    mock_config.api_token = "s3cret"
+    mock_config.cors_origins = ["https://avatar.local"]
+    brain = Mimir(mock_config)
+    server = create_server(brain, "127.0.0.1", 0)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.shutdown()
+        brain.close()
+
+
+def _req(method: str, url: str, headers: dict | None = None) -> tuple[int, dict]:
+    req = urllib.request.Request(url, headers=headers or {}, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, dict(r.headers)
+    except urllib.error.HTTPError as exc:
+        return exc.code, dict(exc.headers)
+
+
+def test_api_token_gates_api_but_not_the_page(secured_url: str) -> None:
+    assert _req("GET", secured_url + "/api/state")[0] == 401                       # no token
+    assert _req("GET", secured_url + "/api/state",
+                {"Authorization": "Bearer wrong"})[0] == 401                       # bad token
+    assert _req("GET", secured_url + "/api/state",
+                {"Authorization": "Bearer s3cret"})[0] == 200                      # good token
+    assert _req("GET", secured_url + "/")[0] == 200          # the shell stays open (UI prompts)
+
+
+def test_cors_preflight_and_headers(secured_url: str) -> None:
+    # preflight is unauthenticated (browsers don't send Authorization on OPTIONS)
+    status, headers = _req("OPTIONS", secured_url + "/api/turn",
+                           {"Origin": "https://avatar.local"})
+    assert status == 204
+    assert headers.get("Access-Control-Allow-Origin") == "https://avatar.local"
+    assert "Authorization" in headers.get("Access-Control-Allow-Headers", "")
+    # an authorized GET from the allowed origin echoes the CORS header
+    _, headers = _req("GET", secured_url + "/api/state",
+                      {"Origin": "https://avatar.local", "Authorization": "Bearer s3cret"})
+    assert headers.get("Access-Control-Allow-Origin") == "https://avatar.local"
+    # a disallowed origin gets no CORS header
+    _, headers = _req("OPTIONS", secured_url + "/api/turn", {"Origin": "https://evil.example"})
+    assert "Access-Control-Allow-Origin" not in headers

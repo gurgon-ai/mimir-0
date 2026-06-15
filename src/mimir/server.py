@@ -24,6 +24,7 @@ to localhost and put a real reverse proxy in front if you expose it.
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import logging
 import threading
@@ -107,11 +108,57 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
         log.info("%s - %s", self.address_string(), fmt % args)
 
+    # -- auth + CORS (the integration security layer; DESIGN §8) ----------------------
+
+    def _authorized(self) -> bool:
+        """True if the request may hit ``/api/*``. Open when no token is configured (localhost dev);
+        otherwise requires ``Authorization: Bearer <token>`` (constant-time compared)."""
+        token = self.server.brain.config.api_token
+        if not token:
+            return True
+        header = self.headers.get("Authorization", "")
+        prefix = "Bearer "
+        if not header.startswith(prefix):
+            return False
+        return hmac.compare_digest(header[len(prefix):], token)
+
+    def _cors_origin(self) -> str | None:
+        """The value to echo in ``Access-Control-Allow-Origin`` for this request, or None."""
+        allowed = self.server.brain.config.cors_origins
+        if not allowed:
+            return None
+        origin = self.headers.get("Origin")
+        if "*" in allowed:
+            return origin or "*"
+        return origin if origin in allowed else None
+
+    def _gate(self) -> bool:
+        """Enforce the API token on ``/api/*``. Returns False (and sends 401) if unauthorized."""
+        if urlparse(self.path).path.startswith("/api/") and not self._authorized():
+            self._send_json({"error": "unauthorized"}, status=401)
+            return False
+        return True
+
+    def do_OPTIONS(self) -> None:  # noqa: N802 (CORS preflight for browser integrations)
+        self.send_response(204)
+        origin = self._cors_origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+            self.send_header("Vary", "Origin")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _send(self, status: int, body: bytes, content_type: str) -> None:
         try:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            origin = self._cors_origin()
+            if origin:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
             self.end_headers()
             self.wfile.write(body)
         except _CLIENT_GONE:
@@ -143,6 +190,8 @@ class _Handler(BaseHTTPRequestHandler):
     # -- routing ----------------------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802 (stdlib naming)
+        if not self._gate():
+            return
         parsed = urlparse(self.path)
         route, params = parsed.path, parse_qs(parsed.query)
         try:
@@ -215,6 +264,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"error": str(exc)}, status=500)
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._gate():
+            return
         route = urlparse(self.path).path
         if route == "/api/turn/stream":
             self._turn_stream()  # manages its own (streaming) response
@@ -421,6 +472,10 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
+        origin = self._cors_origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
         self.end_headers()
         self.close_connection = True
 
@@ -1310,10 +1365,22 @@ function applyAssistantName(name) {
   document.querySelectorAll(".msg.mimir .who").forEach(el => { el.textContent = ASSISTANT_NAME; });
 }
 
-async function api(method, path, body) {
-  const opt = { method, headers: {} };
+// Optional API token: stored locally, sent as a bearer header; prompted for on a 401 (so the same
+// UI works whether the server is open localhost or token-gated for remote/integration use).
+function authHeaders() {
+  const t = localStorage.getItem("mimirToken");
+  return t ? { "Authorization": "Bearer " + t } : {};
+}
+function promptForToken() {
+  const t = window.prompt("This Mimir requires an API token:");
+  if (t) { localStorage.setItem("mimirToken", t.trim()); return true; }
+  return false;
+}
+async function api(method, path, body, _retried) {
+  const opt = { method, headers: { ...authHeaders() } };
   if (body !== undefined) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
   const r = await fetch(path, opt);
+  if (r.status === 401 && !_retried && promptForToken()) return api(method, path, body, true);
   const data = await r.json();
   if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
   return data;
@@ -1339,7 +1406,8 @@ async function streamTurn(text) {
   body.classList.add("thinking"); body.textContent = "thinking…";
   let started = false;
   const begin = () => { if (!started) { started = true; body.classList.remove("thinking"); body.textContent = ""; } };
-  const resp = await fetch("/api/turn/stream", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, user: "operator" }) });
+  const resp = await fetch("/api/turn/stream", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ text, user: "operator" }) });
+  if (resp.status === 401 && promptForToken()) { body.classList.remove("thinking"); return streamTurn(text); }
   if (!resp.ok) { body.classList.remove("thinking"); const e = await resp.json().catch(() => ({ error: "HTTP " + resp.status })); throw new Error(e.error); }
   const reader = resp.body.getReader(); const dec = new TextDecoder();
   let buf = "", introspect = null;
