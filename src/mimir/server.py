@@ -928,12 +928,14 @@ _HTML = """<!doctype html>
   .msg .body.thinking { color:#8a94a3; font-style:italic; animation: pulse 1.1s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity:.4 } 50% { opacity:1 } }
   .meta { font-size:11px; color:#6f7a8a; margin-top:4px; }
-  #graphSvg { display:block; background:radial-gradient(circle at 50% 40%, #0f1521, #0a0d12); cursor:grab; }
-  #graphSvg line { stroke:#2b3a4f; stroke-opacity:.5; }
+  #graphSvg { display:block; background:radial-gradient(circle at 50% 45%, #0a1422, #05080d); cursor:grab; }
+  #graphSvg.panning { cursor:grabbing; }
+  #graphSvg line { stroke:#4a9fe0; stroke-opacity:.18; }
   #graphSvg .node { cursor:pointer; }
-  #graphSvg .node text { fill:#c3ccd8; font-size:10px; pointer-events:none; }
-  #graphSvg .node circle { stroke:#0a0d12; stroke-width:1.5; }
-  #graphSvg .node.sel circle { stroke:#1f6feb; stroke-width:3; }
+  #graphSvg .node text { fill:#bcd7f5; font-size:10px; pointer-events:none; opacity:.85; }
+  #graphSvg .node .halo { stroke:none; }
+  #graphSvg .node .core { stroke:#0a1422; stroke-width:1; }
+  #graphSvg .node.sel .core { stroke:#eaf6ff; stroke-width:2.5; }
   #graphInspect { display:none; position:absolute; top:12px; right:12px; width:300px; max-height:88%;
     overflow:auto; background:#11161d; border:1px solid #2b333f; border-radius:10px; padding:14px; }
   #graphInspect textarea { width:100%; min-height:90px; resize:vertical; }
@@ -1337,14 +1339,11 @@ $("sessionNew").addEventListener("click", async () => {
   catch (e) { addMsg("mimir", "[error] " + e.message); }
 });
 
-// --- memory graph: a force-directed map of memory blobs + entities, click to review/edit ---
+// --- memory graph: a drifting galaxy of memory blobs + entities (zoom/pan, click to review/edit) ---
 const GNS = "http://www.w3.org/2000/svg";
-const graph = { on: false, nodes: [], links: [], byId: {}, raf: 0, ticks: 0, sel: null, w: 600, h: 500 };
+const graph = { on: false, nodes: [], links: [], byId: {}, raf: 0, sel: null,
+                w: 600, h: 500, k: 1, px: 0, py: 0, root: null };
 
-function tierColor(t) {
-  return ({ stated_by_primary_user: "#7fd17f", stated_by_trusted: "#9fd0ff", document: "#c0a0e0",
-            inferred: "#e0b070", conversation: "#6f7a8a" })[t] || "#8a94a3";
-}
 function escapeHtml(s) {
   return (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
@@ -1352,69 +1351,117 @@ function graphSize() {
   const r = $("graphSvg").getBoundingClientRect();
   graph.w = r.width || 600; graph.h = r.height || 500;
 }
+function applyTransform() {
+  if (graph.root) graph.root.setAttribute("transform",
+    `translate(${graph.px.toFixed(1)},${graph.py.toFixed(1)}) scale(${graph.k.toFixed(3)})`);
+}
+// White-hot at the centre (important) → deep blue at the rim, for the lightning look.
+function glowColor(t) {
+  const a = [59, 130, 246], b = [233, 246, 255];
+  const m = i => Math.round(a[i] + (b[i] - a[i]) * t);
+  return `rgb(${m(0)},${m(1)},${m(2)})`;
+}
 
 async function loadGraphMap() {
   let data; try { data = await api("GET", "/api/graph/map"); } catch (e) { return; }
   graphSize();
-  const cx = graph.w / 2, cy = graph.h / 2, R = Math.min(graph.w, graph.h) * 0.4;
+  const cx = graph.w / 2, cy = graph.h / 2, R = Math.min(graph.w, graph.h) * 0.42;
   graph.nodes = (data.nodes || []).map((n, i) => {
-    const a = i * 2.3999;  // golden-angle spread so the initial layout isn't a clump
-    return Object.assign({}, n, { x: cx + Math.cos(a) * (40 + (i % 7) / 7 * R),
-                                  y: cy + Math.sin(a) * (40 + (i % 7) / 7 * R), vx: 0, vy: 0 });
+    const a = i * 2.3999, rr = 30 + (i % 9) / 9 * R;  // golden-angle scatter to start
+    return Object.assign({}, n, { x: cx + Math.cos(a) * rr, y: cy + Math.sin(a) * rr, vx: 0, vy: 0 });
   });
   graph.byId = {}; graph.nodes.forEach(n => { graph.byId[n.id] = n; });
   graph.links = (data.links || []).filter(l => graph.byId[l.source] && graph.byId[l.target])
     .map(l => ({ source: graph.byId[l.source], target: graph.byId[l.target], label: l.label }));
+
+  // Importance = degree + (for memories) salience + usage + how foundational it is. The seeding
+  // interview (provenance "onboarding") and operator-stated facts are the bedrock, so they get the
+  // biggest boost — biggest blobs, dead centre. Drives the ring, the size, and the brightness.
+  const TIERW = { stated_by_primary_user: 3, stated_by_trusted: 2, document: 1.2,
+                  inferred: 0.8, conversation: 0.5 };
+  graph.nodes.forEach(n => { n.deg = 0; });
+  graph.links.forEach(l => { l.source.deg++; l.target.deg++; });
+  graph.nodes.forEach(n => {
+    const sal = n.salience || 1, acc = n.access || 0;
+    n.imp = n.deg + (n.type === "memory"
+      ? sal * 0.6 + Math.log(1 + acc) * 0.8 + (TIERW[n.tier] || 0.5) * 1.5
+        + (n.provenance === "onboarding" ? 5 : 0)   // foundational interview → bedrock
+      : 0);
+  });
+  const imps = graph.nodes.map(n => n.imp);
+  const lo = Math.min(...imps, 0), hi = Math.max(...imps, lo + 1e-6);
+  const Rmax = Math.min(graph.w, graph.h) * 0.46;
+  graph.nodes.forEach(n => {
+    n.impN = (n.imp - lo) / (hi - lo);          // 0 (peripheral) … 1 (core)
+    n.tr = 16 + (Rmax - 16) * (1 - n.impN);      // target ring radius — important = small = centre
+    n.rad = (n.type === "memory" ? 5 : 3.5) + n.impN * 9;
+  });
+
   buildGraphSvg();
-  $("graphLegend").textContent =
-    `${graph.nodes.length} nodes · ${graph.links.length} links — click a blob to review/edit`;
-  graph.ticks = 0; cancelAnimationFrame(graph.raf); graphTick();
+  graph.px = 0; graph.py = 0; graph.k = 1; applyTransform();
+  $("graphLegend").innerHTML =
+    `${graph.nodes.length} nodes · ${graph.links.length} links — click a blob to edit` +
+    `<br><span style="opacity:.7;">scroll = zoom · drag = pan · double-click = reset</span>`;
+  cancelAnimationFrame(graph.raf); graphTick();
 }
 
 function buildGraphSvg() {
   const svg = $("graphSvg"); svg.innerHTML = "";
-  graph.links.forEach(l => { l.el = document.createElementNS(GNS, "line"); svg.appendChild(l.el); });
+  const root = document.createElementNS(GNS, "g"); svg.appendChild(root); graph.root = root;
+  graph.links.forEach(l => { l.el = document.createElementNS(GNS, "line"); root.appendChild(l.el); });
   graph.nodes.forEach(n => {
     const g = document.createElementNS(GNS, "g"); g.setAttribute("class", "node");
-    const isMem = n.type === "memory";
-    n.rad = isMem ? 7 + Math.min(11, (n.salience || 1) * 5) : 5;
+    const col = glowColor(n.impN);
+    const halo = document.createElementNS(GNS, "circle");
+    halo.setAttribute("class", "halo"); halo.setAttribute("r", (n.rad * 2.6).toFixed(1));
+    halo.setAttribute("fill", col); halo.setAttribute("opacity", 0.16); g.appendChild(halo);
     const c = document.createElementNS(GNS, "circle");
-    c.setAttribute("r", n.rad); c.setAttribute("fill", isMem ? tierColor(n.tier) : "#33405a");
+    c.setAttribute("class", "core"); c.setAttribute("r", n.rad.toFixed(1)); c.setAttribute("fill", col);
     g.appendChild(c);
     const tx = document.createElementNS(GNS, "text");
-    tx.setAttribute("x", n.rad + 3); tx.setAttribute("y", 4); tx.textContent = n.label || "";
+    tx.setAttribute("x", (n.rad + 3).toFixed(1)); tx.setAttribute("y", 4); tx.textContent = n.label || "";
     g.appendChild(tx);
     g.addEventListener("click", (e) => { e.stopPropagation(); selectNode(n); });
-    svg.appendChild(g); n.el = g;
+    root.appendChild(g); n.el = g;
   });
 }
 
 function graphTick() {
   const n = graph.nodes, L = graph.links, cx = graph.w / 2, cy = graph.h / 2;
+  const SPIN = 0.0008;  // very slow galaxy rotation (~5°/s) — never fast enough to fight a click
   for (let i = 0; i < n.length; i++) {
     for (let j = i + 1; j < n.length; j++) {
-      const a = n[i], b = n[j]; let dx = a.x - b.x, dy = a.y - b.y; const d2 = dx * dx + dy * dy + 0.01;
-      const d = Math.sqrt(d2), f = 1700 / d2; const fx = dx / d * f, fy = dy / d * f;
+      const a = n[i], b = n[j]; const dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy + 0.01;
+      const d = Math.sqrt(d2), f = 900 / d2; const fx = dx / d * f, fy = dy / d * f;
       a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
     }
   }
   L.forEach(l => {
-    const a = l.source, b = l.target; let dx = b.x - a.x, dy = b.y - a.y;
-    const d = Math.sqrt(dx * dx + dy * dy) + 0.01, f = (d - 95) * 0.02;
+    const a = l.source, b = l.target; const dx = b.x - a.x, dy = b.y - a.y;
+    const d = Math.sqrt(dx * dx + dy * dy) + 0.01, f = (d - 70) * 0.006;
     const fx = dx / d * f, fy = dy / d * f; a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
   });
+  const cs = Math.cos(SPIN), sn = Math.sin(SPIN);
   n.forEach(p => {
-    p.vx += (cx - p.x) * 0.002; p.vy += (cy - p.y) * 0.002; p.vx *= 0.85; p.vy *= 0.85;
-    p.x += p.vx; p.y += p.vy;
-    p.x = Math.max(p.rad + 4, Math.min(graph.w - p.rad - 4, p.x));
-    p.y = Math.max(p.rad + 4, Math.min(graph.h - p.rad - 4, p.y));
+    const dx = p.x - cx, dy = p.y - cy, r = Math.sqrt(dx * dx + dy * dy) + 1e-3;
+    const fr = (p.tr - r) * 0.02;                 // pull toward this node's target ring
+    p.vx += dx / r * fr; p.vy += dy / r * fr;
+    p.vx *= 0.9; p.vy *= 0.9;
+    let nx = p.x + p.vx, ny = p.y + p.vy;
+    const rx = nx - cx, ry = ny - cy;             // steady slow rotation about the centre
+    p.x = cx + rx * cs - ry * sn; p.y = cy + rx * sn + ry * cs;
     p.el.setAttribute("transform", `translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
   });
   L.forEach(l => {
     l.el.setAttribute("x1", l.source.x.toFixed(1)); l.el.setAttribute("y1", l.source.y.toFixed(1));
     l.el.setAttribute("x2", l.target.x.toFixed(1)); l.el.setAttribute("y2", l.target.y.toFixed(1));
   });
-  if (graph.on && ++graph.ticks < 320) graph.raf = requestAnimationFrame(graphTick);
+  if (graph.on) graph.raf = requestAnimationFrame(graphTick);  // continuous, gentle drift
+}
+
+function graphDeselect() {
+  $("graphInspect").style.display = "none";
+  if (graph.sel && graph.sel.el) { graph.sel.el.classList.remove("sel"); graph.sel = null; }
 }
 
 function selectNode(n) {
@@ -1466,10 +1513,38 @@ function toggleGraph() {
   else { cancelAnimationFrame(graph.raf); $("graphInspect").style.display = "none"; }
 }
 $("graphToggle").addEventListener("click", toggleGraph);
-$("graphSvg").addEventListener("click", () => {
-  $("graphInspect").style.display = "none";
-  if (graph.sel && graph.sel.el) { graph.sel.el.classList.remove("sel"); graph.sel = null; }
-});
+
+// Zoom (scroll, toward the cursor) + pan (drag the background). A background click with no drag
+// deselects. Node clicks are handled on the node (stopPropagation), so dragging never starts there.
+(() => {
+  const svg = $("graphSvg");
+  svg.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const r = svg.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    const nk = Math.max(0.25, Math.min(5, graph.k * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+    graph.px = mx - (mx - graph.px) * (nk / graph.k);
+    graph.py = my - (my - graph.py) * (nk / graph.k);
+    graph.k = nk; applyTransform();
+  }, { passive: false });
+  let drag = null;
+  svg.addEventListener("mousedown", (e) => {
+    if (e.target.closest(".node")) return;  // let node clicks through
+    drag = { x: e.clientX, y: e.clientY, px: graph.px, py: graph.py, moved: false };
+    svg.classList.add("panning");
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    graph.px = drag.px + dx; graph.py = drag.py + dy; applyTransform();
+  });
+  window.addEventListener("mouseup", () => {
+    if (!drag) return;
+    const moved = drag.moved; drag = null; svg.classList.remove("panning");
+    if (!moved) graphDeselect();  // a plain click on the background
+  });
+  svg.addEventListener("dblclick", () => { graph.px = 0; graph.py = 0; graph.k = 1; applyTransform(); });
+})();
 
 // --- tabs ---
 const loaders = { mind: loadMind, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet };
