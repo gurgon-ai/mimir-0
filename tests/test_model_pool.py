@@ -191,3 +191,46 @@ def test_chat_stream_fails_over_before_first_token() -> None:
     pool = ProviderPool([("A", a), ("B", b)], max_retries=0, sleep=_noop_sleep)
     out = "".join(pool.chat_stream("m", [], {}, priority=Priority.USER_ADJACENT))
     assert out == "from-b"
+
+
+class FleetProvider(FakeProvider):
+    """A provider that advertises an inventory (so the pool learns its models) and tags replies."""
+
+    def __init__(self, name: str, models: list[str]) -> None:
+        super().__init__(name, reply=f"reply-from-{name}")
+        self._models = models
+
+    def list_models(self) -> list[str]:
+        return self._models
+
+
+def test_council_placements_one_per_node_distinct_models() -> None:
+    a = FleetProvider("A", ["gemma:12b", "nomic-embed-text"])
+    b = FleetProvider("B", ["gemma:12b", "qwen:14b"])
+    c = FleetProvider("C", ["qwen:14b"])
+    pool = ProviderPool([("A", a), ("B", b), ("C", c)], sleep=_noop_sleep)
+    pool.refresh()
+    placements = pool.council_placements()
+    nodes = [n for n, _m in placements]
+    assert nodes == ["A", "B", "C"]                  # one slot per reachable node
+    assert all("embed" not in m for _n, m in placements)  # embedding models excluded
+    # greedy distinctness: A→gemma, B→qwen (gemma taken), C→qwen (only option)
+    assert dict(placements)["A"] == "gemma:12b"
+    assert dict(placements)["B"] == "qwen:14b"
+
+
+def test_chat_on_pins_to_node() -> None:
+    a = FleetProvider("A", ["m"])
+    b = FleetProvider("B", ["m"])
+    pool = ProviderPool([("A", a), ("B", b)], sleep=_noop_sleep)
+    pool.refresh()
+    assert pool.chat_on("B", "m", [], {}, priority=Priority.BACKGROUND) == "reply-from-B"
+    assert b.calls == 1 and a.calls == 0  # pinned to B, A untouched
+
+
+def test_chat_on_falls_back_when_node_missing() -> None:
+    a = FleetProvider("A", ["m"])
+    pool = ProviderPool([("A", a)], sleep=_noop_sleep)
+    pool.refresh()
+    # node "Z" doesn't exist → fall back to ordinary routing (lands on A), persona not lost
+    assert pool.chat_on("Z", "m", [], {}, priority=Priority.BACKGROUND) == "reply-from-A"

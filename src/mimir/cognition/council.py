@@ -29,7 +29,7 @@ from ..storage.repo import save_memory
 
 log = logging.getLogger("mimir.council")
 
-_MAX_PARALLEL = 5
+_MAX_PARALLEL = 16  # cap on concurrent persona calls — wide enough to light up a whole fleet
 
 
 @dataclass(slots=True)
@@ -37,6 +37,7 @@ class Position:
     persona: str
     model: str
     text: str
+    node: str = ""  # which fleet node argued this (blank = routed, not pinned)
 
 
 @dataclass(slots=True)
@@ -55,27 +56,46 @@ def _eligible_models(model: ModelGateway) -> list[str]:
     return [model.default_council_model()]  # nothing discovered → fall back to a configured model
 
 
-def _ask_persona(model: ModelGateway, name: str, stance: str, on_model: str, question: str) -> str:
-    return model.chat_with_model(
-        on_model,
-        [
-            {"role": "system", "content": council_persona_system(name, stance)},
-            {"role": "user", "content": question},
-        ],
-    )
-
-
-def _gather_positions(model: ModelGateway, question: str, models: list[str]) -> list[Position]:
-    """Each persona takes a position, assigned round-robin across the models, in parallel."""
-    assignments = [
-        (name, stance, models[i % len(models)])
-        for i, (name, stance) in enumerate(COUNCIL_PERSONAS)
+def _ask_persona(
+    model: ModelGateway, name: str, stance: str, node: str, on_model: str, question: str
+) -> str:
+    messages = [
+        {"role": "system", "content": council_persona_system(name, stance)},
+        {"role": "user", "content": question},
     ]
-    positions: list[Position] = [Position(n, m, "") for n, _s, m in assignments]
-    with ThreadPoolExecutor(max_workers=min(_MAX_PARALLEL, len(assignments))) as pool:
+    if node:  # pin to a specific fleet node so the council fans across the whole fleet (DESIGN §5)
+        return model.chat_on_node(node, on_model, messages)
+    return model.chat_with_model(on_model, messages)
+
+
+def _assignments(
+    models: list[str], placements: list[tuple[str, str]]
+) -> list[tuple[str, str, str, str]]:
+    """(persona, stance, node, model) for each persona. With a known fleet, spread round-robin
+    across nodes (one machine per slot until they wrap) so every node works at once; otherwise
+    round-robin across distinct models and let routing place each call (node left blank)."""
+    out: list[tuple[str, str, str, str]] = []
+    for i, (name, stance) in enumerate(COUNCIL_PERSONAS):
+        if placements:
+            node, on_model = placements[i % len(placements)]
+        else:
+            node, on_model = "", models[i % len(models)]
+        out.append((name, stance, node, on_model))
+    return out
+
+
+def _gather_positions(
+    model: ModelGateway, question: str, models: list[str], placements: list[tuple[str, str]]
+) -> list[Position]:
+    """Each persona takes a position, in parallel, fanned across the fleet's nodes when known."""
+    assignments = _assignments(models, placements)
+    positions = [Position(n, m, "", node=node) for n, _s, node, m in assignments]
+    width = len(placements) if placements else len(models)
+    workers = max(1, min(_MAX_PARALLEL, len(assignments), width))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
-            pool.submit(_ask_persona, model, name, stance, on_model, question): idx
-            for idx, (name, stance, on_model) in enumerate(assignments)
+            pool.submit(_ask_persona, model, name, stance, node, on_model, question): idx
+            for idx, (name, stance, node, on_model) in enumerate(assignments)
         }
         for future in futures:
             idx = futures[future]
@@ -113,8 +133,13 @@ def deliberate(
     ``provenance`` tags the stored verdict — defaults to user-convened ``"inner council"``; the
     sleep cycle passes ``"sleep deliberation"`` for self-initiated arguments (DESIGN §5a)."""
     models = _eligible_models(model)
-    log.info("council: deliberating across %d model(s): %s", len(models), models)
-    positions = _gather_positions(model, question, models)
+    placements = model.council_placements()
+    if placements:
+        log.info("council: deliberating across %d node(s): %s", len(placements),
+                 [f"{n}:{m}" for n, m in placements])
+    else:
+        log.info("council: deliberating across %d model(s): %s", len(models), models)
+    positions = _gather_positions(model, question, models, placements)
     verdict = _synthesize(model, question, positions)
 
     mem = Memory(
