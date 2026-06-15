@@ -477,3 +477,10 @@ def test_timezones_endpoint(base_url: str) -> None:
 def test_sleep_tab_present(base_url: str) -> None:
     _, html = _get_html(base_url + "/")
     assert 'data-tab="sleep"' in html and 'id="setTz"' in html
+
+
+def test_deliberate_endpoint(base_url: str) -> None:
+    status, data = _json("POST", base_url + "/api/deliberate/run")
+    assert status == 200 and "ran" in data  # no conflicts seeded → empty but well-formed
+    _, html = _get_html(base_url + "/")
+    assert 'id="delibBtn"' in html and 'id="setDeliberate"' in html

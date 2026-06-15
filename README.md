@@ -104,7 +104,10 @@ On top of that:
   maintains itself. Runs in a user-set **nightly window** (with phase budgeting, same-night resume,
   and catch-up) because streaming chat on a slow machine leaves the post-turn window too short for
   heavy work — plus a "run sleep now" button any time (DESIGN §5a).
-- **Inner council** — adversarial deliberation across whatever models are installed.
+- **Inner council** — adversarial deliberation across whatever models are installed. Convene it on a
+  question yourself, or let it run **self-directed during sleep**: the system surfaces its own
+  conflicts (graph tensions, divergent memories), a curator picks the few worth arguing, and the
+  verdicts become recallable understanding (DESIGN §5a).
 - **Distributed fleet + qualifying tournament** — point it at your LAN and it discovers every
   `ollama serve` (zero setup on those machines), routes each request to a node that has the model,
   and **qualifies** them on a measured battery (talk, tools, code, reasoning, discipline, and an

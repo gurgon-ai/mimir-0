@@ -389,6 +389,18 @@ checkpointed per-day in a generic `kv` table, so a same-night restart **resumes*
 restarted host). It always yields to a live turn, and a manual "run sleep now" forces the full cycle
 any time. This is the pattern lifted (clean) from the private home-AI's nightly cycle.
 
+**Self-directed deliberation — the council argues the system's own conflicts. [landed]** A
+`deliberate` phase (after consolidation) turns the inner council from a hand-invoked tool into
+autonomous cognition (`cognition/deliberation.py`). Consolidation settles the clear-cut cases; what
+remains are genuine *tensions* it deterministically surfaces: **graph tensions** (a subject with two+
+objects under the same *non-functional* relation — functional ones like "lives in" are consolidation's
+job) and **divergent near-duplicates** (memory pairs in a cosine band close enough to be the same
+topic but not merged, whose text differs). A **hybrid curator** picks the few most worth arguing — an
+LLM ranks them, with a deterministic weight order as the no-model fallback — and each is submitted to
+the council; the verdict is stored as recallable understanding (`provenance="sleep deliberation"`).
+Conflicts argued recently are skipped so it doesn't loop. This is the public-clean analogue of the
+home-AI's nightly BBS/deliberation forum (its 16-persona forum + curator → our council + curator).
+
 > A concrete **build sketch** mapping the *rest* of §5a onto Mimir-0's parts (the bidirectional-RAG
 > tasks, idle takeover, the phased plan B1–B4) is parked in
 > [`docs/BURST_WORKER.md`](docs/BURST_WORKER.md) — not scheduled; do the inference-engine phases first.

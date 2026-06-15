@@ -66,6 +66,14 @@ check_interval_s = 900       # how often the daemon checks the clock (15 min)
 # turns off the hot path. Left for back-compat / headless setups without a steady clock.
 every = 0
 
+[deliberation]
+# During the sleep cycle, the system surfaces its OWN conflicts — graph tensions (a subject with two
+# values under a non-functional relation) and divergent near-duplicate memories — and submits the few
+# most worth arguing to the inner council for adversarial reasoning, storing the verdicts. The council
+# is otherwise only invoked by hand; this makes it self-directed. Also a "Deliberate now" manual button.
+enabled = true
+limit = 3                    # max conflicts argued per cycle (each is several model calls)
+
 [procedural]
 # Learned reasoning habits (trigger → procedure). When a turn matches a habit's trigger, the
 # procedure is injected as guidance. Teach habits via brain.learn_procedure() or the web UI.
