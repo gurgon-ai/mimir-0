@@ -62,7 +62,7 @@ def build_graph_map(
             "id": f"m{m.id}", "type": "memory", "mid": m.id,
             "label": text[:42] + ("…" if len(text) > 42 else ""), "text": text,
             "tier": m.evidence_tier.key, "salience": round(m.salience, 3),
-            "provenance": m.provenance,
+            "access": m.access_count, "provenance": m.provenance,
         })
     for low, nid in entity_id.items():
         nodes.append({"id": nid, "type": "entity", "label": entity_label[low]})

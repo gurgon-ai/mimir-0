@@ -8,6 +8,14 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Changed
+- **Memory graph as a drifting galaxy.** The visual graph now lays out as a slow-rotating galaxy:
+  importance (degree + salience + usage + how foundational a memory is) pulls the biggest, brightest
+  blobs to the **centre** and loose ones to the rim. **The seeding-interview memories** (provenance
+  `onboarding`) and operator-stated facts get the strongest pull — biggest, dead centre — so who you
+  are and who's around you form the core. Added **scroll-to-zoom (toward the cursor), drag-to-pan, and
+  double-click-reset**, a continuous gentle drift + rotation (slow enough to click comfortably), and a
+  **white-hot→blue glow** palette (white cores at the centre, deep-blue at the rim, with halos) for a
+  lightning-like look.
 - **The web chat now streams.** The composer was calling the non-streaming `/api/turn` (the UI froze
   until the whole reply landed — painful on slow edge nodes); it now uses the existing SSE
   `/api/turn/stream` so tokens appear as they're generated, with a pulsing **"thinking…"** indicator
