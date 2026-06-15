@@ -1142,17 +1142,63 @@ class Mimir:
         """Recent captured errors (WARNING+), oldest-first — for the UI and introspection."""
         return [r.as_dict() for r in self._errors.recent(limit=limit, min_level=min_level)]
 
-    def _error_context(self) -> str | None:
-        """The 'recent errors' block for this turn's prompt, or None when nothing's wrong lately.
+    @staticmethod
+    def _short_node(name: str) -> str:
+        """A compact node label: the last IP octet (``…189``) for a URL, else the bare name."""
+        host = name.split("//", 1)[-1].split(":", 1)[0]
+        return f"…{host.rsplit('.', 1)[-1]}" if host.count(".") == 3 else (host or name)
 
-        Only errors inside the configured recency window are shown (so a fixed problem fades from
-        the prompt), capped — self-observability without drowning the context (DESIGN §10)."""
+    def pool_health(self) -> dict[str, Any]:
+        """Backend pool health for the UI: nodes up, down, saturated, and per-node speeds."""
+        stats = self._model.get_stats()
+        endpoints = list(stats.get("endpoints", []))
+        return {
+            "nodes": len(endpoints),
+            "nodes_up": int(stats.get("nodes_up", 0)),
+            "down": list(stats.get("down", [])),
+            "saturated": stats.get("saturated", {}) or {},
+            "latency": stats.get("latency", {}) or {},  # node → fastest known s/turn
+        }
+
+    def _backend_health_line(self) -> tuple[str, bool] | None:
+        """``(line, degraded)`` — a one-line backend summary (nodes up/down, saturation, per-node
+        speeds) plus whether it's degraded. ``None`` for a single local provider (no fleet)."""
+        h = self.pool_health()
+        if h["nodes"] <= 1:
+            return None  # a single local provider — no fleet health worth narrating
+        degraded = bool(h["down"]) or bool(h["saturated"])
+        parts = [f"Backend: {h['nodes_up']}/{h['nodes']} nodes up"]
+        if h["down"]:
+            parts.append("down: " + ", ".join(self._short_node(n) for n in h["down"]))
+        if h["saturated"]:
+            parts.append("saturated: " + ", ".join(
+                f"{self._short_node(n)} ({s:.0f}s)" for n, s in h["saturated"].items()))
+        if h["latency"]:
+            speeds = sorted(h["latency"].items(), key=lambda kv: kv[1])
+            parts.append(
+                "speeds: " + ", ".join(f"{self._short_node(n)} {t:.1f}s" for n, t in speeds))
+        return "; ".join(parts) + ".", degraded
+
+    def _error_context(self) -> str | None:
+        """The system-health block for this turn's prompt: recent errors + backend pool health.
+
+        Errors inside the recency window (so a fixed problem fades), capped; plus a one-line backend
+        summary when there's a fleet that's degraded or there are errors to report alongside.
+        ``None`` when there's nothing worth saying — observability without noise (DESIGN §10)."""
         if not self.config.surface_errors:
             return None
+        blocks: list[str] = []
         recent = self._errors.within(
             self.config.error_context_window_s, time.time(), limit=self.config.error_context_max
         )
-        return render_errors(recent) if recent else None
+        if recent:
+            blocks.append(render_errors(recent))
+        backend = self._backend_health_line()
+        # Surface backend status when it's degraded (a node down/saturated) or alongside errors —
+        # not on every healthy turn, to keep the prompt quiet when all is well.
+        if backend and (backend[1] or recent):
+            blocks.append(backend[0])
+        return "\n".join(blocks) if blocks else None
 
     def digest_errors(self) -> dict[str, Any]:
         """The sleep cycle's health pass: summarize the period's errors and record the digest (kv),
