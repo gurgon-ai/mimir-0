@@ -116,6 +116,17 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **Self-directed adversarial reasoning in the sleep cycle (DESIGN §5a).** The inner council is no
+  longer only something you invoke by hand — during sleep the system **surfaces its own conflicts and
+  argues them**. A new `deliberate` phase (after consolidate) deterministically surfaces tensions
+  consolidation doesn't resolve — *graph tensions* (a subject with two+ objects under the same
+  **non-functional** relation, e.g. "wants X" vs "wants Y") and *divergent near-duplicates* (memory
+  pairs in a cosine tension band whose text differs) — a **hybrid curator** picks the few most worth
+  arguing (an LLM ranks; deterministic weight order is the fallback), and each goes to the council;
+  verdicts are stored as recallable understanding (`provenance="sleep deliberation"`). Conflicts
+  argued in the last 30 days are skipped so it doesn't loop nightly. Toggle in the Sleep tab
+  (`[deliberation] enabled`, default on) + a **"Deliberate now"** manual trigger
+  (`POST /api/deliberate/run`). New: `cognition/deliberation.py`, `Mimir.deliberate_open_questions()`.
 - **A wall-clock sleep cycle — heavy maintenance gets its own quiet window (DESIGN §5a).** The
   post-turn *burst* worker assumes the model idles while you read the reply, but with **streaming**
   chat the model is busy to the last token and on a **slow machine** one turn eats the window — so

@@ -231,6 +231,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._ingest(body))
             elif route == "/api/sleep":
                 self._send_json(self._sleep())
+            elif route == "/api/deliberate/run":
+                self._send_json(self._deliberate_now())
             elif route == "/api/settings":
                 self._send_json(self._update_settings(body))
             elif route == "/api/council":
@@ -787,6 +789,11 @@ class _Handler(BaseHTTPRequestHandler):
             })
         return out
 
+    def _deliberate_now(self) -> dict[str, Any]:
+        # Manual trigger for self-directed deliberation: surface conflicts → council → verdicts.
+        with self.server.brain_lock:
+            return self.server.brain.deliberate_open_questions(force=True)
+
     def _update_settings(self, body: dict[str, Any]) -> dict[str, Any]:
         changes = body.get("settings", body)  # accept {"settings": {...}} or a bare {...}
         if not isinstance(changes, dict):
@@ -1125,12 +1132,17 @@ _HTML = """<!doctype html>
         <div><label>Quiet hours end</label><input type="time" id="setEnd"/></div>
         <label style="font-weight:normal;"><input type="checkbox" id="setEnabled"/> Enabled</label>
       </div>
+      <label style="font-weight:normal; display:block; margin-bottom:8px;">
+        <input type="checkbox" id="setDeliberate"/> Reason adversarially over my own conflicts during sleep
+      </label>
       <button id="saveSleep" type="button">Save schedule</button>
       <span id="settingsMsg" class="hint" style="margin-left:10px;"></span>
       <h2 style="margin-top:18px;">Status</h2>
       <div id="sleepStatus" class="hint">—</div>
       <button class="secondary" id="sleepBtn" type="button">Run sleep now</button>
+      <button class="secondary" id="delibBtn" type="button">Deliberate now</button>
       <div id="sleepResult" class="hint"></div>
+      <div id="delibResult" style="margin-top:8px;"></div>
     </div>
 
     <div class="tabpane hidden" id="tab-memories">
@@ -1761,6 +1773,7 @@ async function loadSleepTab() {
     $("setStart").value = s.sleep_window_start || "02:00";
     $("setEnd").value = s.sleep_window_end || "06:00";
     $("setEnabled").checked = !!s.sleep_enabled;
+    $("setDeliberate").checked = !!s.deliberation_enabled;
   } catch (e) { $("settingsMsg").textContent = "error: " + e.message; }
   loadSleepStatus();
 }
@@ -1773,6 +1786,7 @@ $("saveSleep").addEventListener("click", async () => {
       sleep_window_start: $("setStart").value,
       sleep_window_end: $("setEnd").value,
       sleep_enabled: $("setEnabled").checked,
+      deliberation_enabled: $("setDeliberate").checked,
     }});
     $("settingsMsg").textContent = "Saved.";
     setTimeout(() => $("settingsMsg").textContent = "", 1500);
@@ -1790,6 +1804,22 @@ $("sleepBtn").addEventListener("click", async () => {
     $("sleepResult").textContent = `Ran ${(r.ran||[]).join(", ") || "nothing"}.${counts}`;
     loadSleepStatus(); loadMind(); refreshState();
   } catch (e) { $("sleepResult").textContent = "Error: " + e.message; }
+});
+
+$("delibBtn").addEventListener("click", async () => {
+  $("delibResult").innerHTML = '<span class="hint">Surfacing conflicts and convening the council… (this can take a while)</span>';
+  try {
+    const r = await api("POST", "/api/deliberate/run");
+    const ran = r.ran || [];
+    if (!ran.length) {
+      $("delibResult").innerHTML = `<span class="hint">No open conflicts to argue${r.surfaced ? ` (surfaced ${r.surfaced}, none fresh)` : ""}.</span>`;
+      return;
+    }
+    $("delibResult").innerHTML = `<div class="hint">Argued ${ran.length} of ${r.surfaced} surfaced:</div>` +
+      ran.map(d => `<div class="mem"><div class="text"><b>Q:</b> ${escapeHtml(d.question)}</div>` +
+        `<div class="text" style="color:#9fb3c8;"><b>Verdict:</b> ${escapeHtml(d.verdict)}</div></div>`).join("");
+    refreshState();
+  } catch (e) { $("delibResult").innerHTML = '<span class="hint">Error: ' + escapeHtml(e.message) + '</span>'; }
 });
 
 $("memKind").addEventListener("change", loadMemories);

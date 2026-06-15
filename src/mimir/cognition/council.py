@@ -106,8 +106,12 @@ def deliberate(
     *,
     question: str,
     user: str | None = None,
+    provenance: str = "inner council",
 ) -> CouncilResult:
-    """Run a council deliberation and persist the verdict as recallable understanding."""
+    """Run a council deliberation and persist the verdict as recallable understanding.
+
+    ``provenance`` tags the stored verdict — defaults to user-convened ``"inner council"``; the
+    sleep cycle passes ``"sleep deliberation"`` for self-initiated arguments (DESIGN §5a)."""
     models = _eligible_models(model)
     log.info("council: deliberating across %d model(s): %s", len(models), models)
     positions = _gather_positions(model, question, models)
@@ -120,7 +124,7 @@ def deliberate(
         confidence=0.6,
         salience=1.0,
         embedding=embedder.embed(verdict),
-        provenance="inner council",
+        provenance=provenance,
         user=user,
     )
     save_memory(storage, mem)

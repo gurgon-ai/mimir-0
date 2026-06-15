@@ -144,6 +144,11 @@ class Config:
     sleep_window_start: str = "02:00"      # local HH:MM the window opens
     sleep_window_end: str = "06:00"        # local HH:MM it closes (may cross midnight, e.g. 23:00)
     sleep_check_interval_s: float = 900.0  # how often the daemon checks the clock (15 min)
+    # Self-directed deliberation (DESIGN §5a): during sleep, the system surfaces its own conflicts
+    # (graph tensions + divergent near-duplicates) and submits them to the inner council for
+    # adversarial reasoning, storing the verdicts. A sleep phase; also a manual trigger.
+    deliberation_enabled: bool = True
+    deliberation_limit: int = 3  # max conflicts argued per cycle (each is several model calls)
     # Procedural memory: how many matching procedures to inject, and the minimum trigger match.
     procedural_top_k: int = 3
     procedural_min_match: float = 0.3
@@ -291,6 +296,8 @@ def load_config(path: str | Path) -> Config:
         sleep_window_start=str(raw.get("sleep", {}).get("window_start", "02:00")),
         sleep_window_end=str(raw.get("sleep", {}).get("window_end", "06:00")),
         sleep_check_interval_s=float(raw.get("sleep", {}).get("check_interval_s", 900.0)),
+        deliberation_enabled=bool(raw.get("deliberation", {}).get("enabled", True)),
+        deliberation_limit=int(raw.get("deliberation", {}).get("limit", 3)),
         procedural_top_k=int(raw.get("procedural", {}).get("top_k", 3)),
         procedural_min_match=float(raw.get("procedural", {}).get("min_match", 0.3)),
         timezone=(str(raw["locale"]["timezone"]) if raw.get("locale", {}).get("timezone")

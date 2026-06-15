@@ -21,6 +21,7 @@ import threading
 import time
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ from .cognition.benchmark import benchmark_fleet as _benchmark_fleet
 from .cognition.benchmark import complete_speed_matrix as _complete_speed_matrix
 from .cognition.burst import BurstResult, BurstWorker, ResponseContext
 from .cognition.council import CouncilResult, deliberate
+from .cognition.deliberation import curate, surface_conflicts
 from .cognition.epistemics import EpistemicResult, run_epistemics
 from .cognition.fleet import (
     ROLE_NEEDS,
@@ -920,6 +922,7 @@ class Mimir:
             "sleep_enabled": self.config.sleep_enabled,
             "sleep_window_start": self.config.sleep_window_start,
             "sleep_window_end": self.config.sleep_window_end,
+            "deliberation_enabled": self.config.deliberation_enabled,
         }
 
     def _overrides(self) -> dict[str, Any]:
@@ -961,7 +964,7 @@ class Mimir:
                         f"unknown timezone: {val!r} (install the optional `tzdata` package "
                         f"for full IANA support)"
                     )
-            elif key == "sleep_enabled":
+            elif key in ("sleep_enabled", "deliberation_enabled"):
                 val = bool(val)
             overrides[key] = val
         kv_set(self._storage, self._SETTINGS_KEY, json.dumps(overrides))
@@ -1025,6 +1028,7 @@ class Mimir:
 
         return [
             SleepPhase("consolidate", min_minutes=2.0, run=_consolidate),
+            SleepPhase("deliberate", min_minutes=15.0, run=self.deliberate_open_questions),
             SleepPhase("narratives", min_minutes=10.0, run=self.generate_narratives),
         ]
 
@@ -1109,6 +1113,61 @@ class Mimir:
         scheduler = threading.Thread(target=_loop, name="mimir-sleep-cycle", daemon=True)
         scheduler.start()
         self._sleep_scheduler = scheduler
+
+    # -- self-directed deliberation (the council, on the system's own conflicts; DESIGN §5a) --
+
+    _DELIB_SEEN_KEY = "deliberated"
+    _DELIB_SEEN_TTL_DAYS = 30  # re-argue a conflict only if it's still around this long later
+
+    def _deliberation_enabled(self) -> bool:
+        return bool(self._overrides().get("deliberation_enabled", self.config.deliberation_enabled))
+
+    def _load_deliberated(self) -> dict[str, str]:
+        raw = kv_get(self._storage, self._DELIB_SEEN_KEY)
+        if not raw:
+            return {}
+        try:
+            value = json.loads(raw)
+            return value if isinstance(value, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+
+    def deliberate_open_questions(self, *, force: bool = False) -> dict[str, Any]:
+        """Surface the system's own conflicts → curate → submit each to the council (DESIGN §5a).
+
+        The sleep cycle calls this as a phase; ``/api/deliberate/run`` calls it with ``force``.
+        Skips conflicts argued within the last ``_DELIB_SEEN_TTL_DAYS`` so it doesn't loop nightly.
+        Returns a small report (what was argued + counts)."""
+        if not force and not self._deliberation_enabled():
+            return {"enabled": False, "ran": []}
+        conflicts = surface_conflicts(self._storage, embedder=self._embedder)
+        today = local_now(self._tz()).strftime("%Y-%m-%d")
+        seen = self._load_deliberated()
+        fresh = [c for c in conflicts if c.key not in seen]
+        chosen = curate(self._model, fresh, limit=max(1, self.config.deliberation_limit))
+        results: list[dict[str, Any]] = []
+        for conflict in chosen:
+            try:
+                outcome = deliberate(
+                    self._model, self._storage, self._embedder,
+                    question=conflict.question, provenance="sleep deliberation",
+                )
+            except Exception as exc:  # one bad council run never sinks the phase (§10)
+                log.error("deliberation: council failed on %r: %s", conflict.key, exc)
+                continue
+            seen[conflict.key] = today
+            results.append({"question": conflict.question, "verdict": outcome.verdict,
+                            "memory_id": outcome.memory_id})
+        self._prune_and_save_deliberated(seen)
+        log.info("deliberation: %d conflict(s) surfaced, %d fresh, %d argued",
+                 len(conflicts), len(fresh), len(results))
+        return {"enabled": True, "surfaced": len(conflicts), "fresh": len(fresh), "ran": results}
+
+    def _prune_and_save_deliberated(self, seen: dict[str, str]) -> None:
+        cutoff = local_now(self._tz()) - timedelta(days=self._DELIB_SEEN_TTL_DAYS)
+        cutoff_str = cutoff.strftime("%Y-%m-%d")
+        pruned = {k: d for k, d in seen.items() if d >= cutoff_str}
+        kv_set(self._storage, self._DELIB_SEEN_KEY, json.dumps(pruned))
 
     def scan_fleet(self) -> FleetScanResult:
         """Inventory the model fleet (nodes + models) and rebuild the catalogue (DESIGN §5)."""
