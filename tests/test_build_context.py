@@ -162,3 +162,19 @@ def test_empty_recall_states_no_memory_rather_than_omitting() -> None:
     assert "no stored memory" in know.body.lower()
     assert know.substantive is False
     assert bundle.source_count == 0  # still counts as no grounding (uncertainty gate still fires)
+
+
+def test_wiki_reference_section_counts_as_grounding() -> None:
+    bundle = build_context(
+        query="what is an apple?",
+        user=None,
+        identity="You are Mimir.",
+        retrieved=[],
+        sentinel_note=None,
+        embed_mode=EmbeddingMode.BOOTSTRAP,
+        budget_tokens=2000,
+        wiki_context="Apple: An apple is a pome fruit.\n\nOrchard: where apples grow.",
+    )
+    ref = next(s for s in bundle.sections if s.name == "reference")
+    assert "Apple" in ref.body and "Wikipedia" in ref.title
+    assert bundle.source_count == 2  # two reference blocks count as grounding

@@ -84,6 +84,22 @@ class BackendConfig:
 
 
 @dataclass(slots=True)
+class WikiConfig:
+    """An optional offline-reference source: a Kiwix server over a ZIM (DESIGN §9). Zero Python
+    dependency — Mimir talks to ``kiwix-serve`` with stdlib HTTP, like any other local endpoint. The
+    user downloads any ZIM (Wikipedia nopic, a medical wiki, top-50k, …), runs ``kiwix-serve`` over
+    it, and points ``url`` + ``book`` here; it's queried live and injected as an attributed section.
+    """
+
+    enabled: bool = False
+    url: str = "http://localhost:8080"   # the kiwix-serve base URL
+    book: str = ""                       # the ZIM's book name (as kiwix-serve lists it)
+    max_articles: int = 2                # how many top hits to inject per turn
+    max_chars: int = 800                 # chars of each article's lead text
+    timeout_s: float = 2.0               # hard cap so a slow/missing wiki never stalls a turn
+
+
+@dataclass(slots=True)
 class Config:
     storage_path: str
     roles: dict[str, RoleSpec]
@@ -91,6 +107,8 @@ class Config:
     # When set, the model gateway is built from a discovered/declared Ollama fleet instead of the
     # single ``provider``. ``provider`` is then just the adapter type (ollama).
     backend: BackendConfig | None = None
+    # Optional offline encyclopedia (Kiwix/ZIM over HTTP) — a live, attributed reference layer.
+    wiki: WikiConfig | None = None
     identity: str = DEFAULT_IDENTITY
     # The owner whose statements earn the top evidence tier. If None, Mimir runs in
     # single-user mode and treats whoever speaks as the primary user (DESIGN §3b).
@@ -211,6 +229,18 @@ def load_config(path: str | Path) -> Config:
     else:
         raise ConfigError('config is missing [provider] type = "ollama" (or "mock")')
 
+    wiki_raw = raw.get("wiki")
+    wiki: WikiConfig | None = None
+    if wiki_raw:
+        wiki = WikiConfig(
+            enabled=bool(wiki_raw.get("enabled", True)),  # presence of the block implies intent
+            url=str(wiki_raw.get("url", "http://localhost:8080")).rstrip("/"),
+            book=str(wiki_raw.get("book", "")),
+            max_articles=int(wiki_raw.get("max_articles", 2)),
+            max_chars=int(wiki_raw.get("max_chars", 800)),
+            timeout_s=float(wiki_raw.get("timeout_s", 2.0)),
+        )
+
     identity_raw = raw.get("identity", {})
     anchor_keys = (
         "name", "operator", "location", "purpose", "values", "scope", "boundaries", "voice"
@@ -220,6 +250,7 @@ def load_config(path: str | Path) -> Config:
         roles=_parse_roles(raw.get("roles", {})),
         provider=provider,
         backend=backend,
+        wiki=wiki,
         identity=str(identity_raw.get("text", DEFAULT_IDENTITY)),
         primary_user=(
             str(identity_raw["primary_user"]) if "primary_user" in identity_raw else None

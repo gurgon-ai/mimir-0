@@ -69,6 +69,18 @@ min_match = 0.3      # minimum trigger relevance (cosine or keyword) before a ha
 # timezone = "America/Vancouver"   # IANA name; omit to use the host's local zone
 hemisphere = "north"               # "north" or "south" — which way the seasons run
 
+# [wiki] turns on an OPTIONAL offline encyclopedia as a live reference layer — zero Python deps.
+# You run `kiwix-serve` (a single static binary, no install) over any ZIM you downloaded, and Mimir
+# queries it over stdlib HTTP, like any other local endpoint. Pick your ZIM size: Wikipedia "nopic"
+# (recommended), a medical wiki, a top-50k slice, etc. Each turn's query is searched live and the
+# top articles are injected as an attributed reference section. Omit the block to disable.
+# [wiki]
+# url = "http://localhost:8080"   # the kiwix-serve base URL
+# book = "wikipedia"              # the ZIM's book name as kiwix-serve lists it
+# max_articles = 2               # top hits injected per turn
+# max_chars = 800                # chars of lead text per article
+# timeout_s = 2.0                # hard cap so a slow/missing wiki never stalls a turn
+
 [provider]
 # "ollama" talks to a local Ollama server with stdlib HTTP (no extra deps).
 # "mock" is a deterministic, offline stand-in for tests/demos (needs no model server).

@@ -236,6 +236,36 @@ path **replaces** its previous chunks rather than duplicating them.
 - Recall quality on documents depends on the embedding mode (§4). Bootstrap matches words; for
   semantic recall over documents, use **endpoint** mode.
 
+## 5c. Offline encyclopedia (Kiwix/ZIM) — optional, zero extra deps
+
+Point Mimir at an offline copy of Wikipedia (or any **ZIM**) and it becomes a **live reference
+layer**: each turn's query is searched and the top articles are injected as an attributed
+`Reference — … (Wikipedia)` section, so the model can answer from a whole encyclopedia without you
+ingesting anything. There is **no Python dependency** — Mimir talks to a Kiwix server over stdlib
+HTTP, exactly like it talks to Ollama.
+
+1. **Get the binary + a ZIM.** Download `kiwix-tools` (a single static `kiwix-serve` binary; builds
+   exist for Linux/macOS/Windows **and ARM/Raspberry Pi**) and any ZIM from
+   [library.kiwix.org](https://library.kiwix.org) — pick your size: Wikipedia **nopic** is a great
+   default; there are medical wikis, a top-50k slice, Wiktionary, and more.
+2. **Serve it** (no install, no Mimir code on that box): `kiwix-serve --port 8080 wikipedia_en_nopic.zim`
+3. **Point Mimir at it** — add a `[wiki]` block to `mimir.toml`:
+
+```toml
+[wiki]
+url = "http://localhost:8080"   # the kiwix-serve base URL
+book = "wikipedia_en_nopic"     # the ZIM's book name as kiwix-serve lists it (its homepage shows it)
+max_articles = 2                # top hits injected per turn
+max_chars = 800                 # chars of lead text per article
+timeout_s = 2.0                 # hard cap so a slow/missing wiki never stalls a turn
+```
+
+It's fully optional and **fail-open**: omit the block to disable, and a missing or slow server just
+yields no reference section — it never errors or stalls a turn. Trivial turns (greetings) skip the
+lookup. (Want to point at the raw `.zim` file instead of running a server? That needs the GPL
+`libzim` library + Python 3.14's stdlib zstd or a zstd dep, so we keep the dependency-free HTTP path
+as the default.)
+
 ## 5d. Distributed inference — pool several machines (the fleet)
 
 Don't have one powerful machine? Pool several modest ones. Every computer that runs `ollama serve`
