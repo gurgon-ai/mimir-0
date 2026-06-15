@@ -173,6 +173,10 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self.server.brain.sleep_cycle_status())  # lock-free (reads state)
             elif route == "/api/settings":
                 self._send_json(self.server.brain.settings())  # lock-free (kv read)
+            elif route == "/api/forum":
+                self._send_json({"threads": self.server.brain.forum_threads()})
+            elif route == "/api/forum/thread":
+                self._send_json(self._forum_thread(params))
             elif route == "/api/timezones":
                 self._send_json({"zones": self.server.brain.available_timezones()})
             elif route == "/api/procedures":
@@ -233,6 +237,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._sleep())
             elif route == "/api/deliberate/run":
                 self._send_json(self._deliberate_now())
+            elif route == "/api/forum":
+                self._send_json(self._forum_action(body))
             elif route == "/api/settings":
                 self._send_json(self._update_settings(body))
             elif route == "/api/council":
@@ -794,6 +800,38 @@ class _Handler(BaseHTTPRequestHandler):
         with self.server.brain_lock:
             return self.server.brain.deliberate_open_questions(force=True)
 
+    def _forum_thread(self, params: dict[str, list[str]]) -> dict[str, Any]:
+        thread_id = int((params.get("id") or ["0"])[0])
+        thread = self.server.brain.forum_thread(thread_id)
+        if thread is None:
+            raise MimirError(f"no thread {thread_id}")
+        return thread
+
+    def _forum_action(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Forum housekeeping + 'ask the council'. One action per call (keeps the UI simple)."""
+        action = body.get("action")
+        brain = self.server.brain
+        if action == "ask":
+            question = str(body.get("question", "")).strip()
+            if not question:
+                raise MimirError("question is required")
+            with self.server.brain_lock:  # a real deliberation — fans across the fleet
+                result = brain.deliberate(question, user="operator")
+            return {"thread_id": result.thread_id}
+        if action == "comment":
+            brain.forum_comment(int(body["thread_id"]), str(body.get("text", "")).strip(),
+                                user="operator")
+        elif action in ("close", "reopen"):
+            brain.forum_set_status(int(body["thread_id"]),
+                                   "closed" if action == "close" else "open")
+        elif action == "delete_thread":
+            brain.forum_delete_thread(int(body["thread_id"]))
+        elif action == "delete_post":
+            brain.forum_delete_post(int(body["post_id"]))
+        else:
+            raise MimirError(f"unknown forum action: {action!r}")
+        return {"ok": True}
+
     def _update_settings(self, body: dict[str, Any]) -> dict[str, Any]:
         changes = body.get("settings", body)  # accept {"settings": {...}} or a bare {...}
         if not isinstance(changes, dict):
@@ -1045,8 +1083,10 @@ _HTML = """<!doctype html>
       <button class="secondary" id="sessionRestore" type="button" title="Load the selected conversation and continue it.">Restore</button>
       <button class="secondary" id="sessionNew" type="button" title="Start a fresh conversation.">+ New</button>
       <button class="secondary" id="graphToggle" type="button" title="Switch between the chat and a visual map of your memories." style="margin-left:auto;">🕸 Graph</button>
+      <button class="secondary" id="forumToggle" type="button" title="The council forum — read deliberations, comment, and keep house.">🏛 Forum</button>
     </div>
     <div id="benchBoard" style="display:none; flex:1; overflow:auto; padding:18px;"></div>
+    <div id="forumView" style="display:none; flex:1; overflow:auto; padding:16px;"></div>
     <div id="graphView" style="display:none; flex:1; position:relative; overflow:hidden;">
       <svg id="graphSvg" width="100%" height="100%"></svg>
       <div id="graphLegend" class="hint" style="position:absolute; top:8px; left:10px; pointer-events:none;"></div>
@@ -1601,6 +1641,9 @@ function selectNode(n) {
 
 function toggleGraph() {
   graph.on = !graph.on;
+  if (graph.on && typeof forum !== "undefined" && forum.on) {  // mutually exclusive takeover views
+    forum.on = false; $("forumView").style.display = "none"; $("forumToggle").textContent = "🏛 Forum";
+  }
   $("graphView").style.display = graph.on ? "block" : "none";
   $("log").style.display = graph.on ? "none" : "";
   $("composer").style.display = graph.on ? "none" : "";
@@ -1609,6 +1652,119 @@ function toggleGraph() {
   else { cancelAnimationFrame(graph.raf); $("graphInspect").style.display = "none"; }
 }
 $("graphToggle").addEventListener("click", toggleGraph);
+
+// --- the council forum: deliberations as browsable threads (comment + full-admin housekeeping) ---
+const forum = { on: false, threadId: null };
+
+function toggleForum() {
+  forum.on = !forum.on;
+  if (forum.on && graph.on) {  // the two takeover views are mutually exclusive
+    graph.on = false; $("graphView").style.display = "none";
+    $("graphToggle").textContent = "🕸 Graph"; cancelAnimationFrame(graph.raf);
+  }
+  $("forumView").style.display = forum.on ? "block" : "none";
+  $("log").style.display = forum.on ? "none" : "";
+  $("composer").style.display = forum.on ? "none" : "";
+  $("forumToggle").textContent = forum.on ? "💬 Chat" : "🏛 Forum";
+  if (forum.on) { forum.threadId = null; loadForumList(); }
+}
+$("forumToggle").addEventListener("click", toggleForum);
+
+function forumWhen(ts) { return ts ? new Date(ts * 1000).toLocaleString() : ""; }
+
+async function loadForumList() {
+  const el = $("forumView");
+  el.innerHTML = '<div class="hint">Loading…</div>';
+  let threads;
+  try { threads = (await api("GET", "/api/forum")).threads || []; }
+  catch (e) { el.innerHTML = '<div class="hint">Error: ' + escapeHtml(e.message) + '</div>'; return; }
+  const ask =
+    '<div style="display:flex; gap:8px; margin-bottom:14px;">' +
+    '<input type="text" id="forumAsk" placeholder="Ask the council a question…" style="flex:1;"/>' +
+    '<button id="forumAskBtn" type="button">Ask the council</button></div>' +
+    '<div id="forumAskMsg" class="hint" style="margin-bottom:10px;"></div>';
+  if (!threads.length) {
+    el.innerHTML = ask + '<div class="hint">No deliberations yet. Ask the council above, ' +
+      'or let it argue its own conflicts during sleep.</div>';
+  } else {
+    el.innerHTML = ask + threads.map(t => {
+      const badge = t.status === "closed"
+        ? '<span style="color:#8896a6;">● closed</span>'
+        : '<span style="color:#7fd17f;">● open</span>';
+      return `<div class="mem forum-thread" data-id="${t.id}" style="cursor:pointer;">` +
+        `<div class="text"><b>${escapeHtml(t.question)}</b></div>` +
+        `<div class="meta">${badge} · ${escapeHtml(t.source)} · ${t.posts} posts · ${forumWhen(t.created_at)}</div></div>`;
+    }).join("");
+    el.querySelectorAll(".forum-thread").forEach(d =>
+      d.addEventListener("click", () => openForumThread(parseInt(d.dataset.id))));
+  }
+  $("forumAskBtn").addEventListener("click", forumAsk);
+  $("forumAsk").addEventListener("keydown", e => { if (e.key === "Enter") forumAsk(); });
+}
+
+async function forumAsk() {
+  const q = $("forumAsk").value.trim(); if (!q) return;
+  $("forumAskMsg").textContent = "The council is convening across the fleet… (this can take a while)";
+  $("forumAskBtn").disabled = true;
+  try {
+    const r = await api("POST", "/api/forum", { action: "ask", question: q });
+    if (r.thread_id) openForumThread(r.thread_id); else loadForumList();
+  } catch (e) { $("forumAskMsg").textContent = "Error: " + e.message; }
+  finally { $("forumAskBtn").disabled = false; }
+}
+
+async function openForumThread(id) {
+  forum.threadId = id;
+  const el = $("forumView");
+  el.innerHTML = '<div class="hint">Loading…</div>';
+  let t;
+  try { t = await api("GET", "/api/forum/thread?id=" + id); }
+  catch (e) { el.innerHTML = '<div class="hint">Error: ' + escapeHtml(e.message) + '</div>'; return; }
+  const closed = t.status === "closed";
+  const head =
+    '<button class="secondary" id="forumBack" type="button">← All threads</button>' +
+    `<h2 style="margin:10px 0 4px;">${escapeHtml(t.question)}</h2>` +
+    `<div class="hint" style="margin-bottom:10px;">${escapeHtml(t.source)} · ${closed ? "closed" : "open"} · ${forumWhen(t.created_at)} ` +
+    `<button class="secondary" id="forumStatus" type="button">${closed ? "Reopen" : "Close"}</button> ` +
+    `<button class="secondary" id="forumDelThread" type="button">Delete thread</button></div>`;
+  const posts = (t.posts || []).map(p => {
+    const where = (p.node || p.model) ? ` · ${escapeHtml([p.node, p.model].filter(Boolean).join(" @ "))}` : "";
+    const isVerdict = p.kind === "verdict";
+    const style = isVerdict
+      ? 'border-left:3px solid #7fa8d1; background:#1a2230;'
+      : (p.kind === "comment" ? 'border-left:3px solid #6f7a8a;' : '');
+    return `<div class="mem" style="${style}">` +
+      `<div class="meta"><b>${escapeHtml(p.author)}</b> · ${escapeHtml(p.kind)}${where} · ${forumWhen(p.created_at)} ` +
+      `<a href="#" class="forum-delpost" data-id="${p.id}" style="color:#c98; margin-left:6px;">delete</a></div>` +
+      `<div class="text" style="white-space:pre-wrap;">${escapeHtml(p.content)}</div></div>`;
+  }).join("");
+  const comment =
+    '<div style="display:flex; gap:8px; margin-top:12px;">' +
+    '<input type="text" id="forumComment" placeholder="Add a comment…" style="flex:1;"/>' +
+    '<button id="forumCommentBtn" type="button">Comment</button></div>';
+  el.innerHTML = head + posts + comment;
+  $("forumBack").addEventListener("click", loadForumList);
+  $("forumStatus").addEventListener("click", async () => {
+    await api("POST", "/api/forum", { action: closed ? "reopen" : "close", thread_id: id });
+    openForumThread(id);
+  });
+  $("forumDelThread").addEventListener("click", async () => {
+    await api("POST", "/api/forum", { action: "delete_thread", thread_id: id });
+    loadForumList();
+  });
+  el.querySelectorAll(".forum-delpost").forEach(a => a.addEventListener("click", async (e) => {
+    e.preventDefault();
+    await api("POST", "/api/forum", { action: "delete_post", post_id: parseInt(a.dataset.id) });
+    openForumThread(id);
+  }));
+  const send = async () => {
+    const text = $("forumComment").value.trim(); if (!text) return;
+    await api("POST", "/api/forum", { action: "comment", thread_id: id, text });
+    openForumThread(id);
+  };
+  $("forumCommentBtn").addEventListener("click", send);
+  $("forumComment").addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+}
 
 // Zoom (scroll, toward the cursor) + pan (drag the background). A background click with no drag
 // deselects. Node clicks are handled on the node (stopPropagation), so dragging never starts there.

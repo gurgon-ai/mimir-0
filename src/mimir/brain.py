@@ -89,10 +89,14 @@ from .sanitize import StreamTagStripper, strip_epistemic_tags
 from .storage.gateway import StorageGateway
 from .storage.models import Memory, MemoryKind, Procedure
 from .storage.repo import (
+    add_forum_post,
     bump_procedure_uses,
+    delete_forum_post,
+    delete_forum_thread,
     delete_memory,
     disabled_models,
     disabled_nodes,
+    get_forum_thread,
     interaction_history,
     kv_get,
     kv_set,
@@ -100,12 +104,14 @@ from .storage.repo import (
     latest_self_model,
     latest_sentinel_note,
     list_catalogue,
+    list_forum_threads,
     list_memories,
     list_sessions,
     recent_conversation,
     record_access,
     record_conversation_turn,
     record_interaction,
+    set_forum_thread_status,
     set_model_enabled,
     set_node_enabled,
     update_catalogue_speed,
@@ -1440,6 +1446,33 @@ class Mimir:
         understanding (DESIGN §0.4, §4, §5).
         """
         return deliberate(self._model, self._storage, self._embedder, question=question, user=user)
+
+    # -- the council forum (browsable deliberations + housekeeping; DESIGN §5a) --------
+
+    def forum_threads(self) -> list[dict[str, Any]]:
+        """All forum threads (deliberations), newest first, with post counts."""
+        return list_forum_threads(self._storage)
+
+    def forum_thread(self, thread_id: int) -> dict[str, Any] | None:
+        """One thread with its posts (persona positions, verdict, comments), or None."""
+        return get_forum_thread(self._storage, thread_id)
+
+    def forum_comment(self, thread_id: int, text: str, *, user: str | None = None) -> None:
+        """Add a user comment to a thread (annotation only — not fed back into reasoning)."""
+        add_forum_post(self._storage, thread_id=thread_id, author=user or "you",
+                       kind="comment", content=text)
+
+    def forum_set_status(self, thread_id: int, status: str) -> None:
+        """Close or reopen a thread."""
+        if status not in ("open", "closed"):
+            raise ConfigError(f"bad thread status: {status!r}")
+        set_forum_thread_status(self._storage, thread_id, status)
+
+    def forum_delete_thread(self, thread_id: int) -> None:
+        delete_forum_thread(self._storage, thread_id)
+
+    def forum_delete_post(self, post_id: int) -> None:
+        delete_forum_post(self._storage, post_id)
 
     def wait_for_sentinel(self) -> None:
         """Block until the most recent turn's burst (note, self-model) has drained (DESIGN §5a)."""

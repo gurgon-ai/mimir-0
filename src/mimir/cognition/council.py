@@ -25,7 +25,7 @@ from ..prompts import (
 )
 from ..storage.gateway import StorageGateway
 from ..storage.models import EvidenceTier, Memory, MemoryKind
-from ..storage.repo import save_memory
+from ..storage.repo import add_forum_post, create_forum_thread, save_memory
 
 log = logging.getLogger("mimir.council")
 
@@ -46,6 +46,7 @@ class CouncilResult:
     positions: list[Position]
     verdict: str
     memory_id: int | None
+    thread_id: int | None = None  # the persisted forum thread for this deliberation
 
 
 def _eligible_models(model: ModelGateway) -> list[str]:
@@ -153,4 +154,28 @@ def deliberate(
         user=user,
     )
     save_memory(storage, mem)
-    return CouncilResult(question=question, positions=positions, verdict=verdict, memory_id=mem.id)
+    thread_id = _persist_thread(storage, question, positions, verdict, provenance)
+    return CouncilResult(
+        question=question, positions=positions, verdict=verdict, memory_id=mem.id,
+        thread_id=thread_id,
+    )
+
+
+def _persist_thread(
+    storage: StorageGateway, question: str, positions: list[Position], verdict: str, source: str,
+) -> int | None:
+    """Persist the deliberation as a browsable forum thread (positions + verdict). Best-effort —
+    a forum write must never sink the deliberation, whose verdict is already saved (§10)."""
+    try:
+        thread_id = create_forum_thread(storage, question=question, source=source, verdict=verdict)
+        for pos in positions:
+            add_forum_post(
+                storage, thread_id=thread_id, author=pos.persona, kind="position",
+                content=pos.text, model=pos.model, node=pos.node,
+            )
+        add_forum_post(storage, thread_id=thread_id, author="synthesis", kind="verdict",
+                       content=verdict)
+        return thread_id
+    except Exception as exc:
+        log.warning("council: could not persist forum thread: %s", exc)
+        return None

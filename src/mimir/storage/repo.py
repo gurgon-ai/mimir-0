@@ -181,6 +181,114 @@ def kv_set(gateway: StorageGateway, key: str, value: str) -> None:
     gateway.submit(_write)
 
 
+# -- the council forum (DESIGN §5a) ---------------------------------------------------
+
+def create_forum_thread(
+    gateway: StorageGateway, *, question: str, source: str = "council", verdict: str = "",
+) -> int:
+    """Open a forum thread for a deliberation; returns its id."""
+    ts = time.time()
+
+    def _write(conn: sqlite3.Connection) -> int:
+        cur = conn.execute(
+            "INSERT INTO forum_threads (question, status, source, verdict, created_at) "
+            "VALUES (?, 'open', ?, ?, ?)",
+            (question, source, verdict, ts),
+        )
+        return int(cur.lastrowid or 0)
+
+    return gateway.submit(_write)
+
+
+def add_forum_post(
+    gateway: StorageGateway, *, thread_id: int, author: str, kind: str, content: str,
+    model: str = "", node: str = "",
+) -> None:
+    """Append a post (persona position, verdict, or user comment) to a thread."""
+    ts = time.time()
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "INSERT INTO forum_posts (thread_id, author, kind, model, node, content, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (thread_id, author, kind, model, node, content, ts),
+        )
+
+    gateway.submit(_write)
+
+
+def set_forum_thread_verdict(gateway: StorageGateway, thread_id: int, verdict: str) -> None:
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute("UPDATE forum_threads SET verdict = ? WHERE id = ?", (verdict, thread_id))
+
+    gateway.submit(_write)
+
+
+def set_forum_thread_status(gateway: StorageGateway, thread_id: int, status: str) -> None:
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute("UPDATE forum_threads SET status = ? WHERE id = ?", (status, thread_id))
+
+    gateway.submit(_write)
+
+
+def delete_forum_thread(gateway: StorageGateway, thread_id: int) -> None:
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute("DELETE FROM forum_posts WHERE thread_id = ?", (thread_id,))
+        conn.execute("DELETE FROM forum_threads WHERE id = ?", (thread_id,))
+
+    gateway.submit(_write)
+
+
+def delete_forum_post(gateway: StorageGateway, post_id: int) -> None:
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute("DELETE FROM forum_posts WHERE id = ?", (post_id,))
+
+    gateway.submit(_write)
+
+
+def list_forum_threads(gateway: StorageGateway) -> list[dict[str, Any]]:
+    """All threads, newest first, each with its post count (for the forum list)."""
+    def _read(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+        rows = conn.execute(
+            "SELECT t.id, t.question, t.status, t.source, t.verdict, t.created_at, "
+            "       (SELECT COUNT(*) FROM forum_posts p WHERE p.thread_id = t.id) "
+            "FROM forum_threads t ORDER BY t.created_at DESC"
+        ).fetchall()
+        return [
+            {"id": r[0], "question": r[1], "status": r[2], "source": r[3], "verdict": r[4],
+             "created_at": r[5], "posts": r[6]}
+            for r in rows
+        ]
+
+    return gateway.read(_read)
+
+
+def get_forum_thread(gateway: StorageGateway, thread_id: int) -> dict[str, Any] | None:
+    """One thread with all its posts in time order, or ``None`` if it's gone."""
+    def _read(conn: sqlite3.Connection) -> dict[str, Any] | None:
+        t = conn.execute(
+            "SELECT id, question, status, source, verdict, created_at FROM forum_threads "
+            "WHERE id = ?", (thread_id,)
+        ).fetchone()
+        if t is None:
+            return None
+        posts = conn.execute(
+            "SELECT id, author, kind, model, node, content, created_at FROM forum_posts "
+            "WHERE thread_id = ? ORDER BY created_at ASC, id ASC", (thread_id,)
+        ).fetchall()
+        return {
+            "id": t[0], "question": t[1], "status": t[2], "source": t[3], "verdict": t[4],
+            "created_at": t[5],
+            "posts": [
+                {"id": p[0], "author": p[1], "kind": p[2], "model": p[3], "node": p[4],
+                 "content": p[5], "created_at": p[6]}
+                for p in posts
+            ],
+        }
+
+    return gateway.read(_read)
+
+
 def save_narrative(
     gateway: StorageGateway, *, scope: str, period: str, narrative: str,
     source_count: int = 0, created_at: float | None = None,

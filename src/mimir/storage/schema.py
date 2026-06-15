@@ -292,6 +292,34 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             ")",
         ],
     ),
+    (
+        20,
+        [
+            # The council forum (DESIGN §5a): deliberations persisted as browsable threads so the
+            # user can read the debate, comment, and keep house (close/delete). A thread is one
+            # question; posts are the persona positions (tagged with the node+model that argued
+            # them), the synthesized verdict, and user comments.
+            "CREATE TABLE forum_threads ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  question TEXT NOT NULL,"
+            "  status TEXT NOT NULL DEFAULT 'open',"   # open | closed
+            "  source TEXT NOT NULL DEFAULT 'council',"  # council | sleep deliberation | user
+            "  verdict TEXT NOT NULL DEFAULT '',"
+            "  created_at REAL NOT NULL"
+            ")",
+            "CREATE TABLE forum_posts ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  thread_id INTEGER NOT NULL,"
+            "  author TEXT NOT NULL,"                  # persona name | 'synthesis' | user name
+            "  kind TEXT NOT NULL,"                    # position | verdict | comment
+            "  model TEXT NOT NULL DEFAULT '',"
+            "  node TEXT NOT NULL DEFAULT '',"
+            "  content TEXT NOT NULL,"
+            "  created_at REAL NOT NULL"
+            ")",
+            "CREATE INDEX idx_forum_posts_thread ON forum_posts(thread_id)",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -365,4 +393,6 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
     "narratives": {"id", "scope", "period", "narrative", "source_count", "created_at"},
     "conversation": {"id", "user", "user_text", "reply", "created_at", "session_id"},
     "kv": {"key", "value", "updated_at"},
+    "forum_threads": {"id", "question", "status", "source", "verdict", "created_at"},
+    "forum_posts": {"id", "thread_id", "author", "kind", "model", "node", "content", "created_at"},
 }

@@ -125,6 +125,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **The council forum — deliberations you can read, comment on, and keep house in (DESIGN §5a).** A
+  `🏛 Forum` toggle swaps the chat panel for a forum (like the graph view): every deliberation —
+  whether you convened it, asked from the forum, or the sleep cycle self-initiated it — now persists
+  as a **thread** with one **post per persona** (tagged with the node + model that argued it, so the
+  fleet fan-out is visible), the synthesized **verdict**, and your **comments**. Full-admin
+  housekeeping: comment, close/reopen, delete a post, delete a thread; an "Ask the council" box seeds
+  a fresh (fleet-distributed) deliberation. Comments are annotations — they don't feed back into the
+  reasoning. New tables `forum_threads`/`forum_posts` (schema v20), forum repo CRUD, `Mimir.forum_*`,
+  `GET /api/forum` + `/api/forum/thread`, `POST /api/forum` (ask/comment/close/reopen/delete).
 - **Self-directed adversarial reasoning in the sleep cycle (DESIGN §5a).** The inner council is no
   longer only something you invoke by hand — during sleep the system **surfaces its own conflicts and
   argues them**. A new `deliberate` phase (after consolidate) deterministically surfaces tensions
