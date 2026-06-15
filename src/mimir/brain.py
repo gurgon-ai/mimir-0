@@ -87,10 +87,12 @@ from .storage.repo import (
     disabled_models,
     disabled_nodes,
     interaction_history,
+    last_conversation_meta,
     latest_self_model,
     latest_sentinel_note,
     list_catalogue,
     list_memories,
+    list_sessions,
     recent_conversation,
     record_access,
     record_conversation_turn,
@@ -113,6 +115,7 @@ _PROBE_TIMEOUT_S = 20.0
 _PROBE_PREDICT = 64  # cap the probe generation — long enough to time throughput, still cheap
 _FALLBACK_DEPTH = 4  # how many acceptable models deep a role's fallback chain runs (best first)
 _HISTORY_TURNS = 6   # recent exchanges replayed to the model as real messages (continuity)
+_SESSION_GAP_S = 6 * 3600  # a fresh boot continues the last conversation only if it's this recent
 
 
 def _latency_staleness(info: dict[str, object] | None) -> float:
@@ -196,6 +199,7 @@ class Mimir:
 
         self._last_sentinel_error: BaseException | None = None
         self._turn_count = 0
+        self._session_id: str | None = None  # the current conversation; resolved lazily on turn 1
         self._turn_active = False  # True while a turn is generating — background yields to it (§5a)
         # The burst worker: all post-response cognition (sentinel, self-model, working memory,
         # sleep) is scheduled through it — priority-ordered, slot-capped, interruptible — instead of
@@ -373,18 +377,53 @@ class Mimir:
         """The temporal-narrative arc (month → week → lately) for the prompt, or ``None``."""
         return render_recent_history(self._storage)
 
-    def _history_messages(self, user: str | None) -> list[dict[str, str]]:
-        """Recent exchanges as real chat messages, so the model has genuine conversational
-        continuity (not just summarized text) — the session-history replay (DESIGN §3a)."""
+    def _history_messages(self, user: str | None, session_id: str) -> list[dict[str, str]]:
+        """The current session's recent exchanges as real chat messages, so the model has genuine
+        continuity (not just summarized text) — scoped to this conversation so a new one starts
+        clean (DESIGN §3a)."""
         msgs: list[dict[str, str]] = []
-        for turn in recent_conversation(self._storage, user=user, limit=_HISTORY_TURNS):
+        for turn in recent_conversation(
+            self._storage, user=user, limit=_HISTORY_TURNS, session_id=session_id
+        ):
             msgs.append({"role": "user", "content": turn["user_text"]})
             msgs.append({"role": "assistant", "content": turn["reply"]})
         return msgs
 
-    def history(self, *, user: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
-        """The durable conversation log, oldest→newest — what the UI restores on load (§3a)."""
-        return recent_conversation(self._storage, user=user, limit=limit)
+    def _resolve_session(self) -> str:
+        """The current conversation's id. On the first turn it continues the last conversation if it
+        was recent, else starts a new one; explicit new/resume pin it thereafter (DESIGN §3a)."""
+        if self._session_id is None:
+            meta = last_conversation_meta(self._storage)
+            if (meta and meta["session_id"]
+                    and (time.time() - meta["created_at"]) < _SESSION_GAP_S):
+                self._session_id = str(meta["session_id"])
+            else:
+                self._session_id = self._new_session_id()
+        return self._session_id
+
+    @staticmethod
+    def _new_session_id() -> str:
+        return f"s{int(time.time() * 1000)}"
+
+    def start_new_session(self) -> str:
+        """Begin a fresh conversation — subsequent turns won't carry the prior one's context."""
+        self._session_id = self._new_session_id()
+        return self._session_id
+
+    def resume_session(self, session_id: str) -> None:
+        """Continue an earlier conversation — its recent turns replay to the model again."""
+        self._session_id = session_id
+
+    def sessions(self, *, user: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        """Past conversations (most recent first) with a one-line summary — for the dropdown."""
+        return list_sessions(self._storage, user=user, limit=limit)
+
+    def history(
+        self, *, user: str | None = None, limit: int = 50, session_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """The durable conversation log, oldest→newest — restored by the UI. ``session_id`` scopes
+        it to one conversation (§3a)."""
+        return recent_conversation(self._storage, user=user, limit=limit, session_id=session_id)
 
     def generate_narratives(self) -> dict[str, Any]:
         """Run the temporal-narrative cycle now (daily entry + weekly/monthly roll-up), sync.
@@ -407,6 +446,7 @@ class Mimir:
         now = time.time()
         awareness = self._temporal_awareness(user, now)
         record_interaction(self._storage, now, user)
+        sid = self._resolve_session()
 
         # 0. Deterministic time-query intercept — answer "what day/season is it" with no model call
         #    (DESIGN §3e). Still recorded as an exchange (continuity), nothing to bake/reflect on.
@@ -419,7 +459,8 @@ class Mimir:
                 time_context=self._time_context(), now_ts=now,
             )
             record_exchange(self._storage, user=user, user_text=text, reply=intercept)
-            record_conversation_turn(self._storage, user=user, user_text=text, reply=intercept)
+            record_conversation_turn(self._storage, user=user, user_text=text, reply=intercept,
+                                     session_id=sid)
             return TurnResult(reply=intercept, context=bundle, baked=[])
 
         self._turn_active = True  # foreground in progress — the burst yields to it (§5a)
@@ -464,7 +505,7 @@ class Mimir:
                     "chat",
                     [
                         {"role": "system", "content": bundle.prompt},
-                        *self._history_messages(user),
+                        *self._history_messages(user, sid),
                         {"role": "user", "content": text},
                     ],
                 )
@@ -481,7 +522,8 @@ class Mimir:
                 primary_user=self.config.primary_user,
             )
             record_exchange(self._storage, user=user, user_text=text, reply=reply)
-            record_conversation_turn(self._storage, user=user, user_text=text, reply=reply)
+            record_conversation_turn(self._storage, user=user, user_text=text, reply=reply,
+                                     session_id=sid)
         finally:
             self._turn_active = False
 
@@ -509,6 +551,7 @@ class Mimir:
         now = time.time()
         awareness = self._temporal_awareness(user, now)
         record_interaction(self._storage, now, user)
+        sid = self._resolve_session()
         intercept = self.maybe_time_answer(text)
         if intercept is not None:
             bundle = build_context(
@@ -518,7 +561,8 @@ class Mimir:
                 time_context=self._time_context(), now_ts=now,
             )
             record_exchange(self._storage, user=user, user_text=text, reply=intercept)
-            record_conversation_turn(self._storage, user=user, user_text=text, reply=intercept)
+            record_conversation_turn(self._storage, user=user, user_text=text, reply=intercept,
+                                     session_id=sid)
             yield intercept
             return bundle.introspect()
 
@@ -553,7 +597,7 @@ class Mimir:
             )
             messages = [
                 {"role": "system", "content": bundle.prompt},
-                *self._history_messages(user),
+                *self._history_messages(user, sid),
                 {"role": "user", "content": text},
             ]
 
@@ -582,7 +626,8 @@ class Mimir:
                 primary_user=self.config.primary_user,
             )
             record_exchange(self._storage, user=user, user_text=text, reply=reply)
-            record_conversation_turn(self._storage, user=user, user_text=text, reply=reply)
+            record_conversation_turn(self._storage, user=user, user_text=text, reply=reply,
+                                     session_id=sid)
         finally:
             self._turn_active = False
 

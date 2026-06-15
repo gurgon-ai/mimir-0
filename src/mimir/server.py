@@ -156,6 +156,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._onboarding_payload())
             elif route == "/api/history":
                 self._send_json(self._history(params))
+            elif route == "/api/sessions":
+                self._send_json(self._sessions())
             elif route == "/api/mind":
                 self._send_json(self._mind())
             elif route == "/api/memories":
@@ -210,6 +212,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._establish(body))
             elif route == "/api/onboarding/answer":
                 self._send_json(self._onboarding_answer(body))
+            elif route == "/api/session":
+                self._send_json(self._session_action(body))
             elif route == "/api/ingest":
                 self._send_json(self._ingest(body))
             elif route == "/api/sleep":
@@ -288,12 +292,30 @@ class _Handler(BaseHTTPRequestHandler):
             return self._identity_payload()
 
     def _history(self, params: dict[str, list[str]]) -> dict[str, Any]:
-        """The durable conversation log, for restoring the chat on page load."""
+        """The durable conversation log (optionally one session), for restoring the chat."""
         try:
             limit = max(1, min(200, int((params.get("limit") or ["50"])[0])))
         except ValueError:
             limit = 50
-        return {"turns": self.server.brain.history(user="operator", limit=limit)}
+        session = (params.get("session") or [None])[0] or None
+        return {"turns": self.server.brain.history(
+            user="operator", limit=limit, session_id=session)}
+
+    def _sessions(self) -> dict[str, Any]:
+        """Past conversations (summary + timestamps) for the chat dropdown."""
+        return {"sessions": self.server.brain.sessions(user="operator")}
+
+    def _session_action(self, body: dict[str, Any]) -> dict[str, Any]:
+        action = str(body.get("action", "")).strip()
+        if action == "new":
+            return {"session_id": self.server.brain.start_new_session()}
+        if action == "resume":
+            sid = str(body.get("session_id", "")).strip()
+            if not sid:
+                raise ValueError("'session_id' is required to resume")
+            self.server.brain.resume_session(sid)
+            return {"session_id": sid}
+        raise ValueError("'action' must be 'new' or 'resume'")
 
     def _onboarding_payload(self) -> dict[str, Any]:
         """The seeding interview: every question + current answer, and what's still pending."""
@@ -879,6 +901,8 @@ _HTML = """<!doctype html>
   .msg .body.thinking { color:#8a94a3; font-style:italic; animation: pulse 1.1s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity:.4 } 50% { opacity:1 } }
   .meta { font-size:11px; color:#6f7a8a; margin-top:4px; }
+  #sessionBar { display:flex; gap:8px; align-items:center; padding:8px 12px; border-bottom:1px solid #232a35; }
+  #sessionSelect { flex:1; min-width:0; background:#11161d; border:1px solid #2b333f; color:#d7dde5; border-radius:8px; padding:6px 9px; font:inherit; }
   #composer { display:flex; gap:8px; padding:12px; border-top:1px solid #232a35; }
   #composer input[type=text] { flex:1; }
   input[type=text], textarea { background:#11161d; border:1px solid #2b333f; color:#d7dde5; border-radius:8px; padding:9px 11px; font:inherit; }
@@ -940,6 +964,12 @@ _HTML = """<!doctype html>
 </header>
 <main>
   <div id="chat">
+    <div id="sessionBar">
+      <span class="hint" style="white-space:nowrap;">Conversation:</span>
+      <select id="sessionSelect" title="Past conversations — pick one and Restore to view/continue it."></select>
+      <button class="secondary" id="sessionRestore" type="button" title="Load the selected conversation and continue it.">Restore</button>
+      <button class="secondary" id="sessionNew" type="button" title="Start a fresh conversation.">+ New</button>
+    </div>
     <div id="benchBoard" style="display:none; flex:1; overflow:auto; padding:18px;"></div>
     <div id="log"></div>
     <div id="interviewStrip" style="display:none;">
@@ -965,7 +995,6 @@ _HTML = """<!doctype html>
       <button data-tab="identity" class="active">Identity</button>
       <button data-tab="profile">Profile</button>
       <button data-tab="mind">Mind</button>
-      <button data-tab="history">History</button>
       <button data-tab="memories">Memories</button>
       <button data-tab="graph">Graph</button>
       <button data-tab="procedures">Habits</button>
@@ -981,16 +1010,6 @@ _HTML = """<!doctype html>
         <button id="saveIdent" type="button">Save</button>
       </div>
       <div id="identMsg"></div>
-    </div>
-
-    <div class="tabpane hidden" id="tab-history">
-      <h2>Conversation history</h2>
-      <div class="hint" style="margin-bottom:8px;">The durable log of past turns (oldest first, newest at the bottom). Survives restarts; the chat pane restores the most recent on load.</div>
-      <div class="row" style="margin-bottom:10px;">
-        <button class="secondary" id="historyReloadBtn" type="button">Reload</button>
-      </div>
-      <div id="historyMsg" class="hint" style="min-height:14px;"></div>
-      <div id="historyList"></div>
     </div>
 
     <div class="tabpane hidden" id="tab-profile">
@@ -1207,6 +1226,9 @@ $("composer").addEventListener("submit", async (e) => {
   try { await streamTurn(text); }
   catch (e) { addMsg("mimir", "[error] " + e.message); }
   $("send").disabled = false; $("text").focus(); refreshState();
+  // Refresh the conversation dropdown (a brand-new session appears; counts update) and keep the
+  // current (most recent) one selected.
+  loadSessions().then(s => { if (s.length) $("sessionSelect").value = s[0].session_id || ""; });
 });
 
 $("saveIdent").addEventListener("click", async () => {
@@ -1234,35 +1256,47 @@ $("ingestBtn").addEventListener("click", async () => {
   } catch (e) { $("ingestResult").textContent = "Error: " + e.message; }
 });
 
-async function loadHistory() {
-  const list = $("historyList");
+// --- session dropdown (past conversations: select + restore + new) ---
+async function loadSessions(selectId) {
   try {
-    const data = await api("GET", "/api/history?limit=200");
-    const turns = data.turns || [];
-    list.innerHTML = "";
-    $("historyMsg").textContent = turns.length ? `${turns.length} turn(s) retained.` : "";
-    if (!turns.length) { list.innerHTML = '<div class="hint">No conversation yet.</div>'; return; }
-    turns.forEach(t => {
-      const d = document.createElement("div"); d.className = "mem";
-      const u = document.createElement("div"); u.className = "text"; u.style.color = "#9fd0ff";
-      u.textContent = "you: " + t.user_text;
-      const a = document.createElement("div"); a.className = "text"; a.style.marginTop = "4px";
-      a.textContent = "mimir: " + t.reply;
-      d.appendChild(u); d.appendChild(a);
-      if (t.created_at) {
-        const meta = document.createElement("div"); meta.className = "meta";
-        meta.textContent = new Date(t.created_at * 1000).toLocaleString();
-        d.appendChild(meta);
-      }
-      list.appendChild(d);
+    const data = await api("GET", "/api/sessions");
+    const sel = $("sessionSelect"); sel.innerHTML = "";
+    const sessions = data.sessions || [];
+    if (!sessions.length) {
+      const o = document.createElement("option"); o.value = ""; o.textContent = "(no past conversations)";
+      sel.appendChild(o); return sessions;
+    }
+    sessions.forEach(s => {
+      const o = document.createElement("option"); o.value = s.session_id || "";
+      const when = s.last ? new Date(s.last * 1000).toLocaleDateString() : "";
+      const sum = (s.summary || "(empty)").replace(/\\s+/g, " ").slice(0, 50);
+      o.textContent = `${sum} · ${s.count} msg · ${when}`;
+      sel.appendChild(o);
     });
-    list.scrollTop = list.scrollHeight;  // newest at the bottom, like the chat
-  } catch (e) { list.innerHTML = "error: " + e.message; }
+    if (selectId != null) sel.value = selectId;
+    return sessions;
+  } catch (e) { return []; }
 }
-$("historyReloadBtn").addEventListener("click", loadHistory);
+
+async function restoreSession(sessionId) {
+  $("log").innerHTML = "";
+  const q = sessionId ? `&session=${encodeURIComponent(sessionId)}` : "";
+  const data = await api("GET", "/api/history?limit=200" + q);
+  (data.turns || []).forEach(t => { addMsg("you", t.user_text); addMsg("mimir", t.reply); });
+}
+
+$("sessionRestore").addEventListener("click", async () => {
+  const sid = $("sessionSelect").value; if (!sid) return;
+  try { await api("POST", "/api/session", { action: "resume", session_id: sid }); await restoreSession(sid); }
+  catch (e) { addMsg("mimir", "[error] " + e.message); }
+});
+$("sessionNew").addEventListener("click", async () => {
+  try { await api("POST", "/api/session", { action: "new" }); $("log").innerHTML = ""; await loadSessions(""); }
+  catch (e) { addMsg("mimir", "[error] " + e.message); }
+});
 
 // --- tabs ---
-const loaders = { mind: loadMind, history: loadHistory, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet };
+const loaders = { mind: loadMind, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet };
 document.querySelectorAll(".tabs button").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));
@@ -2126,17 +2160,19 @@ async function onboardingNudge() {
   } catch (_) {}
 }
 
-// Restore the durable conversation on load (a refresh/restart no longer loses the chat), then nudge.
-async function restoreHistory() {
-  try {
-    const data = await api("GET", "/api/history?limit=50");
-    (data.turns || []).forEach(t => { addMsg("you", t.user_text); addMsg("mimir", t.reply); });
-    return (data.turns || []).length;
-  } catch (_) { return 0; }
+// On load: populate the conversation dropdown and restore the most recent one into the chat (a
+// refresh/restart no longer loses it). If there's no history yet, nudge the onboarding interview.
+async function initConversation() {
+  const sessions = await loadSessions();
+  if (sessions.length && sessions[0].session_id) {
+    $("sessionSelect").value = sessions[0].session_id;
+    await restoreSession(sessions[0].session_id);
+  } else {
+    onboardingNudge();
+  }
 }
 
-refreshState(); loadIdentity(); resumeFleetWork();
-restoreHistory().then(n => { if (!n) onboardingNudge(); });
+refreshState(); loadIdentity(); resumeFleetWork(); initConversation();
 </script>
 </body>
 </html>

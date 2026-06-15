@@ -93,6 +93,14 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   win on small models; (3) it survives a process restart (a new `Mimir` on the same DB has the
   history). `Mimir.history()`, `repo.{record_conversation_turn,recent_conversation}`. A reasonable,
   single-stream approximation of the home AI's session system.
+- **Conversations as selectable sessions (home-AI style).** Turns are grouped into **sessions** (a
+  new one on an explicit "+ New" or a long idle gap; schema v17 `conversation.session_id`). A
+  **dropdown above the chat** lists past conversations, each with a one-line summary (its first
+  message) + turn count + date; **Restore** loads a conversation back into the chat and continues it,
+  **+ New** starts a fresh one. Replayed model context is scoped to the active session, so a new
+  conversation starts clean and resuming an old one replays its tail. `Mimir.{sessions,
+  start_new_session, resume_session}`, `GET /api/sessions`, `POST /api/session`,
+  `GET /api/history?session=…`. (Replaces the flat History tab.)
 - **The burst worker — post-response cognition as a scheduled idle-window pool (brain slice 3;
   DESIGN §5a).** `cognition/burst.py` is the generic scheduler extracted from the home AI, stripped to
   a universal skeleton: **pent-up-demand priority** (`effective = base − starved_s × rate`, so starved

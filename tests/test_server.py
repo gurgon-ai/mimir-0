@@ -390,9 +390,31 @@ def test_history_endpoint_and_restore(base_url: str) -> None:
     assert status == 200
     assert any("hello there" in t["user_text"] for t in data["turns"])
     _, html = _get_html(base_url + "/")
-    assert "restoreHistory" in html  # the UI repopulates the chat from the log on load
+    assert 'id="sessionBar"' in html  # the conversation dropdown restores into the chat on load
 
 
-def test_page_has_history_tab(base_url: str) -> None:
-    _, html = _get_html(base_url + "/")
-    assert 'data-tab="history"' in html and 'id="historyList"' in html
+def test_sessions_list_and_switch(base_url: str) -> None:
+    # A turn creates the current session; listing shows it with a summary line.
+    _json("POST", base_url + "/api/turn", {"text": "teal is my favorite", "user": "operator"})
+    status, data = _json("GET", base_url + "/api/sessions")
+    assert status == 200 and data["sessions"]
+    first = data["sessions"][0]
+    assert "teal is my favorite" in (first["summary"] or "") and first["count"] >= 1
+
+    # Start a new conversation, then a turn lands in a DISTINCT session.
+    s2, new = _json("POST", base_url + "/api/session", {"action": "new"})
+    assert s2 == 200 and new["session_id"]
+    _json("POST", base_url + "/api/turn", {"text": "different topic now", "user": "operator"})
+    _, after = _json("GET", base_url + "/api/sessions")
+    assert len(after["sessions"]) >= 2
+
+    # Restoring the original session returns only its turns.
+    sid = first["session_id"]
+    _json("POST", base_url + "/api/session", {"action": "resume", "session_id": sid})
+    _, hist = _json("GET", base_url + f"/api/history?session={sid}")
+    assert all("different topic" not in t["user_text"] for t in hist["turns"])
+
+
+def test_session_action_validates(base_url: str) -> None:
+    status, data = _json("POST", base_url + "/api/session", {"action": "bogus"})
+    assert status == 400 and "error" in data
