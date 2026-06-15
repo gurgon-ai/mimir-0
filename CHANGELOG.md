@@ -69,6 +69,11 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   before any benchmark.
 
 ### Fixed
+- **The web UI columns scroll independently; the chat header + input bar stay put.** The page used a
+  brittle `height: calc(100vh - 50px)` and missing flex `min-height:0`, so the whole window scrolled
+  as one. Now the app fills the viewport and never scrolls as a whole: the left column's **chat log
+  (or graph/forum takeover view) scrolls on its own** between a pinned session bar and a pinned
+  composer, and the **right column scrolls separately**.
 - **Manual role override can now target a specific edge node — not just a model.** The role dropdown
   collapsed to one entry per model name (routed to its fastest node, usually the local beast), so you
   couldn't pin a role onto an edge box, and a model living on several nodes showed only once. The

@@ -992,12 +992,17 @@ _HTML = """<!doctype html>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; background:#0e1116; color:#d7dde5; }
-  header { padding:12px 20px; border-bottom:1px solid #232a35; display:flex; align-items:center; gap:14px; }
+  /* App fills the viewport and never scrolls as a whole: header pinned, the two columns scroll on
+     their own. (min-height:0 lets a flex/grid child actually shrink so its child can scroll.) */
+  body { margin:0; font:15px/1.5 system-ui, sans-serif; background:#0e1116; color:#d7dde5;
+    height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+  header { flex:none; padding:12px 20px; border-bottom:1px solid #232a35; display:flex; align-items:center; gap:14px; }
   header h1 { font-size:18px; margin:0; letter-spacing:.5px; }
   header .status { font-size:12px; color:#8a94a3; }
-  main { display:grid; grid-template-columns: 1fr 360px; gap:0; height: calc(100vh - 50px); }
-  #chat { display:flex; flex-direction:column; border-right:1px solid #232a35; }
+  main { display:grid; grid-template-columns: 1fr 360px; gap:0; flex:1; min-height:0; }
+  #chat { display:flex; flex-direction:column; border-right:1px solid #232a35; min-height:0; }
+  /* The left column's scrolling region (chat log or a takeover view) — header + footer stay put. */
+  #log, #benchBoard, #forumView, #graphView { min-height:0; }
   #log { flex:1; overflow-y:auto; padding:18px; }
   .msg { margin:0 0 14px; max-width:80%; }
   .msg .who { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:#6f7a8a; margin-bottom:3px; }
@@ -1019,9 +1024,9 @@ _HTML = """<!doctype html>
   #graphInspect { display:none; position:absolute; top:12px; right:12px; width:300px; max-height:88%;
     overflow:auto; background:#11161d; border:1px solid #2b333f; border-radius:10px; padding:14px; }
   #graphInspect textarea { width:100%; min-height:90px; resize:vertical; }
-  #sessionBar { display:flex; gap:8px; align-items:center; padding:8px 12px; border-bottom:1px solid #232a35; }
+  #sessionBar { flex:none; display:flex; gap:8px; align-items:center; padding:8px 12px; border-bottom:1px solid #232a35; }
   #sessionSelect { flex:1; min-width:0; background:#11161d; border:1px solid #2b333f; color:#d7dde5; border-radius:8px; padding:6px 9px; font:inherit; }
-  #composer { display:flex; gap:8px; padding:12px; border-top:1px solid #232a35; }
+  #composer { flex:none; display:flex; gap:8px; padding:12px; border-top:1px solid #232a35; }
   #composer input[type=text] { flex:1; }
   input[type=text], textarea { background:#11161d; border:1px solid #2b333f; color:#d7dde5; border-radius:8px; padding:9px 11px; font:inherit; }
   button { background:#238636; color:#fff; border:0; border-radius:8px; padding:9px 14px; font:inherit; cursor:pointer; }
@@ -1030,7 +1035,7 @@ _HTML = """<!doctype html>
   button.done    { background:#1f7a37; }   /* green — completed */
   button.failed  { background:#b62324; }   /* red — errored */
   button:disabled { opacity:.5; cursor:default; }
-  aside { overflow-y:auto; padding:16px; }
+  aside { overflow-y:auto; min-height:0; padding:16px; }   /* right column scrolls independently */
   aside section { margin-bottom:26px; }
   aside h2 { font-size:13px; text-transform:uppercase; letter-spacing:.7px; color:#8a94a3; margin:0 0 10px; }
   .field { margin-bottom:9px; }
