@@ -144,3 +144,21 @@ def test_knowledge_truncates_under_tight_budget() -> None:
     assert knowledge.truncated
     assert len(bundle.retrieved_ids) < 20
     assert any("truncated" in w for w in bundle.warnings)
+
+
+def test_empty_recall_states_no_memory_rather_than_omitting() -> None:
+    # When recall is empty the knowledge section is still present and says so plainly, so the model
+    # answers "I don't have any memory of this" instead of confabulating (DESIGN §3d).
+    bundle = build_context(
+        query="what did I say about the gate?",
+        user="alex",
+        identity="You are Mimir.",
+        retrieved=[],
+        sentinel_note=None,
+        embed_mode=EmbeddingMode.BOOTSTRAP,
+        budget_tokens=2000,
+    )
+    know = next(s for s in bundle.sections if s.name == "knowledge")
+    assert "no stored memory" in know.body.lower()
+    assert know.substantive is False
+    assert bundle.source_count == 0  # still counts as no grounding (uncertainty gate still fires)

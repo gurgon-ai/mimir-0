@@ -97,11 +97,22 @@ def _build_knowledge_section(
     """Assemble the attributed knowledge section within its token budget.
 
     Memories arrive best-first. We admit lines until the budget is spent; anything dropped
-    marks the section truncated. Returns the section (or ``None`` if nothing relevant) and
-    the ids actually admitted (for access bookkeeping).
+    marks the section truncated. Returns the section and the ids actually admitted (for access
+    bookkeeping). When recall is **empty** the section is still rendered, stating plainly that there
+    is no memory — so the model says "I don't have any memory of this" rather than confabulating
+    (DESIGN §3d). Never silently absent.
     """
     if not retrieved:
-        return None, []
+        title = "What you know that's relevant:"
+        body = (f"{RECALL_OPEN}\nNo stored memory is relevant to this. If the user is asking about "
+                f"something you'd need to remember, say you have no memory of it — do not guess.\n"
+                f"{RECALL_CLOSE}")
+        section = Section(
+            name="knowledge", title=title, body=body, tier=SectionTier.HIGH, substantive=False,
+            requested_tokens=estimate_tokens(f"{title}\n{body}"),
+            admitted_tokens=estimate_tokens(f"{title}\n{body}"),
+        )
+        return section, []
 
     title = (
         "What you know that's relevant — each fact is attributed. Use these naturally in your "
