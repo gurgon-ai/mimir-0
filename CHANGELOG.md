@@ -37,6 +37,8 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   before any benchmark.
 
 ### Fixed
+- **Interview wording: the values question read backwards.** "What principles or values should guide
+  how you act?" implied the *operator* acts; it's asking what should guide *Mimir* → "…how I act?"
 - **The model greeted the operator by name every turn.** Each turn is sent as just `[system, user]`
   (no prior assistant messages), so a model reads it as a fresh start and opens with "Greetings, …".
   The default identity now instructs it to treat the session as one ongoing conversation — pick up
@@ -99,6 +101,10 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **Empty recall is stated, not silent (DESIGN §3d).** When memory recall comes up empty,
+  `build_context()` now renders the knowledge section anyway — "No stored memory is relevant to this…
+  say you have no memory of it, do not guess" — so the model answers "I don't have any memory of this"
+  instead of confabulating. It still counts as zero grounding, so the uncertainty gate also fires.
 - **Visual memory graph — switch the chat to a relational map (DESIGN §3a).** A **🕸 Graph** toggle
   above the chat swaps the conversation for a force-directed map of **memory "blobs"** (sized by
   salience, coloured by evidence tier) and the **entities** from the triple graph, linked by relation

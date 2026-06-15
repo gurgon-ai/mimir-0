@@ -98,7 +98,7 @@ ONBOARDING_QUESTIONS: list[OnboardingQuestion] = [
         "What the operator most wants my help with: {answer}.", anchor="purpose",
     ),
     OnboardingQuestion(
-        "values", "What principles or values should guide how you act?",
+        "values", "What principles or values should guide how I act?",
         "Principles the operator wants guiding me: {answer}.", anchor="values",
     ),
     OnboardingQuestion(
