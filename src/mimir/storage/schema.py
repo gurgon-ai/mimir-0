@@ -269,6 +269,15 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "CREATE INDEX idx_conversation_session ON conversation(session_id)",
         ],
     ),
+    (
+        18,
+        [
+            # Backfill: turns logged before v17 have a NULL session_id, which the UI can't select or
+            # restore (an empty dropdown value). Group them into one restorable "legacy" session
+            # so every turn belongs to a named session. (No-op for a fresh DB.)
+            "UPDATE conversation SET session_id = 'legacy' WHERE session_id IS NULL",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
