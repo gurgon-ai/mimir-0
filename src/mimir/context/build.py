@@ -170,6 +170,7 @@ def build_context(
     recent_history: str | None = None,
     background_notes: str | None = None,
     wiki_context: str | None = None,
+    system_health: str | None = None,
     now_ts: float | None = None,
     extra_sections: list[Section] | None = None,
 ) -> ContextBundle:
@@ -359,6 +360,21 @@ def build_context(
                 tier=SectionTier.MEDIUM,
                 requested_tokens=estimate_tokens(working_memory),
                 admitted_tokens=estimate_tokens(working_memory),
+            )
+        )
+
+    # 4-bis. System health — recent errors the system logged (DESIGN §10). Self-observability: the
+    #        model should know when it's degraded ("my last sentinel pass failed") rather than carry
+    #        on oblivious. Only present when something actually went wrong recently.
+    if system_health:
+        sections.append(
+            Section(
+                name="system_health",
+                title="System self-check — recent errors to be aware of (own them honestly):",
+                body=system_health,
+                tier=SectionTier.MEDIUM,
+                requested_tokens=estimate_tokens(system_health),
+                admitted_tokens=estimate_tokens(system_health),
             )
         )
 

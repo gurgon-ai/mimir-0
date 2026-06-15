@@ -498,3 +498,10 @@ def test_forum_endpoints(base_url: str) -> None:
     assert status == 200 and thread["question"] == "Why?" and thread["posts"]
     _, html = _get_html(base_url + "/")
     assert 'id="forumToggle"' in html and 'id="forumView"' in html
+
+
+def test_mind_exposes_recent_errors(base_url: str) -> None:
+    status, data = _json("GET", base_url + "/api/mind")
+    assert status == 200 and "recent_errors" in data and "error_counts" in data
+    _, html = _get_html(base_url + "/")
+    assert 'id="systemHealth"' in html  # the Mind-tab system-health readout

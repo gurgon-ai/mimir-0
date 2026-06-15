@@ -149,6 +149,11 @@ class Config:
     # adversarial reasoning, storing the verdicts. A sleep phase; also a manual trigger.
     deliberation_enabled: bool = True
     deliberation_limit: int = 3  # max conflicts argued per cycle (each is several model calls)
+    # Self-observability (DESIGN §10): surface recent errors into the turn's context so the model
+    # knows when it's degraded ("I've had an error"), and digest them in the nightly cycle.
+    surface_errors: bool = True
+    error_context_window_s: float = 1800.0  # an error this recent shows in context (30 min)
+    error_context_max: int = 5              # max errors shown in the context section
     # Procedural memory: how many matching procedures to inject, and the minimum trigger match.
     procedural_top_k: int = 3
     procedural_min_match: float = 0.3
@@ -298,6 +303,11 @@ def load_config(path: str | Path) -> Config:
         sleep_check_interval_s=float(raw.get("sleep", {}).get("check_interval_s", 900.0)),
         deliberation_enabled=bool(raw.get("deliberation", {}).get("enabled", True)),
         deliberation_limit=int(raw.get("deliberation", {}).get("limit", 3)),
+        surface_errors=bool(raw.get("diagnostics", {}).get("surface_errors", True)),
+        error_context_window_s=float(
+            raw.get("diagnostics", {}).get("error_context_window_s", 1800.0)
+        ),
+        error_context_max=int(raw.get("diagnostics", {}).get("error_context_max", 5)),
         procedural_top_k=int(raw.get("procedural", {}).get("top_k", 3)),
         procedural_min_match=float(raw.get("procedural", {}).get("min_match", 0.3)),
         timezone=(str(raw["locale"]["timezone"]) if raw.get("locale", {}).get("timezone")
