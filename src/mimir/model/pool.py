@@ -127,6 +127,79 @@ class ProviderPool:
     ) -> list[list[float]]:
         return self._route(priority, lambda p: p.embed(model, texts), "embed", model)
 
+    def chat_on(
+        self, node: str, model: str, messages: list[Message], params: dict[str, object], *,
+        priority: Priority = Priority.BACKGROUND, max_retries: int | None = None,
+        fallback: bool = True,
+    ) -> str:
+        """Run a chat on a *specific* node — for fanning the council across the whole fleet (§5).
+
+        Pins the call to ``node`` so concurrent persona calls light up every machine instead of
+        piling onto the best node for a model. Records load + latency like normal routing. If the
+        node is gone/disabled or fails and ``fallback`` is set, it degrades to ordinary routing so a
+        persona is never lost to one flaky box; with ``fallback=False`` the failure propagates.
+        """
+        with self._lock:
+            self._stats["calls"] += 1
+            ep = next(
+                (e for e in self._endpoints if e.name == node and e.name not in self._disabled),
+                None,
+            )
+        if ep is None:
+            if fallback:
+                return self.chat(
+                    model, messages, params, priority=priority, max_retries=max_retries
+                )
+            raise ProviderError(f"node {node!r} unavailable for chat", transient=True)
+        base_retries = self._max_retries if max_retries is None else max_retries
+        with self._lock:
+            ep.inflight += 1
+        try:
+            result, elapsed = self._attempt(
+                ep, lambda p: p.chat(model, messages, params), base_retries
+            )
+        except ProviderError:
+            self._record_failure(ep)
+            if fallback:
+                return self.chat(
+                    model, messages, params, priority=priority, max_retries=max_retries
+                )
+            raise
+        else:
+            if isinstance(result, str):
+                self._observe_latency(ep, model, elapsed, result)
+            self._record_success(ep)
+            with self._lock:
+                self._stats["ok"] += 1
+            return result
+        finally:
+            with self._lock:
+                ep.inflight -= 1
+
+    def council_placements(self) -> list[tuple[str, str]]:
+        """One ``(node, model)`` per reachable, non-disabled node — the council's fleet spread.
+
+        Each node contributes one slot, on a non-embedding model it actually has; models are chosen
+        greedily to be **distinct across nodes** where inventory allows (more minds, not just more
+        copies). Empty when no node inventory is known (e.g. a single local provider) — the council
+        then falls back to model-routing. The order follows discovery; the caller round-robins it.
+        """
+        with self._lock:
+            eps = [
+                e for e in self._endpoints
+                if e.reachable and e.name not in self._disabled and e.models
+            ]
+        used: set[str] = set()
+        placements: list[tuple[str, str]] = []
+        for endpoint in eps:
+            options = sorted(m for m in endpoint.models if "embed" not in m.lower())
+            if not options:
+                continue
+            pick = next((m for m in options if m not in used), options[0])
+            used.add(pick)
+            placements.append((endpoint.name, pick))
+        return placements
+
     def chat_stream(
         self, model: str, messages: list[Message], params: dict[str, object], *, priority: Priority
     ) -> Iterator[str]:

@@ -8,6 +8,15 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Changed
+- **The inner council fans across the whole fleet (DESIGN §5).** Council personas (user-convened or
+  the sleep-cycle's self-deliberation) are now **pinned one-per-node** across every reachable machine
+  instead of piling onto the best node for a model — so a deliberation lights up the entire fleet in
+  parallel and finishes far faster. Each node runs a model it has, chosen greedily to be **distinct
+  across nodes** where inventory allows (more minds, not just more copies); concurrency scales to the
+  node count (cap 16, was 5). A pinned node that's gone or flaky falls back to ordinary routing, so no
+  persona is lost. New: `ProviderPool.council_placements()`/`chat_on()`,
+  `ModelGateway.council_placements()`/`chat_on_node()`; `Position` now records the node that argued
+  it. Single-provider/local installs are unaffected (no placement info → prior model-routing).
 - **A Sleep tab with live schedule + timezone settings (no config edit needed).** The sleep window,
   enable toggle, and timezone are now editable in the web UI (new **Sleep** tab) and take effect
   live — they persist as runtime overrides in the `kv` store, layered over the `[sleep]`/`[locale]`

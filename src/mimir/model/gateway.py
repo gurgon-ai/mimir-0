@@ -206,6 +206,22 @@ class ModelGateway:
         merged = {**self._council_params(), **(params or {})}
         return self._pool.chat(model, messages, merged, priority=priority, max_retries=max_retries)
 
+    def council_placements(self) -> list[tuple[str, str]]:
+        """One ``(node, model)`` per reachable node — for fanning the council across the fleet."""
+        return self._pool.council_placements()
+
+    def chat_on_node(
+        self, node: str, model: str, messages: list[Message], *,
+        priority: Priority = Priority.BACKGROUND, params: dict[str, object] | None = None,
+        max_retries: int | None = None,
+    ) -> str:
+        """Run a council persona on a specific node (DESIGN §5). Params come from council/reasoning
+        config; falls back to routing if that node is unavailable, so no persona is lost."""
+        merged = {**self._council_params(), **(params or {})}
+        return self._pool.chat_on(
+            node, model, messages, merged, priority=priority, max_retries=max_retries,
+        )
+
     def get_stats(self) -> dict[str, object]:
         return self._pool.get_stats()
 
