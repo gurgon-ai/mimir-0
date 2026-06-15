@@ -75,3 +75,16 @@ def test_unknown_key_is_ignored_not_miswritten(brain: Mimir) -> None:
     assert brain.record_onboarding_answer("not_a_question", "x") is None
     assert [m for m in list_memories(brain._storage, kind=MemoryKind.MEMORY)
             if m.provenance == ONBOARDING_PROVENANCE] == []
+
+
+def test_core_offramp_split(brain: Mimir) -> None:
+    # The first 12 are the essentials (the strip off-ramps after them); the rest are optional.
+    from mimir.cognition.onboarding import CORE_COUNT, ONBOARDING_QUESTIONS
+
+    profile = brain.onboarding_profile()
+    assert len(profile) == len(ONBOARDING_QUESTIONS) == 19
+    assert sum(1 for q in profile if q["core"]) == CORE_COUNT == 12
+    assert all("core" in q for q in brain.pending_onboarding())
+    # core questions come first, then the optional ones (the off-ramp boundary)
+    flags = [q["core"] for q in profile]
+    assert flags == sorted(flags, reverse=True)

@@ -8,11 +8,14 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Changed
-- **Seeding interview expanded to 19 questions.** Padded the get-to-know-you with the Core + Expanded
-  items from `docs/mimir_foundational_interview.md` §8 — mission/purpose, values, voice, answer style,
-  uncertainty handling, hard limits, memory policy, and local grounding (scope, conditions, vocabulary)
-  + a catch-all. Seven now mirror identity anchors (name, operator, location, purpose, values, voice,
-  boundaries), so the interview seeds more of the always-on self-model. All skippable/editable.
+- **Seeding interview expanded to 19 questions, with a Core-12 off-ramp.** Padded the get-to-know-you
+  with the Core + Expanded items from `docs/mimir_foundational_interview.md` §8 — mission/purpose,
+  values, voice, answer style, uncertainty handling, hard limits, memory policy, and local grounding
+  (scope, conditions, vocabulary) + a catch-all. Seven now mirror identity anchors (name, operator,
+  location, purpose, values, voice, boundaries), so the interview seeds more of the always-on
+  self-model. After the **first 12 (the essentials)** the strip offers an **off-ramp** — *Finish here*
+  or *Continue · 7 more* (good to keep going while the fleet benchmark runs); the Profile panel marks
+  where the optional deeper questions begin. All skippable/editable.
 - **Memory graph as a drifting galaxy.** The visual graph now lays out as a slow-rotating galaxy:
   importance (degree + salience + usage + how foundational a memory is) pulls the biggest, brightest
   blobs to the **centre** and loose ones to the rim. **The seeding-interview memories** (provenance

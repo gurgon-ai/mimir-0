@@ -151,6 +151,11 @@ ONBOARDING_QUESTIONS: list[OnboardingQuestion] = [
 ]
 _BY_KEY: dict[str, OnboardingQuestion] = {q.key: q for q in ONBOARDING_QUESTIONS}
 
+# The first CORE_COUNT are the essentials; the interview offers an off-ramp after them and the rest
+# are optional deeper grounding (the user can stop, or continue while the fleet benchmark runs).
+CORE_COUNT = 12
+_CORE_KEYS = {q.key for q in ONBOARDING_QUESTIONS[:CORE_COUNT]}
+
 
 def _onboarding_rows(storage: StorageGateway) -> dict[str, Memory]:
     """The current onboarding memories, keyed by their question key (one row per question)."""
@@ -202,7 +207,8 @@ def record_answer(
 
 def onboarding_profile(storage: StorageGateway) -> list[dict[str, Any]]:
     """The interview as the editable 'one place': every question, its current answer (or ``None``),
-    and where the answer lands — for the Profile panel and the interview strip."""
+    and where the answer lands — for the Profile panel and the interview strip. ``core`` marks the
+    first ``CORE_COUNT`` (the essentials); the rest are optional deeper grounding."""
     rows = _onboarding_rows(storage)
     out: list[dict[str, Any]] = []
     for q in ONBOARDING_QUESTIONS:
@@ -213,16 +219,17 @@ def onboarding_profile(storage: StorageGateway) -> list[dict[str, Any]]:
             "answer": mem.meta.get("answer") if mem is not None else None,
             "fact": mem.text if mem is not None else None,
             "anchor": q.anchor,
+            "core": q.key in _CORE_KEYS,
         })
     return out
 
 
-def pending_onboarding(storage: StorageGateway) -> list[dict[str, str]]:
+def pending_onboarding(storage: StorageGateway) -> list[dict[str, Any]]:
     """The questions not yet answered — what the interview still needs (drives the strip + the
-    'run me' setup prompt). Empty when the interview is complete."""
+    'run me' setup prompt). Empty when the interview is complete. ``core`` flags the essentials."""
     answered = set(_onboarding_rows(storage))
     return [
-        {"key": q.key, "question": q.question}
+        {"key": q.key, "question": q.question, "core": q.key in _CORE_KEYS}
         for q in ONBOARDING_QUESTIONS
         if q.key not in answered
     ]

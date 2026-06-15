@@ -2336,7 +2336,7 @@ $("councilBtn").addEventListener("click", async () => {
 
 // -- the seeding interview: a one-question-at-a-time strip under the tournament board -----------
 // (and re-runnable any time from the Profile tab). Capture-only; answers persist immediately.
-const ivState = { queue: [], i: 0, active: false, dismissed: false, mode: null };
+const ivState = { queue: [], i: 0, active: false, dismissed: false, mode: null, offramped: false };
 
 function interviewShow(on) {
   ivState.active = on;
@@ -2354,21 +2354,37 @@ async function maybeStartInterview() {
 }
 
 function startInterview(queue, mode) {
-  ivState.queue = queue; ivState.i = 0; ivState.dismissed = false; ivState.mode = mode || "manual";
+  ivState.queue = queue; ivState.i = 0; ivState.dismissed = false; ivState.offramped = false;
+  ivState.mode = mode || "manual";
   interviewShow(true);
   renderInterviewQ();
 }
 
+function renderOfframp() {
+  // Reached the end of the Core 12 — offer to stop or keep going with the optional 7.
+  $("ivForm").style.display = "none"; $("ivSkip").style.display = "none"; $("ivDone").style.display = "none";
+  $("ivProgressTop").textContent = "";
+  $("ivQ").textContent = "That's the essentials — you're all set. There are 7 more optional questions " +
+    "for deeper grounding (the fleet benchmark takes a while anyway).";
+  $("ivProgress").innerHTML =
+    '<button class="secondary" type="button" id="ivMore" style="padding:3px 10px;">Continue · 7 more</button> ' +
+    '<button class="secondary" type="button" id="ivStop" style="padding:3px 10px;">Finish here</button>';
+  $("ivMore").addEventListener("click", () => { ivState.offramped = true; renderInterviewQ(); });
+  $("ivStop").addEventListener("click", () => { ivState.dismissed = true; interviewShow(false); });
+}
+
 function renderInterviewQ() {
   const q = ivState.queue[ivState.i];
+  if (q && q.core === false && !ivState.offramped) { renderOfframp(); return; }
   if (!q) {  // finished the queue
     $("ivQ").textContent = "All set — thank you. You can edit any of this anytime in the Profile tab.";
     $("ivForm").style.display = "none"; $("ivSkip").style.display = "none";
     $("ivProgressTop").textContent = ""; $("ivProgress").textContent = "";
-    $("ivDone").textContent = "Close";
+    $("ivDone").style.display = ""; $("ivDone").textContent = "Close";
     return;
   }
-  $("ivForm").style.display = ""; $("ivSkip").style.display = ""; $("ivDone").textContent = "Later";
+  $("ivForm").style.display = ""; $("ivSkip").style.display = "";
+  $("ivDone").style.display = ""; $("ivDone").textContent = "Later";
   $("ivQ").textContent = q.question;
   $("ivInput").value = q.answer || "";
   $("ivProgressTop").textContent = `${ivState.i + 1} / ${ivState.queue.length}`;
@@ -2396,7 +2412,14 @@ $("ivDone").addEventListener("click", () => { ivState.dismissed = true; intervie
 async function loadProfile() {
   let data; try { data = await api("GET", "/api/onboarding"); } catch (e) { $("profileMsg").textContent = "Error: " + e.message; return; }
   const wrap = $("profileFacts"); wrap.innerHTML = "";
+  let dividerShown = false;
   data.profile.forEach(q => {
+    if (q.core === false && !dividerShown) {  // mark where the optional, deeper questions begin
+      dividerShown = true;
+      const div = document.createElement("div"); div.className = "hint";
+      div.style.cssText = "margin:14px 0 8px; opacity:.7; border-top:1px solid #232a35; padding-top:10px;";
+      div.textContent = "— optional · deeper grounding —"; wrap.appendChild(div);
+    }
     const d = document.createElement("div"); d.className = "profile-fact";
     const badge = q.anchor ? `<span class="anchorbadge">↳ self-model: ${q.anchor}</span>` : "";
     d.innerHTML = `<label>${q.question}${badge}</label>`;
