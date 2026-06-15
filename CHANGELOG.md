@@ -109,7 +109,8 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   static binary, like Ollama), so the whole encyclopedia "populates" the knowledge layer at no ingest
   cost. Fully optional and **fail-open** (a missing/slow server yields no section, never an error or
   stall); trivial turns skip the lookup. `cognition/wiki.py` (`WikiSource`, stdlib `urllib` +
-  `html.parser`), `WikiConfig`, `build_context(wiki_context=…)`.
+  `html.parser`), `WikiConfig`, `build_context(wiki_context=…)`. A `GET /api/wiki/status` reachability
+  check (`Mimir.wiki_status()`) surfaces as a live status line in the web UI's **Docs** tab.
 - **Empty recall is stated, not silent (DESIGN §3d).** When memory recall comes up empty,
   `build_context()` now renders the knowledge section anyway — "No stored memory is relevant to this…
   say you have no memory of it, do not guess" — so the model answers "I don't have any memory of this"

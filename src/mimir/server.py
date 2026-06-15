@@ -167,6 +167,8 @@ class _Handler(BaseHTTPRequestHandler):
             elif route == "/api/graph/map":
                 with self.server.brain_lock:
                     self._send_json(self.server.brain.graph_map())
+            elif route == "/api/wiki/status":
+                self._send_json(self.server.brain.wiki_status())  # lock-free (quick external check)
             elif route == "/api/procedures":
                 self._send_json(self._procedures())
             elif route == "/api/fleet":
@@ -1171,6 +1173,11 @@ _HTML = """<!doctype html>
       <button id="ingestBtn" type="button">Ingest</button>
       <div id="ingestResult"></div>
       <div class="hint">Path is read on the server (this is a local tool).</div>
+
+      <h2 style="margin-top:22px;">Offline encyclopedia</h2>
+      <div class="hint" style="margin-bottom:8px;">A live reference layer over a local Kiwix/ZIM (set the <code>[wiki]</code> block in mimir.toml). Optional.</div>
+      <div id="wikiStatus" class="hint">checking…</div>
+      <button class="secondary" id="wikiRecheck" type="button" style="margin-top:8px;">Recheck</button>
     </div>
   </aside>
 </main>
@@ -1564,8 +1571,26 @@ $("graphToggle").addEventListener("click", toggleGraph);
   svg.addEventListener("dblclick", () => { graph.px = 0; graph.py = 0; graph.k = 1; applyTransform(); });
 })();
 
+async function loadWikiStatus() {
+  const el = $("wikiStatus"); el.textContent = "checking…";
+  try {
+    const s = await api("GET", "/api/wiki/status");
+    if (!s.enabled) {
+      el.innerHTML = "Not configured — add a <code>[wiki]</code> block in mimir.toml " +
+        "(point it at a running <code>kiwix-serve</code>). See docs/SETUP.md §5c.";
+    } else if (s.reachable) {
+      el.innerHTML = `<span style="color:#7fd17f;">✓ connected</span> — book ` +
+        `<b>${s.book}</b> at ${s.url}`;
+    } else {
+      el.innerHTML = `<span style="color:#e0a0a0;">✗ not reachable</span> — ${s.url}` +
+        ` (book ${s.book || "?"})${s.error ? " · " + s.error : ""}. Is kiwix-serve running?`;
+    }
+  } catch (e) { el.textContent = "error: " + e.message; }
+}
+$("wikiRecheck").addEventListener("click", loadWikiStatus);
+
 // --- tabs ---
-const loaders = { mind: loadMind, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet };
+const loaders = { mind: loadMind, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet, docs: loadWikiStatus };
 document.querySelectorAll(".tabs button").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));
