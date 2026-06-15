@@ -14,14 +14,71 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from typing import Any
 
 from ..storage.gateway import StorageGateway
-from ..storage.models import Triple
-from ..storage.repo import all_entities, save_triple, traverse_from_entities
+from ..storage.models import MemoryKind, Triple
+from ..storage.repo import (
+    all_entities,
+    browse_triples,
+    list_memories,
+    save_triple,
+    traverse_from_entities,
+)
 
 log = logging.getLogger("mimir.graph")
 
 _MIN_ENTITY_LEN = 3
+
+
+def build_graph_map(
+    storage: StorageGateway, *, memory_limit: int = 60, triple_limit: int = 300
+) -> dict[str, list[dict[str, Any]]]:
+    """A node/link map for the visual memory graph (DESIGN §3a).
+
+    Nodes are **memory blobs** (the salient, non-archived memories — clickable/editable) plus the
+    **entities** from the triple graph; links are the relation edges (entity—relation→entity) and a
+    light "mentions" edge from a memory to any entity whose name appears in its text. Capped to the
+    most salient memories so the graph stays legible. Pure read — the UI lays it out.
+    """
+    mems = [m for m in list_memories(storage, kind=MemoryKind.MEMORY) if not m.archived]
+    mems.sort(key=lambda m: -(m.salience or 0.0))
+    mems = mems[:memory_limit]
+    triples = browse_triples(storage, limit=triple_limit)
+
+    entity_id: dict[str, str] = {}  # lowercased name → node id
+    entity_label: dict[str, str] = {}
+    for t in triples:
+        for name in (t.subject, t.object):
+            low = name.lower()
+            if len(low) >= _MIN_ENTITY_LEN:
+                entity_id.setdefault(low, f"e:{low}")
+                entity_label.setdefault(low, name)
+
+    nodes: list[dict[str, Any]] = []
+    for m in mems:
+        text = " ".join(m.text.split())
+        nodes.append({
+            "id": f"m{m.id}", "type": "memory", "mid": m.id,
+            "label": text[:42] + ("…" if len(text) > 42 else ""), "text": text,
+            "tier": m.evidence_tier.key, "salience": round(m.salience, 3),
+            "provenance": m.provenance,
+        })
+    for low, nid in entity_id.items():
+        nodes.append({"id": nid, "type": "entity", "label": entity_label[low]})
+
+    links: list[dict[str, Any]] = []
+    for t in triples:
+        s, o = t.subject.lower(), t.object.lower()
+        if s in entity_id and o in entity_id and s != o:
+            links.append({"source": entity_id[s], "target": entity_id[o], "label": t.relation})
+    for m in mems:
+        low_text = m.text.lower()
+        for low, nid in entity_id.items():
+            if low in low_text:
+                links.append({"source": f"m{m.id}", "target": nid, "label": "mentions"})
+
+    return {"nodes": nodes, "links": links}
 
 
 def store_triples(

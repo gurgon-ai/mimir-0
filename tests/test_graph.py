@@ -79,3 +79,38 @@ def test_brain_injects_connected_facts(brain: Mimir) -> None:
     section = next((s for s in r.context.sections if s.name == "entity_graph"), None)
     assert section is not None
     assert "teal" in section.body.lower()
+
+
+def test_graph_map_blobs_entities_and_links(brain: Mimir) -> None:
+    # A memory mentioning "barn" + a relation barn—near→gate → memory blob, two entities, and both
+    # link kinds (relation + the memory's "mentions").
+    from mimir.cognition.graph import build_graph_map
+    from mimir.storage.models import EvidenceTier, Memory, Triple
+    from mimir.storage.repo import save_memory, save_triple
+
+    save_memory(brain._storage, Memory(
+        text="the barn is freshly painted", evidence_tier=EvidenceTier.CONVERSATION, salience=2.0))
+    save_triple(brain._storage, Triple(subject="barn", relation="near", object="gate"))
+
+    m = build_graph_map(brain._storage)
+    ids = {n["id"] for n in m["nodes"]}
+    assert any(n["type"] == "memory" for n in m["nodes"])
+    assert "e:barn" in ids and "e:gate" in ids
+    rel = [link for link in m["links"] if link["label"] == "near"]
+    assert rel and {rel[0]["source"], rel[0]["target"]} == {"e:barn", "e:gate"}
+    assert any(link["target"] == "e:barn" and link["label"] == "mentions" for link in m["links"])
+    mem = next(n for n in m["nodes"] if n["type"] == "memory")
+    assert {"mid", "text", "tier", "salience"} <= set(mem)  # editable fields for the inspector
+
+
+def test_edit_and_forget_memory(brain: Mimir) -> None:
+    from mimir.storage.models import EvidenceTier, Memory
+    from mimir.storage.repo import get_memory, save_memory
+
+    mid = save_memory(brain._storage, Memory(
+        text="initial", evidence_tier=EvidenceTier.CONVERSATION, salience=1.0))
+    brain.edit_memory(mid, text="edited text", salience=3.5)
+    m = get_memory(brain._storage, mid)
+    assert m.text == "edited text" and m.salience == 3.5
+    brain.forget_memory(mid)
+    assert get_memory(brain._storage, mid) is None

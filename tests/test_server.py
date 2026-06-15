@@ -418,3 +418,22 @@ def test_sessions_list_and_switch(base_url: str) -> None:
 def test_session_action_validates(base_url: str) -> None:
     status, data = _json("POST", base_url + "/api/session", {"action": "bogus"})
     assert status == 400 and "error" in data
+
+
+def test_graph_map_and_memory_edit_delete(base_url: str) -> None:
+    _json("POST", base_url + "/api/turn", {"text": "the gate is near the barn", "user": "operator"})
+    status, gm = _json("GET", base_url + "/api/graph/map")
+    assert status == 200 and "nodes" in gm
+    mems = [n for n in gm["nodes"] if n["type"] == "memory"]
+    assert mems
+    mid = mems[0]["mid"]
+    su, up = _json("POST", base_url + "/api/memory",
+                   {"action": "update", "id": mid, "text": "edited via graph", "salience": 2.0})
+    assert su == 200 and up["memory"]["text"] == "edited via graph"
+    sd, dl = _json("POST", base_url + "/api/memory", {"action": "delete", "id": mid})
+    assert sd == 200 and dl["deleted"] == mid
+
+
+def test_page_has_graph_view(base_url: str) -> None:
+    _, html = _get_html(base_url + "/")
+    assert 'id="graphSvg"' in html and 'id="graphToggle"' in html

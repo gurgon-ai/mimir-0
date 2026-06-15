@@ -42,7 +42,7 @@ from .cognition.fleet import (
     roster_for,
     scan_fleet,
 )
-from .cognition.graph import render_triples, retrieve_connected
+from .cognition.graph import build_graph_map, render_triples, retrieve_connected
 from .cognition.identity import (
     current_anchors,
     establish_identity,
@@ -84,6 +84,7 @@ from .storage.gateway import StorageGateway
 from .storage.models import Memory, MemoryKind, Procedure
 from .storage.repo import (
     bump_procedure_uses,
+    delete_memory,
     disabled_models,
     disabled_nodes,
     interaction_history,
@@ -100,6 +101,7 @@ from .storage.repo import (
     set_model_enabled,
     set_node_enabled,
     update_catalogue_speed,
+    update_memory,
 )
 
 log = logging.getLogger("mimir")
@@ -424,6 +426,24 @@ class Mimir:
         """The durable conversation log, oldest→newest — restored by the UI. ``session_id`` scopes
         it to one conversation (§3a)."""
         return recent_conversation(self._storage, user=user, limit=limit, session_id=session_id)
+
+    # -- the memory graph (visual review/edit; DESIGN §3a) -----------------------------
+
+    def graph_map(self, *, memory_limit: int = 60) -> dict[str, Any]:
+        """Nodes (memory blobs + entities) and links (relations + mentions) for the visual graph."""
+        return build_graph_map(self._storage, memory_limit=memory_limit)
+
+    def edit_memory(
+        self, memory_id: int, *, text: str | None = None, salience: float | None = None
+    ) -> Memory | None:
+        """Edit a memory's text/salience (the graph editor) and return it, or ``None`` if gone."""
+        update_memory(self._storage, memory_id, text=text, salience=salience)
+        from .storage.repo import get_memory
+        return get_memory(self._storage, memory_id)
+
+    def forget_memory(self, memory_id: int) -> None:
+        """Permanently delete a memory (the graph editor's remove)."""
+        delete_memory(self._storage, memory_id)
 
     def generate_narratives(self) -> dict[str, Any]:
         """Run the temporal-narrative cycle now (daily entry + weekly/monthly roll-up), sync.

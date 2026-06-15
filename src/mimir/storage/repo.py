@@ -118,6 +118,31 @@ def delete_memory(gateway: StorageGateway, memory_id: int) -> None:
     gateway.submit(_write)
 
 
+def update_memory(
+    gateway: StorageGateway, memory_id: int, *,
+    text: str | None = None, salience: float | None = None,
+) -> None:
+    """Edit a memory's text and/or salience in place (user-governed review, e.g. the graph editor).
+
+    Only the provided fields change. ``embedding`` is left as-is; a re-embed on text change is a
+    later refinement (recall still works on the old vector + keyword overlap)."""
+    sets, params = [], []
+    if text is not None:
+        sets.append("text = ?")
+        params.append(text)
+    if salience is not None:
+        sets.append("salience = ?")
+        params.append(salience)
+    if not sets:
+        return
+    params.append(memory_id)
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute(f"UPDATE memories SET {', '.join(sets)} WHERE id = ?", tuple(params))
+
+    gateway.submit(_write)
+
+
 def record_interaction(
     gateway: StorageGateway, ts: float, user: str | None = None, *, keep: int = 5000
 ) -> None:
