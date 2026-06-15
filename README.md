@@ -31,6 +31,7 @@ keeps the repo fully distributable and your install footprint minimal.
 | **SQLite** storage — bundled with Python; no install, no server, no daemon | **Open model(s)** — `ollama pull` whatever you like (each under its own license) |
 | A deterministic **mock provider + stdlib embedder** so the core runs with *nothing* installed | *(optional)* `pypdf` — only for PDF ingestion (the `[documents]` extra) |
 | The wiki integration — **pure stdlib HTTP**, no library | *(optional)* **[Kiwix](https://kiwix.org)** `kiwix-serve` + any **ZIM** — only if you want offline Wikipedia as a reference layer |
+| Temporal grounding falls back to the **host's local clock** | *(optional)* `tzdata` (the `[timezone]` extra) — only to set an explicit IANA timezone on a host without a tz database (e.g. Windows) |
 
 **Core runtime dependencies: none.** Python's standard library (including SQLite) is the entire
 floor — the mock provider and bootstrap embedder run the full acceptance loop on Python alone. You
