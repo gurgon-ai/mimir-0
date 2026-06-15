@@ -164,6 +164,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._memories(params))
             elif route == "/api/graph":
                 self._send_json(self._graph(params))
+            elif route == "/api/graph/map":
+                with self.server.brain_lock:
+                    self._send_json(self.server.brain.graph_map())
             elif route == "/api/procedures":
                 self._send_json(self._procedures())
             elif route == "/api/fleet":
@@ -214,6 +217,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._onboarding_answer(body))
             elif route == "/api/session":
                 self._send_json(self._session_action(body))
+            elif route == "/api/memory":
+                self._send_json(self._memory_action(body))
             elif route == "/api/ingest":
                 self._send_json(self._ingest(body))
             elif route == "/api/sleep":
@@ -300,6 +305,28 @@ class _Handler(BaseHTTPRequestHandler):
         session = (params.get("session") or [None])[0] or None
         return {"turns": self.server.brain.history(
             user="operator", limit=limit, session_id=session)}
+
+    def _memory_action(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Edit or delete one memory from the graph viewer."""
+        try:
+            mem_id = int(body.get("id"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("'id' (integer) is required") from exc
+        action = str(body.get("action", "update")).strip()
+        with self.server.brain_lock:
+            if action == "delete":
+                self.server.brain.forget_memory(mem_id)
+                return {"deleted": mem_id}
+            if action == "update":
+                text = body.get("text")
+                sal = body.get("salience")
+                mem = self.server.brain.edit_memory(
+                    mem_id,
+                    text=str(text) if text is not None else None,
+                    salience=float(sal) if sal is not None else None,
+                )
+                return {"memory": _memory_to_dict(mem) if mem else None}
+            raise ValueError("'action' must be 'update' or 'delete'")
 
     def _sessions(self) -> dict[str, Any]:
         """Past conversations (summary + timestamps) for the chat dropdown."""
@@ -901,6 +928,15 @@ _HTML = """<!doctype html>
   .msg .body.thinking { color:#8a94a3; font-style:italic; animation: pulse 1.1s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity:.4 } 50% { opacity:1 } }
   .meta { font-size:11px; color:#6f7a8a; margin-top:4px; }
+  #graphSvg { display:block; background:radial-gradient(circle at 50% 40%, #0f1521, #0a0d12); cursor:grab; }
+  #graphSvg line { stroke:#2b3a4f; stroke-opacity:.5; }
+  #graphSvg .node { cursor:pointer; }
+  #graphSvg .node text { fill:#c3ccd8; font-size:10px; pointer-events:none; }
+  #graphSvg .node circle { stroke:#0a0d12; stroke-width:1.5; }
+  #graphSvg .node.sel circle { stroke:#1f6feb; stroke-width:3; }
+  #graphInspect { display:none; position:absolute; top:12px; right:12px; width:300px; max-height:88%;
+    overflow:auto; background:#11161d; border:1px solid #2b333f; border-radius:10px; padding:14px; }
+  #graphInspect textarea { width:100%; min-height:90px; resize:vertical; }
   #sessionBar { display:flex; gap:8px; align-items:center; padding:8px 12px; border-bottom:1px solid #232a35; }
   #sessionSelect { flex:1; min-width:0; background:#11161d; border:1px solid #2b333f; color:#d7dde5; border-radius:8px; padding:6px 9px; font:inherit; }
   #composer { display:flex; gap:8px; padding:12px; border-top:1px solid #232a35; }
@@ -969,8 +1005,14 @@ _HTML = """<!doctype html>
       <select id="sessionSelect" title="Past conversations — pick one and Restore to view/continue it."></select>
       <button class="secondary" id="sessionRestore" type="button" title="Load the selected conversation and continue it.">Restore</button>
       <button class="secondary" id="sessionNew" type="button" title="Start a fresh conversation.">+ New</button>
+      <button class="secondary" id="graphToggle" type="button" title="Switch between the chat and a visual map of your memories." style="margin-left:auto;">🕸 Graph</button>
     </div>
     <div id="benchBoard" style="display:none; flex:1; overflow:auto; padding:18px;"></div>
+    <div id="graphView" style="display:none; flex:1; position:relative; overflow:hidden;">
+      <svg id="graphSvg" width="100%" height="100%"></svg>
+      <div id="graphLegend" class="hint" style="position:absolute; top:8px; left:10px; pointer-events:none;"></div>
+      <div id="graphInspect"></div>
+    </div>
     <div id="log"></div>
     <div id="interviewStrip" style="display:none;">
       <div class="ivhead"><span>🌱 Getting to know you</span>
@@ -1293,6 +1335,140 @@ $("sessionRestore").addEventListener("click", async () => {
 $("sessionNew").addEventListener("click", async () => {
   try { await api("POST", "/api/session", { action: "new" }); $("log").innerHTML = ""; await loadSessions(""); }
   catch (e) { addMsg("mimir", "[error] " + e.message); }
+});
+
+// --- memory graph: a force-directed map of memory blobs + entities, click to review/edit ---
+const GNS = "http://www.w3.org/2000/svg";
+const graph = { on: false, nodes: [], links: [], byId: {}, raf: 0, ticks: 0, sel: null, w: 600, h: 500 };
+
+function tierColor(t) {
+  return ({ stated_by_primary_user: "#7fd17f", stated_by_trusted: "#9fd0ff", document: "#c0a0e0",
+            inferred: "#e0b070", conversation: "#6f7a8a" })[t] || "#8a94a3";
+}
+function escapeHtml(s) {
+  return (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function graphSize() {
+  const r = $("graphSvg").getBoundingClientRect();
+  graph.w = r.width || 600; graph.h = r.height || 500;
+}
+
+async function loadGraphMap() {
+  let data; try { data = await api("GET", "/api/graph/map"); } catch (e) { return; }
+  graphSize();
+  const cx = graph.w / 2, cy = graph.h / 2, R = Math.min(graph.w, graph.h) * 0.4;
+  graph.nodes = (data.nodes || []).map((n, i) => {
+    const a = i * 2.3999;  // golden-angle spread so the initial layout isn't a clump
+    return Object.assign({}, n, { x: cx + Math.cos(a) * (40 + (i % 7) / 7 * R),
+                                  y: cy + Math.sin(a) * (40 + (i % 7) / 7 * R), vx: 0, vy: 0 });
+  });
+  graph.byId = {}; graph.nodes.forEach(n => { graph.byId[n.id] = n; });
+  graph.links = (data.links || []).filter(l => graph.byId[l.source] && graph.byId[l.target])
+    .map(l => ({ source: graph.byId[l.source], target: graph.byId[l.target], label: l.label }));
+  buildGraphSvg();
+  $("graphLegend").textContent =
+    `${graph.nodes.length} nodes · ${graph.links.length} links — click a blob to review/edit`;
+  graph.ticks = 0; cancelAnimationFrame(graph.raf); graphTick();
+}
+
+function buildGraphSvg() {
+  const svg = $("graphSvg"); svg.innerHTML = "";
+  graph.links.forEach(l => { l.el = document.createElementNS(GNS, "line"); svg.appendChild(l.el); });
+  graph.nodes.forEach(n => {
+    const g = document.createElementNS(GNS, "g"); g.setAttribute("class", "node");
+    const isMem = n.type === "memory";
+    n.rad = isMem ? 7 + Math.min(11, (n.salience || 1) * 5) : 5;
+    const c = document.createElementNS(GNS, "circle");
+    c.setAttribute("r", n.rad); c.setAttribute("fill", isMem ? tierColor(n.tier) : "#33405a");
+    g.appendChild(c);
+    const tx = document.createElementNS(GNS, "text");
+    tx.setAttribute("x", n.rad + 3); tx.setAttribute("y", 4); tx.textContent = n.label || "";
+    g.appendChild(tx);
+    g.addEventListener("click", (e) => { e.stopPropagation(); selectNode(n); });
+    svg.appendChild(g); n.el = g;
+  });
+}
+
+function graphTick() {
+  const n = graph.nodes, L = graph.links, cx = graph.w / 2, cy = graph.h / 2;
+  for (let i = 0; i < n.length; i++) {
+    for (let j = i + 1; j < n.length; j++) {
+      const a = n[i], b = n[j]; let dx = a.x - b.x, dy = a.y - b.y; const d2 = dx * dx + dy * dy + 0.01;
+      const d = Math.sqrt(d2), f = 1700 / d2; const fx = dx / d * f, fy = dy / d * f;
+      a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+    }
+  }
+  L.forEach(l => {
+    const a = l.source, b = l.target; let dx = b.x - a.x, dy = b.y - a.y;
+    const d = Math.sqrt(dx * dx + dy * dy) + 0.01, f = (d - 95) * 0.02;
+    const fx = dx / d * f, fy = dy / d * f; a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+  });
+  n.forEach(p => {
+    p.vx += (cx - p.x) * 0.002; p.vy += (cy - p.y) * 0.002; p.vx *= 0.85; p.vy *= 0.85;
+    p.x += p.vx; p.y += p.vy;
+    p.x = Math.max(p.rad + 4, Math.min(graph.w - p.rad - 4, p.x));
+    p.y = Math.max(p.rad + 4, Math.min(graph.h - p.rad - 4, p.y));
+    p.el.setAttribute("transform", `translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
+  });
+  L.forEach(l => {
+    l.el.setAttribute("x1", l.source.x.toFixed(1)); l.el.setAttribute("y1", l.source.y.toFixed(1));
+    l.el.setAttribute("x2", l.target.x.toFixed(1)); l.el.setAttribute("y2", l.target.y.toFixed(1));
+  });
+  if (graph.on && ++graph.ticks < 320) graph.raf = requestAnimationFrame(graphTick);
+}
+
+function selectNode(n) {
+  if (graph.sel && graph.sel.el) graph.sel.el.classList.remove("sel");
+  graph.sel = n; n.el.classList.add("sel");
+  const box = $("graphInspect"); box.style.display = "block"; box.innerHTML = "";
+  if (n.type !== "memory") {
+    const deg = graph.links.filter(l => l.source === n || l.target === n).length;
+    box.innerHTML = `<h2 style="margin-top:0;">Entity</h2><div class="text">${escapeHtml(n.label)}</div>` +
+      `<div class="hint" style="margin-top:6px;">${deg} connection(s)</div>`;
+    return;
+  }
+  const h = document.createElement("h2"); h.style.marginTop = "0"; h.textContent = "Memory"; box.appendChild(h);
+  const ta = document.createElement("textarea"); ta.value = n.text; box.appendChild(ta);
+  const tags = document.createElement("div"); tags.className = "tags"; tags.style.margin = "8px 0";
+  [`tier: ${n.tier || "?"}`, `source: ${n.provenance || "?"}`].forEach(t => {
+    const s = document.createElement("span"); s.className = "tag"; s.textContent = t; tags.appendChild(s);
+  });
+  box.appendChild(tags);
+  const sl = document.createElement("label"); sl.className = "hint";
+  sl.style.cssText = "display:flex; align-items:center; gap:6px;"; sl.textContent = "salience";
+  const sin = document.createElement("input"); sin.type = "number"; sin.step = "0.1"; sin.min = "0";
+  sin.value = n.salience; sin.style.width = "70px"; sl.appendChild(sin); box.appendChild(sl);
+  const row = document.createElement("div"); row.className = "row"; row.style.marginTop = "10px";
+  const save = document.createElement("button"); save.textContent = "Save";
+  save.addEventListener("click", async () => {
+    try {
+      await api("POST", "/api/memory",
+        { action: "update", id: n.mid, text: ta.value, salience: parseFloat(sin.value) });
+      box.style.display = "none"; loadGraphMap();
+    } catch (e) { alert("Error: " + e.message); }
+  });
+  const del = document.createElement("button"); del.className = "secondary"; del.textContent = "Delete";
+  del.addEventListener("click", async () => {
+    if (!confirm("Delete this memory permanently?")) return;
+    try { await api("POST", "/api/memory", { action: "delete", id: n.mid }); box.style.display = "none"; loadGraphMap(); }
+    catch (e) { alert("Error: " + e.message); }
+  });
+  row.appendChild(save); row.appendChild(del); box.appendChild(row);
+}
+
+function toggleGraph() {
+  graph.on = !graph.on;
+  $("graphView").style.display = graph.on ? "block" : "none";
+  $("log").style.display = graph.on ? "none" : "";
+  $("composer").style.display = graph.on ? "none" : "";
+  $("graphToggle").textContent = graph.on ? "💬 Chat" : "🕸 Graph";
+  if (graph.on) loadGraphMap();
+  else { cancelAnimationFrame(graph.raf); $("graphInspect").style.display = "none"; }
+}
+$("graphToggle").addEventListener("click", toggleGraph);
+$("graphSvg").addEventListener("click", () => {
+  $("graphInspect").style.display = "none";
+  if (graph.sel && graph.sel.el) { graph.sel.el.classList.remove("sel"); graph.sel = null; }
 });
 
 // --- tabs ---

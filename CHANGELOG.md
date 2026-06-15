@@ -83,6 +83,14 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **Visual memory graph — switch the chat to a relational map (DESIGN §3a).** A **🕸 Graph** toggle
+  above the chat swaps the conversation for a force-directed map of **memory "blobs"** (sized by
+  salience, coloured by evidence tier) and the **entities** from the triple graph, linked by relation
+  edges and a light "mentions" edge from a memory to entities it names. Click a blob to **review and
+  edit** it — text + salience — or delete it; click an entity to see its connections. Pure vanilla SVG
+  + a small force simulation (no deps). New: `cognition.build_graph_map`, `repo.update_memory`,
+  `Mimir.{graph_map,edit_memory,forget_memory}`, `GET /api/graph/map`, `POST /api/memory`
+  (update/delete). Borrows the home AI's graph-orb concept, stripped to the relational essentials.
 - **Session history + restore.** A durable conversation log (schema v16 `conversation`, one row per
   exchange, pruned to a rolling window) — the lasting full turn history, distinct from the capped
   EXCHANGE recency buffer (cleared on compression) and `interactions` (timestamps only). It does
