@@ -14,6 +14,7 @@ from mimir.cognition.temporal import (
     gap_insight,
     humanize_duration,
     next_season,
+    resolve_timezone,
     season_of,
     time_prefix,
 )
@@ -137,3 +138,24 @@ def test_turn_surfaces_temporal_awareness_after_a_gap(brain: Mimir) -> None:
     assert len(interaction_history(brain._storage, user="operator")) == 10  # log round-trips
     result = brain.turn("hey", user="operator")
     assert any(s.name == "temporal_awareness" for s in result.context.sections)
+
+
+def test_utc_offsets_resolve_without_tzdata() -> None:
+    # Pure-stdlib offsets — these must work on any host (no tz database needed).
+    import datetime as _dt
+    assert resolve_timezone("UTC") == _dt.UTC
+    assert resolve_timezone("UTC-8") == _dt.timezone(_dt.timedelta(hours=-8))
+    assert resolve_timezone("UTC-08:00") == _dt.timezone(_dt.timedelta(hours=-8))
+    assert resolve_timezone("GMT+5:30") == _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+    assert resolve_timezone("-07:00") == _dt.timezone(_dt.timedelta(hours=-7))
+
+
+def test_blank_timezone_means_host_local() -> None:
+    assert resolve_timezone(None) is None
+    assert resolve_timezone("") is None
+
+
+def test_bad_timezone_falls_back_not_crashes() -> None:
+    # An unknown IANA name with no tz db returns None (caller uses host-local) rather than raising.
+    assert resolve_timezone("Totally/Bogus") is None
+    assert resolve_timezone("UTC+99") is None  # out-of-range offset

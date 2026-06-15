@@ -26,19 +26,48 @@ _SEASON_STARTS_NORTH = [(3, 20, "spring"), (6, 21, "summer"), (9, 22, "fall"), (
 _SEASON_STARTS_SOUTH = [(3, 20, "fall"), (6, 21, "winter"), (9, 22, "spring"), (12, 21, "summer")]
 
 
+# A fixed UTC offset: "UTC", "UTC-7", "UTC+05:30", "GMT-8", "-07:00". Resolves with pure stdlib
+# arithmetic (no tz database / no `tzdata` package) — the zero-dep way to pin a zone, sans DST.
+_OFFSET_RE = re.compile(r"^\s*(?:UTC|GMT)?\s*([+-])(\d{1,2})(?::?(\d{2}))?\s*$", re.IGNORECASE)
+
+
+def resolve_timezone(timezone: str | None) -> _dt.tzinfo | None:
+    """A ``tzinfo`` for ``timezone``, or ``None`` to mean 'use the host's local clock'.
+
+    Order: a literal UTC offset (always works, no package) → an IANA name via ``zoneinfo`` (needs
+    the OS tz database or the optional ``tzdata`` extra) → ``None`` (host local) if neither. So
+    ``UTC``/``UTC-08:00`` work everywhere; ``America/Vancouver`` works where a tz db is present.
+    """
+    if not timezone:
+        return None
+    name = timezone.strip()
+    if name.upper() in ("UTC", "GMT", "Z"):
+        return _dt.UTC
+    match = _OFFSET_RE.match(name)
+    if match:
+        hours, minutes = int(match.group(2)), int(match.group(3) or 0)
+        if hours <= 14 and minutes < 60:
+            sign = 1 if match.group(1) == "+" else -1
+            return _dt.timezone(sign * _dt.timedelta(hours=hours, minutes=minutes))
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(name)
+    except Exception:  # no tz db for this name — caller falls back to host local
+        return None
+
+
 def local_now(timezone: str | None = None) -> _dt.datetime:
     """The current moment as an aware datetime. The ONE wall-clock read — everything else is pure.
 
-    ``timezone`` is an IANA name (e.g. ``"America/Vancouver"``); ``None`` uses the host's local tz.
-    An unknown/unavailable zone falls back to local with no crash (a clock is never load-bearing
-    enough to fail a boot).
+    ``timezone`` is a UTC offset (``UTC-08:00``) or IANA name (``America/Vancouver``); ``None`` uses
+    the host's local zone. Anything that doesn't resolve falls back to host-local with no crash — a
+    clock is never load-bearing enough to fail a boot, and host-local is correct when the machine
+    runs in your timezone (the common home case).
     """
-    if timezone:
-        try:
-            from zoneinfo import ZoneInfo
-            return _dt.datetime.now(ZoneInfo(timezone))
-        except Exception:
-            pass
+    tz = resolve_timezone(timezone)
+    if tz is not None:
+        return _dt.datetime.now(tz)
     return _dt.datetime.now().astimezone()
 
 
