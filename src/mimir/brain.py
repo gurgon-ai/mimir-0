@@ -15,6 +15,7 @@ burst before assembling, so the latest note/identity is ready, without making th
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -60,6 +61,8 @@ from .cognition.procedural import learn_procedure, render_procedures, retrieve_p
 from .cognition.self_model import synthesize_self_model
 from .cognition.sentinel import run_sentinel
 from .cognition.sleep import SleepReport, consolidate
+from .cognition.sleep_cycle import CycleReport, in_window, run_cycle
+from .cognition.sleep_cycle import Phase as SleepPhase
 from .cognition.temporal import answer_time_query, gap_insight, local_now, time_prefix
 from .cognition.wiki import WikiSource
 from .cognition.working_memory import (
@@ -89,6 +92,8 @@ from .storage.repo import (
     disabled_models,
     disabled_nodes,
     interaction_history,
+    kv_get,
+    kv_set,
     last_conversation_meta,
     latest_self_model,
     latest_sentinel_note,
@@ -219,6 +224,11 @@ class Mimir:
         self._burst.start()
         self._stop_idle = threading.Event()  # signals the idle latency heartbeat to stop
         self._idle_prober: threading.Thread | None = None
+        # The wall-clock sleep cycle: heavy maintenance in its own quiet window, since streaming +
+        # slow machines starve the post-turn burst of real idle time (DESIGN §5a).
+        self._stop_sleep = threading.Event()
+        self._sleep_scheduler: threading.Thread | None = None
+        self._start_sleep_scheduler()
 
         # Establish any identity anchors declared in config (idempotent upsert at boot), so a
         # non-interactive deployment is grounded without running the interactive interview.
@@ -898,6 +908,96 @@ class Mimir:
             log.error("narrative cycle failed during sleep (consolidation unaffected): %s", exc)
         return report
 
+    # -- the wall-clock sleep cycle (DESIGN §5a) --------------------------------------
+
+    _SLEEP_STATE_KEY = "sleep_cycle"
+    _last_sleep_report: SleepReport | None = None
+
+    def _sleep_phases(self) -> list[SleepPhase]:
+        """The maintenance phases, in order. Consolidation is fast (mostly deterministic, no model);
+        narratives make LLM calls, so it needs a bigger slice on a slow box."""
+        def _consolidate() -> SleepReport:
+            self._last_sleep_report = consolidate(self._storage)
+            return self._last_sleep_report
+
+        return [
+            SleepPhase("consolidate", min_minutes=2.0, run=_consolidate),
+            SleepPhase("narratives", min_minutes=10.0, run=self.generate_narratives),
+        ]
+
+    def _load_sleep_state(self) -> dict:
+        raw = kv_get(self._storage, self._SLEEP_STATE_KEY)
+        if not raw:
+            return {}
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):  # corrupt checkpoint — start fresh, don't crash the cycle
+            return {}
+
+    def _save_sleep_state(self, state: dict) -> None:
+        kv_set(self._storage, self._SLEEP_STATE_KEY, json.dumps(state))
+
+    def run_sleep_cycle(self, force: bool = False) -> CycleReport:
+        """Run the windowed sleep cycle now. ``force=True`` ignores the window + once-a-day guard —
+        the manual "run sleep" path. Otherwise honours the configured window and phase budgets."""
+        return run_cycle(
+            self._sleep_phases(),
+            clock=lambda: local_now(self.config.timezone),
+            window_start=self.config.sleep_window_start,
+            window_end=self.config.sleep_window_end,
+            load_state=self._load_sleep_state,
+            save_state=self._save_sleep_state,
+            is_busy=lambda: self._turn_active,
+            force=force,
+        )
+
+    def sleep_cycle_status(self) -> dict[str, Any]:
+        """Window config + today's checkpoint, for the UI's sleep panel."""
+        state = self._load_sleep_state()
+        now = local_now(self.config.timezone)
+        return {
+            "enabled": self.config.sleep_enabled,
+            "window_start": self.config.sleep_window_start,
+            "window_end": self.config.sleep_window_end,
+            "in_window": in_window(now, self.config.sleep_window_start,
+                                   self.config.sleep_window_end),
+            "last_cycle_date": state.get("date"),
+            "completed": state.get("completed", False),
+            "phases": state.get("phases", {}),
+        }
+
+    def _start_sleep_scheduler(self) -> None:
+        """Daemon: every check interval, if inside the window (and not done today, not mid-turn) run
+        the cycle. Catch-up before noon covers a window missed to a powered-off/restarted host."""
+        if not self.config.sleep_enabled or self._sleep_scheduler is not None:
+            return
+        interval = max(60.0, self.config.sleep_check_interval_s)
+        start, end = self.config.sleep_window_start, self.config.sleep_window_end
+
+        def _loop() -> None:
+            log.info("sleep: scheduler started (window %s–%s, every %.0fs)", start, end, interval)
+            while not self._stop_sleep.wait(timeout=interval):
+                try:
+                    now = local_now(self.config.timezone)
+                    state = self._load_sleep_state()
+                    done_today = (state.get("date") == now.strftime("%Y-%m-%d")
+                                  and state.get("completed"))
+                    if done_today or self._turn_active:
+                        continue
+                    catch_up = (not in_window(now, start, end)) and now.hour < 12
+                    if in_window(now, start, end) or catch_up:
+                        if catch_up:
+                            log.info("sleep: window missed; catch-up at %s", now.strftime("%H:%M"))
+                        self.run_sleep_cycle()
+                except StorageError:  # raced a close() — the store is gone; stop quietly (§10)
+                    return
+                except Exception as exc:  # the scheduler must never die on a transient error (§10)
+                    log.error("sleep: scheduler tick failed: %s", exc, exc_info=True)
+
+        scheduler = threading.Thread(target=_loop, name="mimir-sleep-cycle", daemon=True)
+        scheduler.start()
+        self._sleep_scheduler = scheduler
+
     def scan_fleet(self) -> FleetScanResult:
         """Inventory the model fleet (nodes + models) and rebuild the catalogue (DESIGN §5)."""
         self._model.refresh_inventory()
@@ -1184,9 +1284,13 @@ class Mimir:
     def close(self) -> None:
         self._burst.stop()
         self._stop_idle.set()
+        self._stop_sleep.set()
         if self._idle_prober is not None:
             self._idle_prober.join(timeout=5)
             self._idle_prober = None
+        if self._sleep_scheduler is not None:
+            self._sleep_scheduler.join(timeout=5)
+            self._sleep_scheduler = None
         self._model.stop_prober()
         self._storage.close()
 

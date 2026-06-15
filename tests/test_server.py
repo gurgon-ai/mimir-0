@@ -445,3 +445,13 @@ def test_wiki_status_endpoint(base_url: str) -> None:
     assert status == 200 and data == {"enabled": False}
     _, html = _get_html(base_url + "/")
     assert 'id="wikiStatus"' in html  # the Docs-tab status line
+
+
+def test_sleep_status_endpoint(base_url: str) -> None:
+    status, data = _json("GET", base_url + "/api/sleep/status")
+    assert status == 200
+    assert data["enabled"] is True  # default-on window scheduler
+    assert data["window_start"] and data["window_end"]
+    assert "in_window" in data
+    _, html = _get_html(base_url + "/")
+    assert 'id="sleepStatus"' in html  # the Mind-tab sleep panel

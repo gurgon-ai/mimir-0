@@ -395,9 +395,12 @@ refresh_every = 4               # turns between folding recent exchanges into th
 hops = 2                        # how far to traverse from a turn's entities (1–2); 0 disables
 max_facts = 8                   # max connected facts injected per turn
 
-[sleep]
-every = 0                       # turns between consolidation passes (dedup/decay/archive/
-                                # contradictions); 0 = manual (brain.sleep() / web UI / cron)
+[sleep]                         # the sleep cycle: consolidation + narratives in a nightly window
+enabled = true                  # the wall-clock scheduler (recommended on)
+window_start = "02:00"          # local HH:MM the maintenance window opens
+window_end = "06:00"            # local HH:MM it closes (may cross midnight, e.g. "23:00"→"06:00")
+check_interval_s = 900          # how often the daemon checks the clock (15 min)
+every = 0                       # legacy turn-cadence path (superseded by the window); 0 = off
 
 [procedural]
 top_k = 3                       # max matching learned habits injected per turn

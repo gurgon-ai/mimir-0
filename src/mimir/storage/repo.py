@@ -159,6 +159,28 @@ def record_interaction(
     gateway.submit(_write)
 
 
+def kv_get(gateway: StorageGateway, key: str) -> str | None:
+    """Read a value from the generic key→value store, or ``None`` if unset."""
+    def _read(conn: sqlite3.Connection) -> str | None:
+        row = conn.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    return gateway.read(_read)
+
+
+def kv_set(gateway: StorageGateway, key: str, value: str) -> None:
+    """Upsert a value into the generic key→value store (opaque text; callers JSON-encode)."""
+    ts = time.time()
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "INSERT OR REPLACE INTO kv (key, value, updated_at) VALUES (?, ?, ?)",
+            (key, value, ts),
+        )
+
+    gateway.submit(_write)
+
+
 def save_narrative(
     gateway: StorageGateway, *, scope: str, period: str, narrative: str,
     source_count: int = 0, created_at: float | None = None,

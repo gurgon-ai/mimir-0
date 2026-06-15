@@ -169,6 +169,8 @@ class _Handler(BaseHTTPRequestHandler):
                     self._send_json(self.server.brain.graph_map())
             elif route == "/api/wiki/status":
                 self._send_json(self.server.brain.wiki_status())  # lock-free (quick external check)
+            elif route == "/api/sleep/status":
+                self._send_json(self.server.brain.sleep_cycle_status())  # lock-free (reads state)
             elif route == "/api/procedures":
                 self._send_json(self._procedures())
             elif route == "/api/fleet":
@@ -758,15 +760,26 @@ class _Handler(BaseHTTPRequestHandler):
         }
 
     def _sleep(self) -> dict[str, Any]:
+        # Manual "run sleep now": force the full cycle (ignores window + daily guard) so a click
+        # also stamps today's checkpoint, and the night scheduler then skips a redundant run.
         with self.server.brain_lock:
-            report = self.server.brain.sleep()
-        return {
-            "deduped": report.deduped,
-            "decayed": report.decayed,
-            "archived": report.archived,
-            "contradictions_resolved": report.contradictions_resolved,
-            "total_changes": report.total_changes,
+            cycle = self.server.brain.run_sleep_cycle(force=True)
+            report = self.server.brain._last_sleep_report
+        out: dict[str, Any] = {
+            "ran": cycle.ran,
+            "skipped": cycle.skipped,
+            "failed": cycle.failed,
+            "completed": cycle.completed,
         }
+        if report is not None:
+            out.update({
+                "deduped": report.deduped,
+                "decayed": report.decayed,
+                "archived": report.archived,
+                "contradictions_resolved": report.contradictions_resolved,
+                "total_changes": report.total_changes,
+            })
+        return out
 
     def _mind(self) -> dict[str, Any]:
         brain = self.server.brain
@@ -1075,7 +1088,9 @@ _HTML = """<!doctype html>
       <h2>Self-model</h2>
       <div class="selfmodel" id="selfModel">—</div>
       <div class="stats" id="mindStats"></div>
-      <button class="secondary" id="sleepBtn" type="button">Consolidate now</button>
+      <h2>Sleep cycle</h2>
+      <div id="sleepStatus" class="hint">—</div>
+      <button class="secondary" id="sleepBtn" type="button">Run sleep now</button>
       <div id="sleepResult" class="hint"></div>
       <h2>Working memory</h2>
       <div class="selfmodel" id="workingMemory">—</div>
@@ -1632,6 +1647,7 @@ async function loadMind() {
       refl.appendChild(d);
     });
     if (!(m.recent_reflections||[]).length) refl.innerHTML = '<div class="hint">No reflections yet.</div>';
+    loadSleepStatus();
   } catch (e) { $("selfModel").textContent = "error: " + e.message; }
 }
 
@@ -1675,12 +1691,32 @@ async function loadGraph() {
   } catch (e) { $("graphList").innerHTML = "error: " + e.message; }
 }
 
+async function loadSleepStatus() {
+  const el = $("sleepStatus");
+  try {
+    const s = await api("GET", "/api/sleep/status");
+    const win = `${s.window_start}–${s.window_end}`;
+    const sched = s.enabled
+      ? `Nightly window <b>${win}</b>${s.in_window ? ' <span style="color:#7fd17f;">(open now)</span>' : ''}`
+      : `Scheduler <b>off</b> — manual only`;
+    let last = "never run";
+    if (s.last_cycle_date) {
+      const phases = Object.entries(s.phases || {}).map(([k,v]) => `${k}: ${v}`).join(", ");
+      last = `last: ${s.last_cycle_date}${s.completed ? " ✓" : " (partial)"}${phases ? " — " + phases : ""}`;
+    }
+    el.innerHTML = `${sched}. ${last}. Set the window in <code>[sleep]</code> in mimir.toml.`;
+  } catch (e) { el.textContent = "error: " + e.message; }
+}
+
 $("sleepBtn").addEventListener("click", async () => {
-  $("sleepResult").textContent = "Consolidating…";
+  $("sleepResult").textContent = "Running sleep cycle…";
   try {
     const r = await api("POST", "/api/sleep");
-    $("sleepResult").textContent = `Deduped ${r.deduped} · decayed ${r.decayed} · archived ${r.archived} · contradictions ${r.contradictions_resolved}.`;
-    loadMind(); refreshState();
+    const counts = (r.deduped !== undefined)
+      ? ` Deduped ${r.deduped} · decayed ${r.decayed} · archived ${r.archived} · contradictions ${r.contradictions_resolved}.`
+      : "";
+    $("sleepResult").textContent = `Ran ${(r.ran||[]).join(", ") || "nothing"}.${counts}`;
+    loadSleepStatus(); loadMind(); refreshState();
   } catch (e) { $("sleepResult").textContent = "Error: " + e.message; }
 });
 

@@ -101,7 +101,9 @@ On top of that:
 - **Visual memory graph** — the chat pane flips to a drifting "galaxy" of memory blobs + entities
   (foundational facts brightest and central); click any blob to review/edit it.
 - **Sleep / consolidation** — dedup, decay, archival, and contradiction resolution, so memory
-  maintains itself.
+  maintains itself. Runs in a user-set **nightly window** (with phase budgeting, same-night resume,
+  and catch-up) because streaming chat on a slow machine leaves the post-turn window too short for
+  heavy work — plus a "run sleep now" button any time (DESIGN §5a).
 - **Inner council** — adversarial deliberation across whatever models are installed.
 - **Distributed fleet + qualifying tournament** — point it at your LAN and it discovers every
   `ollama serve` (zero setup on those machines), routes each request to a node that has the model,

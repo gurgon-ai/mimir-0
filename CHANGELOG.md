@@ -105,6 +105,20 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **A wall-clock sleep cycle — heavy maintenance gets its own quiet window (DESIGN §5a).** The
+  post-turn *burst* worker assumes the model idles while you read the reply, but with **streaming**
+  chat the model is busy to the last token and on a **slow machine** one turn eats the window — so
+  consolidation (dedup/decay/archive/contradiction hygiene) + narrative roll-ups now run in a
+  user-set nightly window instead of fighting for scraps. A `[sleep]` block sets `enabled`
+  (default **on**), `window_start`/`window_end` (cross-midnight aware), and `check_interval_s`. A
+  daemon checks the clock; inside the window — and not already done today, and not mid-turn — it runs
+  the phases **in order, skipping any that won't fit the time left**, checkpointed per-day so a
+  same-night restart resumes and it never runs twice a day, with **catch-up before noon** if the
+  window was missed (powered-off/restarted host). Manual "Run sleep now" any time (Mind tab → forces
+  the full cycle and stamps the day). New: `cognition/sleep_cycle.py`, a generic `kv` table
+  (schema v19) for the checkpoint, `Mimir.run_sleep_cycle()`/`sleep_cycle_status()`, and
+  `GET /api/sleep/status`. The window is the new primary path; the old turn-cadence `[sleep] every`
+  stays (default off) for back-compat.
 - **Offline encyclopedia as a live reference layer (Kiwix/ZIM, DESIGN §9) — zero new dependency.**
   Point a `[wiki]` config block at a running `kiwix-serve` over any ZIM (Wikipedia nopic, a medical
   wiki, a top-50k slice, …) and each turn's query is searched live; the top articles' lead text is
