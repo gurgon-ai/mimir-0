@@ -8,6 +8,10 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Changed
+- **Consolidation prunes stale single-latest rows.** Working-memory and self-model rows accumulate
+  one-per-synthesis, but only the latest of each is ever used (recency, limit 1) — pure dead weight on
+  a long-lived deployment. The sleep cycle's consolidate pass now prunes them (keeps 2 working-memory,
+  3 self-model), reported as `pruned` in the sleep report.
 - **Working memory now keeps recent turns raw and folds only the oldest (true rolling compression).**
   Previously a fold summarized *all* buffered exchanges and **deleted every one**, so right after a
   compression the prompt had only the summary and no recent verbatim turns. Now, once
