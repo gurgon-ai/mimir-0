@@ -407,6 +407,10 @@ every = 0                       # legacy turn-cadence path (superseded by the wi
 enabled = true                  # also toggle live in the Sleep tab; "Deliberate now" triggers it manually
 limit = 3                       # max conflicts argued per cycle (each is several model calls)
 
+[server]                        # reference web server / integration API — see docs/API.md
+# api_token = "..."             # require Authorization: Bearer <token> on /api/* (env MIMIR_API_TOKEN wins)
+# cors_origins = ["*"]          # browser origins allowed to call the API; empty = same-origin only
+
 [self_knowledge]                # bake a doc describing the system into memory each nightly cycle
 doc = "README.md"               # path (relative to the working dir); empty/unset disables it
                                 # → recallable DOCUMENT-tier memory; "what are you?" answers from it

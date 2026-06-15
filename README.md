@@ -129,7 +129,10 @@ On top of that:
     system on this hardware* — best **for you**, not "best model in the world."
 
   Run the brain on a Raspberry Pi and borrow GPUs over the network.
-- **Reference web UI** — a zero-dependency stdlib server for all of the above.
+- **Reference web UI + integration API** — a zero-dependency stdlib server for all of the above, and
+  a documented, optionally token-authenticated HTTP API ([`docs/API.md`](docs/API.md)). Mimir is a
+  *brain with endpoints, no built-in hands*: bring your own IO (voice, avatar, Home Assistant, an
+  agent framework — or a relay where two Mimirs talk to each other).
 
 ## Runtime contract
 

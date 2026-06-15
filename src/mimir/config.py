@@ -11,6 +11,7 @@ never a silent default that changes behavior behind the user's back.
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -162,6 +163,12 @@ class Config:
     # nightly cycle (content-hashed, so it re-embeds only when the doc changes) so it can answer
     # about itself. Empty disables. Path is relative to the working directory (the repo root).
     self_knowledge_doc: str | None = "README.md"
+    # Web server / integration API (DESIGN §8: a brain with endpoints, no built-in hands).
+    # ``api_token`` (or env ``MIMIR_API_TOKEN``, which wins) gates every ``/api/*`` route via an
+    # ``Authorization: Bearer <token>`` check; unset = open (localhost dev). ``cors_origins`` = the
+    # browser origins allowed to call it (``["*"]`` for any); empty = same-origin only.
+    api_token: str | None = None
+    cors_origins: list[str] = field(default_factory=list)
     # Procedural memory: how many matching procedures to inject, and the minimum trigger match.
     procedural_top_k: int = 3
     procedural_min_match: float = 0.3
@@ -194,6 +201,15 @@ class Config:
                 raise ConfigError(f"sleep.window_{label} must be 'HH:MM', got {value!r}") from None
             if not (0 <= h < 24 and 0 <= m < 60):
                 raise ConfigError(f"sleep.window_{label} out of range: {value!r}")
+
+
+def _as_str_list(value: Any) -> list[str]:
+    """Accept a string or a list in config and normalize to a list of strings (CORS origins)."""
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [value]
+    return [str(v) for v in value]
 
 
 def _parse_roles(raw: dict[str, Any]) -> dict[str, RoleSpec]:
@@ -323,6 +339,10 @@ def load_config(path: str | Path) -> Config:
         ),
         error_context_max=int(raw.get("diagnostics", {}).get("error_context_max", 5)),
         self_knowledge_doc=(raw.get("self_knowledge", {}).get("doc", "README.md") or None),
+        # Env var wins over config so secrets needn't live in the TOML file.
+        api_token=(os.environ.get("MIMIR_API_TOKEN") or raw.get("server", {}).get("api_token")
+                   or None),
+        cors_origins=_as_str_list(raw.get("server", {}).get("cors_origins", [])),
         procedural_top_k=int(raw.get("procedural", {}).get("top_k", 3)),
         procedural_min_match=float(raw.get("procedural", {}).get("min_match", 0.3)),
         timezone=(str(raw["locale"]["timezone"]) if raw.get("locale", {}).get("timezone")

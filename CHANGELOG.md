@@ -163,6 +163,16 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **Integration API + a security layer — a brain with endpoints, no built-in hands (DESIGN §8).**
+  Mimir 0 deliberately ships no IO of its own; instead the HTTP surface is now a documented,
+  optionally-authenticated **integration API** so you build your own (voice, avatar, Home Assistant,
+  social, agent frameworks — or a middle layer where **two Mimirs talk to each other**). Set
+  `[server] api_token` (or env `MIMIR_API_TOKEN`, which wins) and every `/api/*` route requires
+  `Authorization: Bearer <token>` (constant-time checked); unset = open localhost as before. The page
+  shell stays open so the bundled UI prompts for the token once and stores it. `[server] cors_origins`
+  enables browser frontends on other origins (with an `OPTIONS` preflight). The `user` field on
+  `POST /api/turn` is the **speaker identity** — the seam for agent-to-agent. Full contract in
+  [`docs/API.md`](docs/API.md). New config: `[server] api_token`, `cors_origins`.
 - **Self-knowledge — the system bakes its own README into memory so it knows what it is.** A
   `self_knowledge` phase in the sleep cycle ingests a configured doc (default `README.md`) through the
   document pipeline into recallable, `DOCUMENT`-tier memory tagged with its source — so "what are you
