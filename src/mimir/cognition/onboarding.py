@@ -54,8 +54,10 @@ class OnboardingQuestion:
     anchor: str | None = None  # identity-anchor key to also set, or None
 
 
-# The question set (the user's get-to-know-you). Order is the interview order. Deliberately short —
-# the smallest set of durable facts that orient behaviour from turn one (foundational-interview §3).
+# The question set (the get-to-know-you). Order is the interview order: identity → people/place/
+# routine → mission/values/voice/style → trust → local grounding → catch-all. Drawn from the Core +
+# Expanded sets in docs/mimir_foundational_interview.md §8; all generic (no deployment specifics).
+# Everything's skippable and editable later, so a longer set is fine — answer what you like.
 ONBOARDING_QUESTIONS: list[OnboardingQuestion] = [
     OnboardingQuestion(
         "assistant_name", "First — what would you like to call me?",
@@ -89,6 +91,62 @@ ONBOARDING_QUESTIONS: list[OnboardingQuestion] = [
     OnboardingQuestion(
         "interests", "What are you into — interests worth my knowing so I'm useful, not generic?",
         "The operator's interests: {answer}.",
+    ),
+    # --- mission, values, voice (the operating frame; several mirror identity anchors) ---
+    OnboardingQuestion(
+        "purpose", "What do you most want my help with — what's my job here?",
+        "What the operator most wants my help with: {answer}.", anchor="purpose",
+    ),
+    OnboardingQuestion(
+        "values", "What principles or values should guide how you act?",
+        "Principles the operator wants guiding me: {answer}.", anchor="values",
+    ),
+    OnboardingQuestion(
+        "voice", "How should I talk with you — tone and style?",
+        "How the operator wants me to communicate: {answer}.", anchor="voice",
+    ),
+    OnboardingQuestion(
+        "answer_style",
+        "When you ask me something, what's your default — brief, detailed, options with tradeoffs, "
+        "or step-by-step?",
+        "The operator's preferred answer style: {answer}.",
+    ),
+    OnboardingQuestion(
+        "uncertainty",
+        "When I'm unsure, should I ask, give a best effort with caveats, or hold back until I know "
+        "more?",
+        "How the operator wants me to handle uncertainty: {answer}.",
+    ),
+    OnboardingQuestion(
+        "boundaries", "What should I never do — your hard limits and privacy lines?",
+        "Hard limits / privacy lines the operator set: {answer}.", anchor="boundaries",
+    ),
+    OnboardingQuestion(
+        "memory_policy",
+        "What's fair game to remember long-term, and what should I treat as sensitive or "
+        "temporary?",
+        "What's fair to remember vs. keep sensitive/temporary: {answer}.",
+    ),
+    # --- local grounding (place-specific, kept generic in core) ---
+    OnboardingQuestion(
+        "local_scope",
+        "When you say \"local\", what should that mean — this property, the town, the region?",
+        "What \"local\" means to the operator: {answer}.",
+    ),
+    OnboardingQuestion(
+        "local_conditions",
+        "What local conditions matter most — weather, outages, water, wildlife, access?",
+        "Local conditions that matter here: {answer}.",
+    ),
+    OnboardingQuestion(
+        "local_vocabulary",
+        "Any names I should know for rooms, zones, vehicles, gardens, or places here?",
+        "Local names / vocabulary I should know: {answer}.",
+    ),
+    OnboardingQuestion(
+        "anything_else",
+        "Anything else about you, this place, or how you want me to work that would help?",
+        "Other context the operator shared at setup: {answer}.",
     ),
 ]
 _BY_KEY: dict[str, OnboardingQuestion] = {q.key: q for q in ONBOARDING_QUESTIONS}
