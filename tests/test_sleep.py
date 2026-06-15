@@ -120,3 +120,18 @@ def test_brain_sleep_returns_report(brain: Mimir) -> None:
     report = brain.sleep()
     assert isinstance(report, SleepReport)
     assert report.total_changes >= 0
+
+
+def test_consolidation_prunes_stale_working_memory_and_self_model(brain: Mimir) -> None:
+    from mimir.cognition.sleep import SELF_MODEL_KEEP, WORKING_MEMORY_KEEP
+    from mimir.storage.repo import count_memories, save_memory
+
+    for i in range(6):  # simulate many syntheses accumulating
+        save_memory(brain._storage, Memory(text=f"wm {i}", kind=MemoryKind.WORKING_MEMORY,
+                                           evidence_tier=EvidenceTier.INFERRED))
+        save_memory(brain._storage, Memory(text=f"sm {i}", kind=MemoryKind.SELF_MODEL,
+                                           evidence_tier=EvidenceTier.INFERRED))
+    report = consolidate(brain._storage)
+    assert report.pruned >= 1
+    assert count_memories(brain._storage, kind=MemoryKind.WORKING_MEMORY) == WORKING_MEMORY_KEEP
+    assert count_memories(brain._storage, kind=MemoryKind.SELF_MODEL) == SELF_MODEL_KEEP

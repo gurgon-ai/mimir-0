@@ -34,6 +34,7 @@ from ..storage.repo import (
     delete_memories,
     delete_triples,
     list_memories,
+    prune_kind,
 )
 
 log = logging.getLogger("mimir.sleep")
@@ -58,10 +59,19 @@ class SleepReport:
     decayed: int = 0
     archived: int = 0
     contradictions_resolved: int = 0
+    pruned: int = 0  # stale single-latest-wins rows (working-memory/self-model versions) tidied
 
     @property
     def total_changes(self) -> int:
-        return self.deduped + self.decayed + self.archived + self.contradictions_resolved
+        return (self.deduped + self.decayed + self.archived
+                + self.contradictions_resolved + self.pruned)
+
+
+# Working-memory and self-model rows accumulate one-per-synthesis but only the latest of each is
+# ever injected (fetched by recency, limit 1) and they're a separate kind (never recalled) — so old
+# versions are pure dead weight. Keep a couple for introspection; sleep prunes the rest.
+WORKING_MEMORY_KEEP = 2
+SELF_MODEL_KEEP = 3
 
 
 def _norm(text: str) -> str:
@@ -82,13 +92,18 @@ def consolidate(storage: StorageGateway, *, now: float | None = None) -> SleepRe
     report.decayed = _decay(storage, memories, clock)  # mutates salience/confidence in-memory
     report.archived = _archive(storage, memories)
     report.contradictions_resolved = _resolve_contradictions(storage)
+    report.pruned = (
+        prune_kind(storage, MemoryKind.WORKING_MEMORY, WORKING_MEMORY_KEEP)
+        + prune_kind(storage, MemoryKind.SELF_MODEL, SELF_MODEL_KEEP)
+    )
 
     log.info(
-        "sleep: deduped=%d decayed=%d archived=%d contradictions=%d",
+        "sleep: deduped=%d decayed=%d archived=%d contradictions=%d pruned=%d",
         report.deduped,
         report.decayed,
         report.archived,
         report.contradictions_resolved,
+        report.pruned,
     )
     return report
 
