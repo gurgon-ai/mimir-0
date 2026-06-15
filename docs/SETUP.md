@@ -407,6 +407,10 @@ every = 0                       # legacy turn-cadence path (superseded by the wi
 enabled = true                  # also toggle live in the Sleep tab; "Deliberate now" triggers it manually
 limit = 3                       # max conflicts argued per cycle (each is several model calls)
 
+[self_knowledge]                # bake a doc describing the system into memory each nightly cycle
+doc = "README.md"               # path (relative to the working dir); empty/unset disables it
+                                # → recallable DOCUMENT-tier memory; "what are you?" answers from it
+
 [diagnostics]                   # self-observability: the system sees its own recent errors (§10)
 surface_errors = true           # inject a "recent errors" block into the turn's context
 error_context_window_s = 1800   # an error this recent (seconds) shows in context; older ones fade

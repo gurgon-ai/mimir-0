@@ -159,6 +159,13 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **Self-knowledge — the system bakes its own README into memory so it knows what it is.** A
+  `self_knowledge` phase in the sleep cycle ingests a configured doc (default `README.md`) through the
+  document pipeline into recallable, `DOCUMENT`-tier memory tagged with its source — so "what are you
+  / how do you work?" is answered from its own docs (and the self-model, which reads the store, draws
+  on it). Content-hashed, so it re-embeds only when the doc changes; "Run sleep now" bakes it on
+  demand; fail-soft if the file's missing. Config: `[self_knowledge] doc` (empty disables). New:
+  `Mimir.bake_self_knowledge()`.
 - **Self-observability — the system sees its own recent errors (DESIGN §10).** The doctrine was
   fail-*loud* (every downgrade logged); now it's also fail-*aware*. A bounded ring
   (`diagnostics.py`) captures `WARNING`+ off the `mimir` logger, and two surfaces use it: (1) a

@@ -15,6 +15,7 @@ burst before assembling, so the latest note/identity is ready, without making th
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import threading
@@ -85,7 +86,7 @@ from .diagnostics import install_error_capture, render_errors
 from .embed.base import Embedder, EmbeddingMode
 from .embed.endpoint import EndpointEmbedder, NullEmbedder
 from .embed.locality import LocalityHashEmbedder
-from .errors import ConfigError, StorageError
+from .errors import ConfigError, IngestError, StorageError
 from .model.discovery import discover_node_urls
 from .model.gateway import ModelGateway
 from .model.pool import ProviderPool
@@ -1053,6 +1054,7 @@ class Mimir:
 
         return [
             SleepPhase("consolidate", min_minutes=2.0, run=_consolidate),
+            SleepPhase("self_knowledge", min_minutes=1.0, run=self.bake_self_knowledge),
             SleepPhase("deliberate", min_minutes=15.0, run=self.deliberate_open_questions),
             SleepPhase("narratives", min_minutes=10.0, run=self.generate_narratives),
             SleepPhase("health", min_minutes=1.0, run=self.digest_errors),  # cheap, no model
@@ -1225,6 +1227,34 @@ class Mimir:
                  digest["total"],
                  ", ".join(f"{k}:{v}" for k, v in sorted(counts.items())) or "none")
         return digest
+
+    _SELF_KNOWLEDGE_HASH_KEY = "self_knowledge_hash"
+
+    def bake_self_knowledge(self, *, force: bool = False) -> dict[str, Any]:
+        """Bake the self-knowledge doc (default README) into memory so the system can answer about
+        what it is and how it works. Content-hashed: re-embeds only when the doc changed (or force).
+
+        A sleep-cycle phase; also reachable via 'Run sleep now'. Recall (and the self-model, which
+        reads the store) then draw on it. Fail-soft — never sinks the cycle (DESIGN §10)."""
+        doc = self.config.self_knowledge_doc
+        if not doc:
+            return {"baked": False, "reason": "disabled"}
+        path = Path(doc)
+        if not path.is_file():
+            log.warning("self-knowledge: doc not found, skipping: %s", path)
+            return {"baked": False, "reason": "not found", "path": str(path)}
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if not force and kv_get(self._storage, self._SELF_KNOWLEDGE_HASH_KEY) == digest:
+            return {"baked": False, "reason": "unchanged", "path": str(path)}
+        try:
+            result = ingest_document(self._storage, self._embedder, path=path)
+        except IngestError as exc:
+            log.error("self-knowledge: could not bake %s: %s", path, exc)
+            return {"baked": False, "reason": str(exc), "path": str(path)}
+        kv_set(self._storage, self._SELF_KNOWLEDGE_HASH_KEY, digest)
+        log.info("self-knowledge: baked %s (%d chunk(s)) into memory", path.name,
+                 result.chunks_written)
+        return {"baked": True, "path": str(path), "chunks": result.chunks_written}
 
     def health_digest(self) -> dict[str, Any] | None:
         """The last nightly health digest (kv), or None if the sleep cycle hasn't run one yet."""

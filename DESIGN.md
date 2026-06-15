@@ -379,8 +379,10 @@ inference engine, which is *built* to be distributed-and-idle-aware rather than 
 burst worker's premise is that the model idles while the user reads the reply. Two things break it:
 **streaming** keeps the model busy until the last token, and on a **slow machine** a single turn can
 consume the whole post-response window. So the heavy, model-touching maintenance — consolidation
-(dedup, decay, archive, contradiction hygiene) + temporal-narrative roll-ups — gets its **own
-wall-clock window** when nobody's around (`cognition/sleep_cycle.py`, the analogue of sleep). A
+(dedup, decay, archive, contradiction hygiene), self-directed deliberation, temporal-narrative
+roll-ups, a **self-knowledge bake** (its own README → recallable memory, so it knows what it is and
+how it works), and an error-digest health pass — gets its **own wall-clock window** when nobody's
+around (`cognition/sleep_cycle.py`, the analogue of sleep). A
 daemon checks the clock against a user-set `[sleep]` window; inside it (and not already done today,
 and not mid-turn) it runs the phases **in order, skipping any that won't fit the minutes left** —
 graceful degradation on a slow box rather than starting work it can't finish. Each phase is
