@@ -5,12 +5,16 @@ healthy without a human curating it:
 
 - **dedup** — exact and near-duplicate (cosine) memories merged into the best-sourced survivor,
   summing access counts.
-- **decay** — salience decays with disuse (drives forgetting); **confidence decays only for
-  low-tier provisionals**, never authority-tier facts — so a true-but-unused fact loses salience
-  but not truth (DESIGN §3c: don't let "haven't used it lately" masquerade as "probably false").
-- **archive** — only *low-salience provisional* memories are archived (excluded from active recall,
-  kept in the store; archiving ≠ disbelieving). High-confidence facts are never archived, which
-  avoids the death spiral the design warns about.
+- **decay** — salience decays with disuse (drives forgetting), and **faster for the decaying tiers**
+  (conversational + inferred) than for authority/document facts, so peer chatter and self-generated
+  rumination go dormant within weeks while a primary-user fact lingers for months. **Confidence
+  decays only for those same low tiers**, never authority facts — so a true-but-unused fact loses
+  salience but not truth (DESIGN §3c: don't let "haven't used it lately" masquerade as "probably
+  false").
+- **archive** — only *decaying-tier* memories (conversation/inferred) that have decayed below the
+  salience floor are archived (excluded from active recall, kept in the store; archiving ≠
+  disbelieving — confidence is preserved). Authority-tier and document facts are never archived for
+  disuse, which avoids the death spiral the design warns about.
 - **contradiction resolution** — over the entity graph: when a *functional* relation (one whose
   subject has a single value, e.g. "lives in") has conflicting objects, the newest wins and the
   stale edges are dropped. Deliberately conservative — non-functional relations are left alone, so
@@ -41,9 +45,12 @@ log = logging.getLogger("mimir.sleep")
 
 _SECONDS_PER_DAY = 86_400.0
 SALIENCE_HALF_LIFE_DAYS = 30.0
+# The decaying tiers (conversation/inferred — peer chatter + self-generated rumination) lose
+# salience faster, going dormant in weeks of disuse instead of months. This is what makes the
+# salience axis actually distil: low-value provisional content fades and archives; authority stays.
+PROVISIONAL_SALIENCE_HALF_LIFE_DAYS = 10.0
 CONFIDENCE_HALF_LIFE_DAYS = 120.0  # gentler; only applied to decaying tiers
 ARCHIVE_SALIENCE_FLOOR = 0.05
-ARCHIVE_CONFIDENCE_CEILING = 0.6  # only provisional (low-confidence) memories are archived
 NEAR_DUP_COSINE = 0.97
 
 # Relations treated as functional (a subject has at most one value). Only these are eligible for
@@ -67,11 +74,12 @@ class SleepReport:
                 + self.contradictions_resolved + self.pruned)
 
 
-# Working-memory and self-model rows accumulate one-per-synthesis but only the latest of each is
-# ever injected (fetched by recency, limit 1) and they're a separate kind (never recalled) — so old
-# versions are pure dead weight. Keep a couple for introspection; sleep prunes the rest.
+# Working-memory, self-model, and sentinel-note rows accumulate one-per-turn/synthesis but only the
+# latest of each is ever injected (fetched by recency) and they're separate kinds (never recalled) —
+# so old versions are pure dead weight. Keep a handful for introspection; sleep prunes the rest.
 WORKING_MEMORY_KEEP = 2
 SELF_MODEL_KEEP = 3
+SENTINEL_NOTE_KEEP = 10  # the "reflections" view shows recent ones; older are unused dead weight
 
 
 def _norm(text: str) -> str:
@@ -95,6 +103,7 @@ def consolidate(storage: StorageGateway, *, now: float | None = None) -> SleepRe
     report.pruned = (
         prune_kind(storage, MemoryKind.WORKING_MEMORY, WORKING_MEMORY_KEEP)
         + prune_kind(storage, MemoryKind.SELF_MODEL, SELF_MODEL_KEEP)
+        + prune_kind(storage, MemoryKind.SENTINEL_NOTE, SENTINEL_NOTE_KEEP)
     )
 
     log.info(
@@ -176,7 +185,9 @@ def _decay(storage: StorageGateway, memories: list[Memory], now: float) -> int:
         if mem.id is None:
             continue
         age_days = max(0.0, (now - mem.last_accessed) / _SECONDS_PER_DAY)
-        new_salience = mem.salience * (0.5 ** (age_days / SALIENCE_HALF_LIFE_DAYS))
+        half_life = (PROVISIONAL_SALIENCE_HALF_LIFE_DAYS if mem.evidence_tier.decays
+                     else SALIENCE_HALF_LIFE_DAYS)
+        new_salience = mem.salience * (0.5 ** (age_days / half_life))
         new_confidence = mem.confidence
         if mem.evidence_tier.decays:
             new_confidence = mem.confidence * (0.5 ** (age_days / CONFIDENCE_HALF_LIFE_DAYS))
@@ -188,13 +199,15 @@ def _decay(storage: StorageGateway, memories: list[Memory], now: float) -> int:
 
 
 def _archive(storage: StorageGateway, memories: list[Memory]) -> int:
-    # Only low-salience *provisional* memories — never archive a confident fact for going unused.
+    # Only decaying-tier memories (conversation/inferred) that have faded below the salience floor.
+    # Never archive an authority-tier or document fact for going unused (no death spiral); archiving
+    # preserves confidence — it removes from active recall, it does not disbelieve (DESIGN §3c).
     ids = [
         mem.id
         for mem in memories
         if mem.id is not None
         and mem.salience < ARCHIVE_SALIENCE_FLOOR
-        and mem.confidence < ARCHIVE_CONFIDENCE_CEILING
+        and mem.evidence_tier.decays
     ]
     return archive_memories(storage, ids)
 

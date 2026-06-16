@@ -8,6 +8,23 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Changed
+- **Memory distillation: the store now fades and prunes instead of only accumulating.** A bridge-test
+  audit found over-retention (aux-store rows piling up, the salience axis flat at 1.0, nothing ever
+  archived). Three fixes, all in the consolidation pass and tier-aware so they never touch a
+  primary-user fact:
+  - **Salience decays faster for the decaying tiers** (conversation/inferred — peer chatter and
+    self-generated rumination): a 10-day half-life vs 30 for authority/document facts, so low-value
+    provisional content goes dormant in weeks instead of months (`PROVISIONAL_SALIENCE_HALF_LIFE_DAYS`).
+  - **Archival is now tier-based, not confidence-gated.** A memory is archived when it has fallen below
+    the salience floor *and* is a decaying tier — so stale conversational content goes dormant
+    regardless of its stored confidence, while authority/document facts are still never archived for
+    disuse (no death spiral). Archiving preserves confidence (DESIGN §3c).
+  - **Sentinel notes are now pruned** like working-memory and self-model rows (keep the most recent
+    `SENTINEL_NOTE_KEEP=10`); they're fetched by recency, so older ones were pure dead weight.
+- **Inner-life musings start faint and don't repeat.** Self-generated reflections now bake at salience
+  0.25 (was 0.6) so they fade and archive within weeks unless recall revives them, and a near-duplicate
+  guard (`_is_duplicate_musing`) skips a musing that's near-identical to a recent one — so the idle
+  loop distils rather than piling up verbatim repeats.
 - **`Mimir.retier_speaker(name, tier)` — re-tier a speaker's baked memories.** Maintenance for when a
   speaker was ingested at the wrong trust level (e.g. a peer AI baked as `stated_by_primary_user`
   before `[identity] primary_user` was set): drops every memory with provenance `stated by <name>` to

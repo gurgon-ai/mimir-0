@@ -84,7 +84,7 @@ from .cognition.working_memory import (
 from .config import AUTO_MODEL, BackendConfig, Config, ProviderSpec, RoleSpec, load_config
 from .context.build import ContextBundle, build_context
 from .diagnostics import install_error_capture, render_errors
-from .embed.base import Embedder, EmbeddingMode
+from .embed.base import Embedder, EmbeddingMode, cosine
 from .embed.endpoint import EndpointEmbedder, NullEmbedder
 from .embed.locality import LocalityHashEmbedder
 from .errors import ConfigError, IngestError, StorageError
@@ -1280,13 +1280,18 @@ class Mimir:
         thought = compose_thought(self._inner_life_chat, stim)
         if not thought:
             return {"ran": False, "reason": "empty thought"}
+        vec = self._embedder.embed(thought)
+        if self._is_duplicate_musing(thought, vec):
+            # Don't pile up near-verbatim repeats — the over-retention distillation guards against.
+            self._last_thought_at = now  # still spent the cadence; don't immediately retry
+            return {"ran": False, "reason": "duplicate musing"}
         mem = Memory(
             text=thought,
             kind=MemoryKind.MEMORY,
             evidence_tier=EvidenceTier.INFERRED,
-            confidence=0.3,  # a musing, not a fact — low belief, decays unless reinforced
-            salience=0.6,
-            embedding=self._embedder.embed(thought),
+            confidence=0.3,   # a musing, not a fact — low belief; decays unless reinforced
+            salience=0.25,    # starts faint: fades and archives in weeks unless recall revives it
+            embedding=vec,
             provenance="inner life",
         )
         save_memory(self._storage, mem)
@@ -1294,6 +1299,26 @@ class Mimir:
         self._last_thought_kind = stim.kind
         log.info("inner life: mused on %s (mem %s)", stim.kind, mem.id)
         return {"ran": True, "kind": stim.kind, "thought": thought, "memory_id": mem.id}
+
+    _MUSING_DUP_COSINE = 0.95
+
+    def _is_duplicate_musing(self, text: str, vec: list[float] | None) -> bool:
+        """True if this musing is near-identical to a recent one, so the inner life doesn't accrue
+        verbatim repeats. Exact lexical match always counts; cosine only when embeddings are
+        semantic (endpoint mode) — a hash embedder's cosine would be noise."""
+        norm = " ".join(text.lower().split())
+        recent = [
+            m for m in list_memories(self._storage, user=None, kind=MemoryKind.MEMORY)
+            if (m.provenance or "") == "inner life"
+        ]
+        recent.sort(key=lambda m: m.created_at, reverse=True)
+        semantic = vec is not None and self._embedder.mode.is_semantic
+        for m in recent[:20]:
+            if " ".join((m.text or "").lower().split()) == norm:
+                return True
+            if semantic and m.embedding and cosine(vec, m.embedding) >= self._MUSING_DUP_COSINE:
+                return True
+        return False
 
     def _start_inner_life(self) -> None:
         """Daemon: every check interval run one inner-life tick (which self-gates on
