@@ -85,6 +85,8 @@ limit = 3                    # max conflicts argued per cycle (each is several m
 # Set a token to require `Authorization: Bearer <token>` on every /api/* route — or use the env var
 # MIMIR_API_TOKEN, which overrides this (keeps secrets out of the file).
 # api_token = "a-long-random-string"
+# api_token_env = "MIMIR_API_TOKEN"   # env var to read the token from (wins over api_token above).
+                                      # Running two instances on one box? Give each its own var name.
 # cors_origins = ["https://my-avatar.local"]   # browser origins allowed to call the API; ["*"] = any
 
 [self_knowledge]

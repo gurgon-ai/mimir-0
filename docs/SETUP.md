@@ -411,7 +411,8 @@ enabled = true                  # also toggle live in the Sleep tab; "Deliberate
 limit = 3                       # max conflicts argued per cycle (each is several model calls)
 
 [server]                        # reference web server / integration API — see docs/API.md
-# api_token = "..."             # require Authorization: Bearer <token> on /api/* (env MIMIR_API_TOKEN wins)
+# api_token = "..."             # require Authorization: Bearer <token> on /api/* (env var wins)
+# api_token_env = "MIMIR_API_TOKEN"  # which env var holds the token; give co-located instances their own
 # cors_origins = ["*"]          # browser origins allowed to call the API; empty = same-origin only
 
 [self_knowledge]                # bake a doc describing the system into memory each nightly cycle
