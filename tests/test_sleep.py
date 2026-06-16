@@ -122,16 +122,58 @@ def test_brain_sleep_returns_report(brain: Mimir) -> None:
     assert report.total_changes >= 0
 
 
-def test_consolidation_prunes_stale_working_memory_and_self_model(brain: Mimir) -> None:
-    from mimir.cognition.sleep import SELF_MODEL_KEEP, WORKING_MEMORY_KEEP
+def test_consolidation_prunes_stale_aux_stores(brain: Mimir) -> None:
+    from mimir.cognition.sleep import SELF_MODEL_KEEP, SENTINEL_NOTE_KEEP, WORKING_MEMORY_KEEP
     from mimir.storage.repo import count_memories, save_memory
 
-    for i in range(6):  # simulate many syntheses accumulating
+    for i in range(15):  # simulate many turns/syntheses accumulating one-per-turn aux rows
         save_memory(brain._storage, Memory(text=f"wm {i}", kind=MemoryKind.WORKING_MEMORY,
                                            evidence_tier=EvidenceTier.INFERRED))
         save_memory(brain._storage, Memory(text=f"sm {i}", kind=MemoryKind.SELF_MODEL,
+                                           evidence_tier=EvidenceTier.INFERRED))
+        save_memory(brain._storage, Memory(text=f"note {i}", kind=MemoryKind.SENTINEL_NOTE,
                                            evidence_tier=EvidenceTier.INFERRED))
     report = consolidate(brain._storage)
     assert report.pruned >= 1
     assert count_memories(brain._storage, kind=MemoryKind.WORKING_MEMORY) == WORKING_MEMORY_KEEP
     assert count_memories(brain._storage, kind=MemoryKind.SELF_MODEL) == SELF_MODEL_KEEP
+    assert count_memories(brain._storage, kind=MemoryKind.SENTINEL_NOTE) == SENTINEL_NOTE_KEEP
+
+
+def test_archives_stale_conversational_but_not_authority(brain: Mimir) -> None:
+    # Distillation: a conversational memory that has fallen below the salience floor goes dormant —
+    # regardless of its (high) confidence — while an authority-tier fact at the same salience is
+    # protected. last_accessed=now isolates the archive step from decay (confidence stays put).
+    now = time.time()
+    save_memory(brain._storage, Memory(
+        text="peer chatter", salience=0.01, confidence=0.9,  # high confidence, but conversational
+        evidence_tier=EvidenceTier.CONVERSATION, created_at=now, last_accessed=now,
+    ))
+    save_memory(brain._storage, Memory(
+        text="primary fact", salience=0.01, confidence=0.9,
+        evidence_tier=EvidenceTier.STATED_BY_PRIMARY_USER,
+        created_at=now, last_accessed=now,
+    ))
+    consolidate(brain._storage, now=now)
+    active = {m.text for m in list_memories(brain._storage, kind=MemoryKind.MEMORY)}
+    assert "peer chatter" not in active     # decaying tier + below floor → archived
+    assert "primary fact" in active         # authority tier → never archived for disuse
+    # archiving ≠ disbelieving: the row is kept and the archive step preserves confidence
+    rows = {m.text: m for m in browse_memories(brain._storage, kind=MemoryKind.MEMORY)}
+    assert rows["peer chatter"].archived and rows["peer chatter"].confidence == 0.9
+
+
+def test_conversational_salience_decays_faster_than_authority(brain: Mimir) -> None:
+    now = time.time()
+    old = now - 20 * _DAY
+    conv = save_memory(brain._storage, Memory(
+        text="conv", salience=1.0, evidence_tier=EvidenceTier.CONVERSATION,
+        created_at=old, last_accessed=old,
+    ))
+    auth = save_memory(brain._storage, Memory(
+        text="auth", salience=1.0, evidence_tier=EvidenceTier.STATED_BY_PRIMARY_USER,
+        created_at=old, last_accessed=old,
+    ))
+    consolidate(brain._storage, now=now)
+    # 20 days: conversational has a 10-day half-life (~0.25), authority a 30-day one (~0.63).
+    assert get_memory(brain._storage, conv).salience < get_memory(brain._storage, auth).salience

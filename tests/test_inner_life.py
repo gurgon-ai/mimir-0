@@ -100,6 +100,31 @@ def test_forced_tick_stores_one_low_confidence_memory(brain: Mimir) -> None:
     assert musings[0].confidence <= 0.5  # a musing, not a fact
 
 
+def test_forced_tick_skips_a_duplicate_musing(brain: Mimir) -> None:
+    # The mock returns the same reflection text each time, so a second forced tick is a verbatim
+    # repeat — it must be skipped, not piled up (the over-retention distillation guards against).
+    def musings() -> list:
+        return [m for m in list_memories(brain._storage, user=None, kind=MemoryKind.MEMORY)
+                if (m.provenance or "") == "inner life"]
+
+    brain.turn("My favorite color is blue.")
+    first = brain.run_inner_life_tick(force=True)
+    assert first["ran"] is True
+    assert len(musings()) == 1
+
+    second = brain.run_inner_life_tick(force=True)
+    assert second == {"ran": False, "reason": "duplicate musing"}
+    assert len(musings()) == 1  # no new row
+
+
+def test_inner_life_memory_starts_faint(brain: Mimir) -> None:
+    brain.turn("My favorite color is blue.")
+    brain.run_inner_life_tick(force=True)
+    m = next(m for m in list_memories(brain._storage, user=None, kind=MemoryKind.MEMORY)
+             if (m.provenance or "") == "inner life")
+    assert m.salience <= 0.3 and m.confidence <= 0.3  # faint + low-belief, so it decays out fast
+
+
 def test_forced_tick_still_yields_to_a_live_turn(brain: Mimir) -> None:
     brain._turn_active = True
     try:

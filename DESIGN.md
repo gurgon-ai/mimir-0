@@ -101,11 +101,16 @@ Two **separate** axes — conflating them is the bug this design exists to avoid
 - **confidence** = "is it TRUE?" — does *not* decay from disuse. Only low-tier, uncorroborated
   provisionals decay; authority-tier and corroborated facts never do.
 - **salience** = "is it RELEVANT now?" — decays over time, bumps on access. Drives forgetting/archival.
+  It decays **faster for the decaying tiers** (conversation/inferred — peer chatter and self-generated
+  rumination) than for authority/document facts, so low-value provisional content goes dormant in weeks
+  while a primary-user fact lingers for months — this is what makes the store *distil* rather than hoard.
 
 **Access frequency measures relevance, not truth.** Archiving ≠ disbelieving — a resurfaced memory
-is still trusted. The failure this prevents: a true fact buried below the injection floor because it
-wasn't accessed lately, decaying further because it was never injected — a death spiral. Don't let
-"haven't used it lately" masquerade as "probably false."
+is still trusted, and the archive step preserves confidence; it only drops a memory out of *active
+recall*. Only **decaying-tier** memories that have faded below the salience floor are archived;
+authority-tier and document facts are never archived for disuse. The failure this prevents: a true
+fact buried below the injection floor because it wasn't accessed lately, decaying further because it
+was never injected — a death spiral. Don't let "haven't used it lately" masquerade as "probably false."
 
 ### 3d. Uncertainty gate (deterministic, zero model cost)
 After context assembly, count how many layers produced substantive content. If a real question drew
