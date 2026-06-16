@@ -3,16 +3,15 @@
 Mimir 0's core is a library; this is the canonical *human* surface, kept deliberately outside the
 core and built on Python's stdlib ``http.server`` so it adds **zero dependencies** — the runtime
 contract (Python + SQLite + endpoints, nothing else) still holds. It serves a single-page UI and a
-small JSON API:
+JSON API; the full, authoritative route list is the ``do_GET``/``do_POST`` dispatch below, and the
+integration contract is documented in ``docs/API.md``. The core endpoint is:
 
-    GET  /                 the web UI (chat + identity interview + document ingest + status)
-    GET  /api/state        embedding mode, memory count, anchors established
-    GET  /api/identity     current anchors + the questions still pending
-    POST /api/identity     {"answers": {...}}  establish/revise identity anchors
-    GET  /api/onboarding   the seeding interview: every question + answer, what's pending
-    POST /api/onboarding/answer  {"key": "...", "answer": "..."}  store/update one answer (blank clears)
     POST /api/turn         {"text": "...", "user": "..."}  → {"reply", "introspect"}
-    POST /api/ingest       {"path": "..."}  ingest a local document
+    POST /api/turn/stream  same body → a Server-Sent-Events token stream
+    GET  /api/health       liveness (lock-free, unauthenticated): {ok, busy, embed_mode, nodes_up}
+
+plus the UI's data routes (identity, onboarding, mind, memories, graph, sessions, settings, sleep,
+deliberate, council, forum, fleet/*, wiki/status, ingest). See ``do_GET``/``do_POST`` for the lot.
 
 Run it:  ``python -m mimir.server --config mimir.toml``  (then open http://127.0.0.1:8765).
 

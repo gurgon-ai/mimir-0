@@ -276,7 +276,9 @@ def load_config(path: str | Path) -> Config:
             max_model_size_b=float(backend_raw.get("max_model_size_b", 30.0)),
             min_model_size_b=float(backend_raw.get("min_model_size_b", 0.0)),
             max_latency_s=float(backend_raw.get("max_latency_s", 0.0)),
-            benchmark_num_ctx=int(backend_raw.get("benchmark_num_ctx", 8192)),
+            # Default must match BackendConfig.benchmark_num_ctx (24576) + docs — the proven
+            # operational window. (Can't reference the field default: BackendConfig is slotted.)
+            benchmark_num_ctx=int(backend_raw.get("benchmark_num_ctx", 24576)),
         )
 
     provider_raw = raw.get("provider")
