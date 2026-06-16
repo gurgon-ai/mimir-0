@@ -12,10 +12,15 @@ text = "You are Mimir, a local-first assistant with an evidence-aware memory. Yo
 # The owner whose statements earn the top evidence tier. Omit for single-user mode
 # (whoever speaks is then treated as the primary user).
 # primary_user = "alex"
-# Additional believed speakers (trusted tier). Any OTHER named speaker — an unknown API caller, a
-# peer AI, a guest — is attributed but stored at conversation tier, not as fact. The caller picks
-# the `user` name on each API call; this server-side policy picks how much to believe it.
+# Additional believed speakers (trusted tier). Any OTHER named human — an unknown API caller, a
+# guest — is attributed but stored at conversation tier, not as fact. The caller picks the `user`
+# name on each API call; this server-side policy picks how much to believe it.
 # trusted_users = ["sam"]
+# Identities known to be peer AIs (another agent, not a human). Their input bakes at stated_by_peer
+# (below human conversation), attributed and marked AI-sourced — even if named above. A caller may
+# also self-declare per turn via the API field speaker_kind="ai_peer" (default "human"); this list
+# is the operator-side enforcement so a known peer can't avoid it.
+# peer_agents = ["mimir-home"]
 
 # Foundational identity anchors. Set them here for a non-interactive deployment, or leave them
 # out and run the interview: `python -m mimir.interview --config mimir.toml` (add --revise to

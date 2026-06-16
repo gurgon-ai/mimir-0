@@ -118,6 +118,11 @@ class Config:
     # caller, a peer system, a guest) is attributed but baked at CONVERSATION tier, not as fact —
     # the server-side trust policy, so an exposed API can't self-assert trust. Empty = no extra.
     trusted_users: list[str] = field(default_factory=list)
+    # Identities known to be peer AIs (another agent, not a human). Their input bakes at
+    # STATED_BY_PEER — below human conversation, attributed, marked AI-sourced — no matter what they
+    # declare. A caller may also self-declare per-turn via the API's ``speaker_kind="ai_peer"``;
+    # this list is the operator-side enforcement so a known peer can't avoid it. Empty = none.
+    peer_agents: list[str] = field(default_factory=list)
     # Foundational identity anchors (name/operator/location/purpose), set declaratively here
     # for non-interactive deployments. Re-established (upserted) at boot. The interview sets
     # the same anchors interactively. See cognition/identity.py.
@@ -334,6 +339,7 @@ def load_config(path: str | Path) -> Config:
             str(identity_raw["primary_user"]) if "primary_user" in identity_raw else None
         ),
         trusted_users=_as_str_list(identity_raw.get("trusted_users", [])),
+        peer_agents=_as_str_list(identity_raw.get("peer_agents", [])),
         identity_anchors={
             k: str(identity_raw[k]) for k in anchor_keys if k in identity_raw
         },

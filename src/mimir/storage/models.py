@@ -29,6 +29,10 @@ class EvidenceTier(Enum):
     DOCUMENT = ("document", 1.10)
     MULTI_SOURCE = ("multi_source", 1.10)
     CONVERSATION = ("conversation", 1.00)
+    # A peer AI (another agent, not a human). Below human conversation: its claims are generated
+    # text — possibly confabulated, possibly an echo of something this system itself said — so they
+    # are attributed and recallable but never punch above what a human said (DESIGN §3b).
+    STATED_BY_PEER = ("stated_by_peer", 0.95)
     INFERRED = ("inferred", 0.90)
 
     def __init__(self, key: str, multiplier: float) -> None:
@@ -50,7 +54,9 @@ class EvidenceTier(Enum):
         corroborated facts never do (DESIGN §3c). Salience always decays regardless —
         that is a separate axis and lives on the row, not here.
         """
-        return self in (EvidenceTier.INFERRED, EvidenceTier.CONVERSATION)
+        return self in (
+            EvidenceTier.INFERRED, EvidenceTier.CONVERSATION, EvidenceTier.STATED_BY_PEER,
+        )
 
 
 class MemoryKind(Enum):

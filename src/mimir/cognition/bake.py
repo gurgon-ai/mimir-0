@@ -53,22 +53,45 @@ def _parse_bake(raw: str) -> tuple[list[str], list[list[str]]] | None:
     return facts, triples
 
 
+_PEER_KINDS = {"ai_peer", "peer", "ai"}
+_HUMAN_KINDS = {"human", "user", ""}
+
+
+def normalize_speaker_kind(kind: str | None) -> str:
+    """Normalize a declared speaker kind to ``"human"`` or ``"ai_peer"``. ``None``/absent → human
+    (preserves existing behavior). An unrecognized value raises — the trust policy must never
+    resolve ambiguity by *elevating* a caller, so a typo fails loud, not silently to human."""
+    k = (kind or "human").strip().lower()
+    if k in _PEER_KINDS:
+        return "ai_peer"
+    if k in _HUMAN_KINDS:
+        return "human"
+    raise ValueError(f"unknown speaker kind: {kind!r} (use 'human' or 'ai_peer')")
+
+
 def _tier_and_provenance(
     user: str | None, primary_user: str | None, trusted_users: list[str] | None = None,
+    *, is_peer: bool = False,
 ) -> tuple[EvidenceTier, str]:
-    """Map *who said it* → an evidence tier (DESIGN §3b). A server-side trust policy: the caller
-    declares the speaker (``user``), the config decides how much that speaker is believed — not the
-    caller, so an open/exposed API can't let anyone launder claims into top-tier memory.
+    """Map *who said it, and what kind of thing they are* → an evidence tier (DESIGN §3b). A
+    server-side trust policy: the caller declares the speaker (``user``) and its kind, the config
+    decides how much that speaker is believed — not the caller — so an open/exposed API can't let
+    anyone launder claims into top-tier memory.
 
+    - a **peer AI** (``is_peer``) → ``STATED_BY_PEER`` (0.95): attributed, marked AI-sourced, and
+      kept below human conversation — its claims are generated text, not observation. This wins over
+      identity: an agent can't reach a human tier by also being named primary/trusted.
     - ``primary_user`` is the operator → ``STATED_BY_PRIMARY_USER`` (1.30).
     - ``trusted_users`` are additional believed identities → ``STATED_BY_TRUSTED`` (1.20).
-    - any other *named* speaker (an unrecognized caller, a peer AI, a guest) → ``CONVERSATION``:
-      attributed to them, but not treated as established fact.
+    - any other *named* human (an unrecognized caller, a guest) → ``CONVERSATION``: attributed to
+      them, but not treated as established fact.
     - ``user is None`` (unattributed call) → ``CONVERSATION``.
 
-    Zero-config convenience: with NO policy set at all (no primary, no trusted list), the lone
+    Zero-config convenience: with NO policy set (no primary, no trusted list), the lone *human*
     speaker IS treated as the primary — so a simple single-user build-your-own-UI just works.
     """
+    if is_peer:
+        return EvidenceTier.STATED_BY_PEER, f"stated by peer AI {user or 'another agent'}"
     trusted = trusted_users or ()
     if user is None:
         return EvidenceTier.CONVERSATION, "stated in conversation"
@@ -88,11 +111,15 @@ def bake(
     user: str | None,
     primary_user: str | None,
     trusted_users: list[str] | None = None,
+    peer_agents: list[str] | None = None,
+    speaker_kind: str = "human",
 ) -> list[Memory]:
     """Extract, attribute, embed, and store durable facts from this turn's user text.
 
-    Returns the memories actually written (possibly empty). Never raises on a model that
-    misbehaves — it logs and bakes nothing, so a bad extraction can't break the turn.
+    ``speaker_kind`` (``"human"``/``"ai_peer"``) is the caller's declaration of *what kind* of
+    speaker this is; ``peer_agents`` is the config list of identities known to be AIs. Either marks
+    the turn as peer-sourced (``STATED_BY_PEER``). Returns the memories actually written (possibly
+    empty). Never raises on a model that misbehaves — it logs and bakes nothing.
     """
     raw = model.chat(
         "bake",
@@ -108,7 +135,9 @@ def bake(
         return []
     facts, triples = parsed
 
-    tier, provenance = _tier_and_provenance(user, primary_user, trusted_users)
+    is_peer = (normalize_speaker_kind(speaker_kind) == "ai_peer"
+               or (user is not None and user in (peer_agents or ())))
+    tier, provenance = _tier_and_provenance(user, primary_user, trusted_users, is_peer=is_peer)
     if triples:
         store_triples(storage, triples, user=user, provenance=provenance)
     stored: list[Memory] = []

@@ -3,7 +3,9 @@ server config decides how much that speaker is believed — so an exposed API ca
 
 from __future__ import annotations
 
-from mimir.cognition.bake import _tier_and_provenance
+import pytest
+
+from mimir.cognition.bake import _tier_and_provenance, normalize_speaker_kind
 from mimir.storage.models import EvidenceTier
 
 
@@ -38,3 +40,42 @@ def test_trusted_list_without_primary_still_gates() -> None:
     # Setting any policy (even just trusted_users) leaves unlisted named speakers at conversation.
     assert _tier("julien", None, ["julien"]) is EvidenceTier.STATED_BY_TRUSTED
     assert _tier("random", None, ["julien"]) is EvidenceTier.CONVERSATION
+
+
+def test_peer_kind_is_below_human_and_marked_ai_sourced() -> None:
+    tier, provenance = _tier_and_provenance("mimir-home", "greg", [], is_peer=True)
+    assert tier is EvidenceTier.STATED_BY_PEER
+    assert tier.multiplier < EvidenceTier.CONVERSATION.multiplier  # below human conversation
+    assert provenance == "stated by peer AI mimir-home"  # attributed AND marked as an AI
+
+
+def test_peer_flag_wins_over_a_trusted_identity() -> None:
+    # An agent can't reach a human tier by also being named primary/trusted — kind wins.
+    assert _tier_and_provenance("greg", "greg", [], is_peer=True)[0] is EvidenceTier.STATED_BY_PEER
+
+
+def test_normalize_speaker_kind() -> None:
+    assert normalize_speaker_kind(None) == "human"        # absent → human (back-compat)
+    assert normalize_speaker_kind("human") == "human"
+    assert normalize_speaker_kind("user") == "human"
+    assert normalize_speaker_kind("ai_peer") == "ai_peer"
+    assert normalize_speaker_kind("AI") == "ai_peer"      # case-insensitive
+    with pytest.raises(ValueError):                        # a typo fails loud, never elevates
+        normalize_speaker_kind("robot")
+
+
+def test_turn_bakes_ai_peer_input_below_human(brain) -> None:
+    from mimir.storage.models import MemoryKind
+    from mimir.storage.repo import list_memories
+
+    # Same speaker, same statement — as a human it's believed (zero-config → primary); as an AI peer
+    # it's marked AI-sourced and tiered down. The caller's declared kind makes the difference.
+    brain.turn("The north fence is wooden.", user="mimir-home", speaker_kind="ai_peer")
+    mems = list_memories(brain._storage, kind=MemoryKind.MEMORY)
+    assert mems and all(m.evidence_tier is EvidenceTier.STATED_BY_PEER for m in mems)
+    assert all((m.provenance or "").startswith("stated by peer AI") for m in mems)
+
+
+def test_turn_rejects_an_unknown_speaker_kind(brain) -> None:
+    with pytest.raises(ValueError):
+        brain.turn("hello", user="x", speaker_kind="robot")

@@ -69,12 +69,18 @@ assembly, generation, then async bake/sentinel).
 
 Request:
 ```json
-{ "text": "what did I tell you about the garden?", "user": "greg" }
+{ "text": "what did I tell you about the garden?", "user": "greg", "speaker_kind": "human" }
 ```
 - `text` (required) — the message.
 - `user` (optional) — **the speaker's identity.** This is the seam for multi-speaker and
-  **agent-to-agent**: set it to whoever is talking (`"greg"`, `"mimir-parent"`, …). Memory and
+  **agent-to-agent**: set it to whoever is talking (`"greg"`, `"mimir-home"`, …). Memory and
   recency are tracked per speaker.
+- `speaker_kind` (optional, default `"human"`) — **what kind of speaker this is**: `"human"` or
+  `"ai_peer"`. A human's statements are believed per the trust policy below; a peer AI's are baked at
+  a **lower tier** (`stated_by_peer`, 0.95 — below human conversation), attributed and marked
+  AI-sourced, because they're generated text, not observation. So if you build your own interface,
+  leave it `"human"`; if another agent is talking to this one, send `"ai_peer"`. (Alias: `"kind"`.)
+  An unknown value is rejected with 400 — the policy never resolves ambiguity by elevating a caller.
 
 Response:
 ```json
@@ -139,20 +145,27 @@ Give your home Mimir the same endpoint and they can run side by side and "hang o
 
 ### Identity vs. trust (important)
 
-The `user` field is the speaker's **identity** — caller-set. How much that speaker is **believed** is
-**server-side config**, not the caller's to declare (so an exposed endpoint can't inject top-tier
-"facts"). The policy (`[identity]` in `mimir.toml`):
+The `user` field is the speaker's **identity** and `speaker_kind` is its **kind** — both caller-set.
+How much that speaker is **believed** is **server-side config**, not the caller's to declare (so an
+exposed endpoint can't inject top-tier "facts"). The policy (`[identity]` in `mimir.toml`):
 
-- `primary_user = "greg"` → that speaker's statements bake at the top evidence tier (1.30).
-- `trusted_users = ["julien", "home-mimir"]` → trusted tier (1.20).
-- **any other named speaker** (an unknown caller, a peer AI you haven't listed) → attributed but
-  baked at **CONVERSATION** tier — recorded as "X said it," never as established fact.
-- With **no policy set at all**, Mimir is single-user: the lone named speaker is treated as primary
-  (so a simple custom UI works with zero config).
+- `primary_user = "greg"` → that (human) speaker's statements bake at the top evidence tier (1.30).
+- `trusted_users = ["julien"]` → trusted tier (1.20).
+- **any other named human** (an unknown caller, a guest) → attributed but baked at **CONVERSATION**
+  tier (1.00) — recorded as "X said it," never as established fact.
+- a **peer AI** — either `speaker_kind="ai_peer"` on the turn, or the identity listed in
+  `peer_agents = ["mimir-home"]` — bakes at **`stated_by_peer`** (0.95): below human conversation,
+  attributed, and marked AI-sourced. The kind wins over identity, so an agent can't reach a human
+  tier by also being named primary/trusted. `peer_agents` is the operator-side enforcement (a known
+  peer can't avoid it by sending `speaker_kind="human"`).
+- With **no policy set at all**, Mimir is single-user: the lone named *human* speaker is treated as
+  primary (so a simple custom UI works with zero config).
 
-So for a peer AI: leave it off `trusted_users` and its claims are remembered-as-said but not believed
-(safe against hallucinations); add it to `trusted_users` only if you want its statements to carry
-weight. The caller picks the name; the server picks the trust.
+So: build your own front-end → send `speaker_kind="human"` and your users are treated as users. Wire
+another agent to this one → send `speaker_kind="ai_peer"` (and/or list it in `peer_agents`) and its
+claims are remembered-as-said-by-an-AI but kept below human input — safe against one AI's
+hallucinations (or an echo between two agents) being mistaken for fact. The caller picks the name and
+kind; the server picks the trust.
 
 ## Other routes
 

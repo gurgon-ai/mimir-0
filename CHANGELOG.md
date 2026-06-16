@@ -7,6 +7,22 @@ Pre-1.0: the API and schema may change between releases.
 
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
+### Added
+- **A peer-AI source tier — ontology, not just trust level (DESIGN §3b).** The trust policy
+  conflated *who* a speaker is (trust) with *what kind* of thing they are. A peer AI is its own
+  category: it emits generated text that may be confabulated, or may *echo* something this system
+  itself said (so two agents agreeing fakes corroboration). New:
+  - **`speaker_kind` on the turn API** (`"human"` default / `"ai_peer"`) — the caller declares the
+    kind; an unknown value is rejected (the policy never resolves ambiguity by elevating).
+  - **`[identity] peer_agents`** — operator-side enforcement: identities known to be AIs always bake
+    as peer, even if they send `speaker_kind="human"`.
+  - **`STATED_BY_PEER` evidence tier (0.95)** — below human conversation, attributed and marked
+    AI-sourced (`provenance="stated by peer AI <name>"`), and a *decaying* tier so peer chatter fades
+    and archives like other low-value content. **Kind wins over identity** — an agent can't reach a
+    human tier by also being named primary/trusted.
+  Build your own front-end → `speaker_kind="human"` (users are treated as users). Wire another agent
+  in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
+
 ### Changed
 - **Memory distillation: the store now fades and prunes instead of only accumulating.** A bridge-test
   audit found over-retention (aux-store rows piling up, the salience axis flat at 1.0, nothing ever

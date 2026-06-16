@@ -82,19 +82,28 @@ library, etc.) register as further typed sources.
 ### 3b. Evidence tiers (truth provenance)
 Every memory carries an `evidence_tier` assigned at write time by *how it was sourced* — e.g.
 `stated_by_primary_user` > `stated_by_trusted` > `document` / `multi_source` > `conversation` >
-`inferred`. The tier becomes a gentle retrieval multiplier (at equal relevance, better-sourced
+`stated_by_peer` > `inferred`. The tier becomes a gentle retrieval multiplier (at equal relevance,
+better-sourced
 facts win) and an explicit provenance tag in the prompt, so the model attributes correctly instead
 of flattening everyone's knowledge into "you told me." That tag is an *internal* prompt convention:
 it is deterministically stripped from the user-facing reply (see §10), so the scaffolding never
 leaks into output.
 
 **Who gets which tier is a server-side trust policy, not the caller's to declare.** An integration
-caller picks the *speaker identity* (the `user` field); the config decides how much that speaker is
-believed: `primary_user` → `stated_by_primary_user`, `trusted_users` → `stated_by_trusted`, and any
-*other* named speaker (an unknown API caller, a peer AI, a guest) is attributed but written at
-`conversation` tier — never as fact. So an exposed endpoint can't self-assert trust, and two systems
-can converse without each treating the other's mistakes as gospel. (Zero-config single-user keeps the
-old convenience: with no policy set, the lone speaker is the primary.)
+caller picks the *speaker identity* (the `user` field) and its *kind* (`speaker_kind`:
+`human`/`ai_peer`); the config decides how much that speaker is believed: `primary_user` →
+`stated_by_primary_user`, `trusted_users` → `stated_by_trusted`, and any *other* named human (an
+unknown caller, a guest) is attributed but written at `conversation` tier — never as fact.
+
+**A peer AI is its own ontological category, not just an untrusted human.** A human is reporting
+observation; a peer AI is emitting generated text that may be confabulated — or may be an *echo* of
+something this system itself said, so that two agents agreeing manufactures a false sense of
+corroboration ("agreement is an illusion of redundancy"). So a peer's input — declared per-turn
+(`speaker_kind="ai_peer"`) or by config (`peer_agents`) — is written at `stated_by_peer` (0.95, below
+human conversation), attributed and marked AI-sourced. **Kind wins over identity**: an agent can't
+reach a human tier by also being named primary/trusted. So an exposed endpoint can't self-assert
+trust, and two systems can converse without each treating the other's mistakes as gospel. (Zero-config
+single-user keeps the convenience: with no policy set, the lone *human* speaker is the primary.)
 
 ### 3c. Confidence / salience decoupling (the foundational idea)
 Two **separate** axes — conflating them is the bug this design exists to avoid:
