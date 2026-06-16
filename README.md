@@ -170,10 +170,13 @@ curl -s http://127.0.0.1:8765/api/turn \
   -d '{"text": "hello", "user": "greg"}'
 # → {"reply": "...", "introspect": {context accounting: sources, tiers, tokens}}
 ```
-- **`user` is the speaker's identity** — the seam for multi-speaker and agent-to-agent. The server,
-  not the caller, decides how much each speaker is *believed*: `[identity] primary_user` → top tier,
-  `trusted_users` → trusted, **anyone else** (an unknown caller, a peer AI) is attributed but stored
-  at conversation tier, not as fact. So an exposed endpoint can't launder claims into trusted memory.
+- **`user` is the speaker's identity** and **`speaker_kind` (`human`/`ai_peer`) is its kind** — the
+  seam for multi-speaker and agent-to-agent. The server, not the caller, decides how much each is
+  *believed*: `[identity] primary_user` → top tier, `trusted_users` → trusted, any other human →
+  conversation tier, and a **peer AI** (`speaker_kind="ai_peer"` or `peer_agents`) → a *lower*
+  `stated_by_peer` tier, attributed and marked AI-sourced — so one agent's hallucination (or two
+  agents echoing each other) can't be mistaken for fact. An exposed endpoint can't launder claims
+  into trusted memory, and a peer can't reach a human tier by renaming itself.
 - **`POST /api/turn/stream`** streams the reply token-by-token (Server-Sent Events) for low-latency
   voice/chat front-ends.
 - **`GET /api/health`** — instant, unauthenticated liveness (`{ok, busy, embed_mode, nodes_up}`).

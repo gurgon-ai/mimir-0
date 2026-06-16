@@ -376,9 +376,13 @@ path = "data/mimir.db"          # required; SQLite file (created on first run)
 text = "You are Mimir..."       # optional; the always-on self-model / persona
 primary_user = "alex"           # optional; this user's statements earn the top evidence tier.
                                 # Omit for single-user mode (whoever speaks is treated as primary).
-trusted_users = ["sam"]         # optional; also believed (trusted tier). Any OTHER named speaker
-                                # (unknown API caller, peer AI, guest) is attributed but baked at
-                                # conversation tier, not as fact — the server-side trust policy.
+trusted_users = ["sam"]         # optional; also believed (trusted tier). Any OTHER named human
+                                # (unknown API caller, guest) is attributed but baked at conversation
+                                # tier, not as fact — the server-side trust policy.
+peer_agents = ["mimir-home"]    # optional; identities known to be peer AIs. Their input bakes at
+                                # stated_by_peer (below human conversation), marked AI-sourced — even
+                                # if named above. Callers can also self-declare per turn with the
+                                # API field speaker_kind="ai_peer" (default "human").
 
 [embeddings]
 mode = "bootstrap"              # "bootstrap" | "endpoint" | "degraded"

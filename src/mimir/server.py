@@ -33,6 +33,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .brain import Mimir
+from .cognition.bake import normalize_speaker_kind
 from .cognition.self_model import gather_signals
 from .cognition.working_memory import current_working_memory
 from .errors import ConfigError, IngestError, MimirError
@@ -380,8 +381,9 @@ class _Handler(BaseHTTPRequestHandler):
         if not text:
             raise ValueError("'text' is required")
         user = body.get("user") or None
+        speaker_kind = str(body.get("speaker_kind") or body.get("kind") or "human")
         with self.server.brain_lock:
-            result = self.server.brain.turn(text, user=user)
+            result = self.server.brain.turn(text, user=user, speaker_kind=speaker_kind)
         # Return as soon as the reply is generated. The post-turn burst (sentinel/self-model/working
         # memory) runs OFF the hot path and the next turn settles it (DESIGN §5a) — blocking the HTTP
         # response on it would add several model calls of latency (minutes on a small edge node).
@@ -494,6 +496,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": "'text' is required"}, status=400)
                 return
             user = body.get("user") or None
+            speaker_kind = str(body.get("speaker_kind") or body.get("kind") or "human")
+            normalize_speaker_kind(speaker_kind)  # reject a bad kind before the stream opens (400)
         except (json.JSONDecodeError, ValueError) as exc:
             self._send_json({"error": str(exc)}, status=400)
             return
@@ -515,7 +519,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         try:
             with self.server.brain_lock:
-                stream = self.server.brain.turn_stream(text, user=user)
+                stream = self.server.brain.turn_stream(text, user=user, speaker_kind=speaker_kind)
                 while True:
                     try:
                         token = next(stream)

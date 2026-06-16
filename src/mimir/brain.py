@@ -26,7 +26,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from .cognition.bake import bake
+from .cognition.bake import bake, normalize_speaker_kind
 from .cognition.benchmark import FleetBenchmarkResult, ModelBenchmark
 from .cognition.benchmark import benchmark_fleet as _benchmark_fleet
 from .cognition.benchmark import complete_speed_matrix as _complete_speed_matrix
@@ -537,7 +537,11 @@ class Mimir:
 
     # -- the turn ---------------------------------------------------------------------
 
-    def turn(self, text: str, user: str | None = None) -> TurnResult:
+    def turn(self, text: str, user: str | None = None, *,
+             speaker_kind: str = "human") -> TurnResult:
+        # ``speaker_kind`` ("human"/"ai_peer") is the caller's declaration of what kind of speaker
+        # this is; validate it up front so a bad value fails the turn cleanly (DESIGN §3b).
+        normalize_speaker_kind(speaker_kind)
         # Settle the previous turn's burst (sentinel note, self-model) before we assemble — so the
         # prompt reflects the latest reflection and identity (DESIGN §5a).
         self._burst.wait_idle()
@@ -624,6 +628,8 @@ class Mimir:
                 user=user,
                 primary_user=self.config.primary_user,
                 trusted_users=self.config.trusted_users,
+                peer_agents=self.config.peer_agents,
+                speaker_kind=speaker_kind,
             )
             record_exchange(self._storage, user=user, user_text=text, reply=reply)
             record_conversation_turn(self._storage, user=user, user_text=text, reply=reply,
@@ -640,7 +646,7 @@ class Mimir:
         return TurnResult(reply=reply, context=bundle, baked=baked)
 
     def turn_stream(
-        self, text: str, user: str | None = None
+        self, text: str, user: str | None = None, *, speaker_kind: str = "human"
     ) -> Generator[str, None, dict[str, Any]]:
         """Like ``turn`` but yields the reply token-by-token; returns the introspection dict.
 
@@ -649,6 +655,7 @@ class Mimir:
         abandons the stream early, the turn is treated as interrupted — nothing is baked. The
         generator's *return value* (via ``StopIteration.value``) is ``context.introspect()``.
         """
+        normalize_speaker_kind(speaker_kind)  # validate up front (DESIGN §3b), mirroring `turn`
         self._burst.wait_idle()
         self._turn_count += 1
 
@@ -732,6 +739,8 @@ class Mimir:
                 user=user,
                 primary_user=self.config.primary_user,
                 trusted_users=self.config.trusted_users,
+                peer_agents=self.config.peer_agents,
+                speaker_kind=speaker_kind,
             )
             record_exchange(self._storage, user=user, user_text=text, reply=reply)
             record_conversation_turn(self._storage, user=user, user_text=text, reply=reply,
