@@ -573,9 +573,13 @@ class Mimir:
             # Background notes the prior burst surfaced, to carry into this reply.
             notes = self._burst.drain_surfaces()
 
-            # 1. Recall: embed the query, pull candidates, rank them.
+            # 1. Recall: embed the query, pull candidates, rank them. Inner-life musings are split
+            #    out of the knowledge recall and may surface as a framed, tentative note (§5a).
             query_vec = self._embedder.embed(text)
             candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY)
+            candidates, il_note = self._surface_inner_life(candidates, text, query_vec)
+            if il_note:
+                notes = notes + [il_note]
             retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
             note = latest_sentinel_note(self._storage, user)
             self_knowledge = self._compose_self_knowledge()
@@ -683,6 +687,9 @@ class Mimir:
             notes = self._burst.drain_surfaces()
             query_vec = self._embedder.embed(text)
             candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY)
+            candidates, il_note = self._surface_inner_life(candidates, text, query_vec)
+            if il_note:
+                notes = notes + [il_note]
             retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
             note = latest_sentinel_note(self._storage, user)
             self_knowledge = self._compose_self_knowledge()
@@ -1328,6 +1335,28 @@ class Mimir:
             if semantic and m.embedding and cosine(vec, m.embedding) >= self._MUSING_DUP_COSINE:
                 return True
         return False
+
+    _INNER_LIFE_SURFACE_MIN_RELEVANCE = 0.2  # only a genuinely on-topic musing earns a surface
+
+    def _surface_inner_life(
+        self, candidates: list[Memory], query: str, query_vec: list[float] | None,
+    ) -> tuple[list[Memory], str | None]:
+        """Inner life, Slice 2 (DESIGN §5a): a musing is a framed *reflection*, not a knowledge row.
+        Split inner-life memories OUT of the knowledge recall, and if the most relevant one clears
+        the bar this turn, return it as a single tentative background note — it 'earns its way in',
+        framed as the system's own idle thought, never force-injected and never as fact.
+        Returns ``(knowledge_candidates, note_or_None)``."""
+        musings = [m for m in candidates if (m.provenance or "") == "inner life"]
+        if not musings:
+            return candidates, None
+        knowledge = [m for m in candidates if (m.provenance or "") != "inner life"]
+        top = retrieve(query, query_vec, musings, top_k=1)
+        if top and top[0].score >= self._INNER_LIFE_SURFACE_MIN_RELEVANCE:
+            return knowledge, (
+                f"While idle earlier, I'd found myself thinking: {top[0].memory.text} "
+                "(my own tentative reflection — weigh it as such, not as established fact)."
+            )
+        return knowledge, None
 
     def _start_inner_life(self) -> None:
         """Daemon: every check interval run one inner-life tick (which self-gates on

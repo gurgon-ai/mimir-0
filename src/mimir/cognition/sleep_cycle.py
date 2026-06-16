@@ -84,6 +84,12 @@ class CycleReport:
 _TERMINAL = ("completed", "skipped", "failed")
 
 
+def _budget_label(remaining: float) -> str:
+    """Human-readable budget for the phase-start log. A forced run has no window limit (``inf``);
+    say so plainly instead of printing a bare ``-1 min left`` that reads like a negative budget."""
+    return "forced, no window limit" if remaining == float("inf") else f"{remaining:.0f} min left"
+
+
 def run_cycle(
     phases: list[Phase],
     *,
@@ -137,8 +143,7 @@ def run_cycle(
                      phase.min_minutes)
             continue
 
-        log.info("sleep: phase %s starting (%.0f min left)", phase.name,
-                 remaining if remaining != float("inf") else -1)
+        log.info("sleep: phase %s starting (%s)", phase.name, _budget_label(remaining))
         try:
             phase.run()
             phase_status[phase.name] = "completed"

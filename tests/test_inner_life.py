@@ -131,3 +131,34 @@ def test_forced_tick_still_yields_to_a_live_turn(brain: Mimir) -> None:
         assert brain.run_inner_life_tick(force=True) == {"ran": False, "reason": "turn in flight"}
     finally:
         brain._turn_active = False
+
+
+def test_surfaces_a_relevant_musing_as_a_framed_note(brain: Mimir) -> None:
+    from mimir.storage.models import EvidenceTier, Memory
+    from mimir.storage.repo import save_memory
+
+    txt = "the north gate latch is broken and needs a new pin"
+    save_memory(brain._storage, Memory(
+        text=txt, evidence_tier=EvidenceTier.INFERRED, salience=0.25, confidence=0.3,
+        provenance="inner life", embedding=brain._embedder.embed(txt), user="g"))
+    cands = list_memories(brain._storage, user="g", kind=MemoryKind.MEMORY)
+    q = "what is going on with the north gate latch"
+    knowledge, note = brain._surface_inner_life(cands, q, brain._embedder.embed(q))
+    assert note and "north gate latch" in note  # earns its way in, framed
+    assert "tentative" in note                   # framed as a reflection, not a fact
+    assert all((m.provenance or "") != "inner life" for m in knowledge)  # not in knowledge block
+
+
+def test_irrelevant_musing_stays_out_of_the_turn(brain: Mimir) -> None:
+    from mimir.storage.models import EvidenceTier, Memory
+    from mimir.storage.repo import save_memory
+
+    txt = "the north gate latch is broken"
+    save_memory(brain._storage, Memory(
+        text=txt, evidence_tier=EvidenceTier.INFERRED, salience=0.25, confidence=0.3,
+        provenance="inner life", embedding=brain._embedder.embed(txt), user="g"))
+    cands = list_memories(brain._storage, user="g", kind=MemoryKind.MEMORY)
+    q = "summarize the quarterly earnings report"
+    knowledge, note = brain._surface_inner_life(cands, q, brain._embedder.embed(q))
+    assert note is None                                                   # off-topic → no nudge
+    assert all((m.provenance or "") != "inner life" for m in knowledge)   # still kept out of recall

@@ -8,6 +8,14 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **Inner life, Slice 2 — idle thoughts now earn their way into conversation (DESIGN §5a).** A
+  reflection is a *framed* thought, not a knowledge fact, so inner-life memories are split out of the
+  knowledge recall; at turn time the one most relevant to the current input — if it clears a relevance
+  bar — is surfaced as a single tentative background note ("while idle I'd been thinking…", weighed as
+  the system's own idle thought, not as fact). Gated and framed, never force-injected; off-topic
+  musings stay silent. `Mimir._surface_inner_life`. (Slice 1 stored thoughts but only surfaced them
+  passively via ordinary recall, where a faint musing rarely won a slot — and would have read as a
+  fact if it did.)
 - **A peer-AI source tier — ontology, not just trust level (DESIGN §3b).** The trust policy
   conflated *who* a speaker is (trust) with *what kind* of thing they are. A peer AI is its own
   category: it emits generated text that may be confabulated, or may *echo* something this system
@@ -24,6 +32,10 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
 
 ### Fixed
+- **Honest sleep-cycle log for forced runs.** A manual "Run sleep"/"Deliberate now" bypasses the
+  window budget, which the phase-start log printed as a confusing `-1 min left` (it read like a
+  negative budget). It now says `forced, no window limit`. The budgeting itself was correct — it
+  re-reads the clock per phase and skips a phase that won't fit. `sleep_cycle._budget_label`.
 - **The council stopped trying to chat with embedding models.** The embedding-model filter was a bare
   `"embed" in name` check everywhere (routing, `auto` role resolution, council roster), so embedding
   models without "embed" in the name — `all-minilm`, `bge`, `gte`, `mxbai` — slipped through and the

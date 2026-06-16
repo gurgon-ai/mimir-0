@@ -407,14 +407,17 @@ between conversations — the first step of idle-takeover continuous mode. On a 
 cadence (default one thought every ~5 minutes) a daemon picks ONE universal stimulus — a recent
 error, an un-deliberated conflict, the most salient memory, the working-memory thread — and composes
 a brief first-person reflection with a cheap background model. The thought is stored as a
-low-confidence, decaying memory (`provenance="inner life"`, `INFERRED`); it **earns its way** back
-into conversation only through ordinary recall, never force-injected. Two doctrines bound it: **chat
-priority** — it routes *off* the chat model, yields the instant a turn starts (`should_think`), holds
-an idle floor after each turn, and runs on a long cadence — and **edge cost** — one model call per
-cycle, paused when the fleet is down, **off by default** until the operator opts in. The cadence and
-on/off live in the UI (and `[inner_life]` config); a manual "think now" forces one cycle. Still
-**[proposed]**: the deep-idle two-voice dialogue (propose→critique with memory grounding) and
-relevance-gated active surfacing into the next turn.
+low-confidence, decaying memory (`provenance="inner life"`, `INFERRED`). A musing is a *reflection*,
+not a knowledge fact, so it does not sit in the recall/knowledge block: at turn time inner-life
+memories are split out of the knowledge candidates, and the one most relevant to the current turn —
+if it clears a relevance bar — is surfaced as a single **framed, tentative background note** ("while
+idle I'd been thinking…", weighed as the system's own idle thought, not as fact). So it **earns its
+way in**, gated and framed, never force-injected. Two doctrines bound it: **chat priority** — it
+routes *off* the chat model, yields the instant a turn starts (`should_think`), holds an idle floor
+after each turn, and runs on a long cadence — and **edge cost** — one model call per cycle, paused
+when the fleet is down, **off by default** until the operator opts in. The cadence and on/off live in
+the UI (and `[inner_life]` config); a manual "think now" forces one cycle. Still **[proposed]**: the
+deep-idle two-voice dialogue (propose→critique with memory grounding).
 
 **The wall-clock sleep cycle — heavy maintenance needs a real window, not scraps. [landed]** The
 burst worker's premise is that the model idles while the user reads the reply. Two things break it:

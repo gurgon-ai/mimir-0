@@ -188,3 +188,10 @@ def test_brain_manual_sleep_cycle(brain: Mimir) -> None:
     assert status_after["last_cycle_date"] is not None
     assert status_after["completed"]
     assert status_after["phases"].get("consolidate") == "completed"
+
+
+def test_budget_label_distinguishes_forced_from_windowed() -> None:
+    from mimir.cognition.sleep_cycle import _budget_label
+    # A forced run has no window limit — say so, not a bare "-1 min left" that reads as negative.
+    assert _budget_label(float("inf")) == "forced, no window limit"
+    assert _budget_label(12.4) == "12 min left"
