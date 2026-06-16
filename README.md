@@ -8,7 +8,7 @@ it's assembled into the prompt with an explicit epistemic structure. You tell it
 later it recalls that fact, cites where it came from, and tells you when it's reasoning from
 thin evidence instead of confabulating.
 
-> **Status: pre-alpha — feature-rich, actively evolving (snapshot 2026-06-14; subject to
+> **Status: pre-alpha — feature-rich, actively evolving (snapshot 2026-06-15; subject to
 > change).** The whole architecture in [`DESIGN.md`](DESIGN.md) is implemented and verified
 > end-to-end against a live multi-node LAN: the acceptance loop, every typed knowledge layer, the
 > async cognition, and the distributed model fleet. On top of the spine, the **highest-leverage
@@ -86,9 +86,12 @@ On top of that:
   reference layer — **zero Python dependency** (stdlib HTTP, like talking to Ollama), nothing to
   ingest, fail-open.
 - **Entity graph** — subject–relation–object triples with 1–2 hop traversal.
-- **Working memory & self-model** — rolling salient context, and an evolving generic identity
-  seeded by the **seeding interview** (a re-runnable, ~12-essential + 7-optional get-to-know-you whose
-  answers become the operator's highest-provenance orienting facts).
+- **Working memory & self-model** — rolling salient context (folds the oldest exchanges into a
+  short summary, keeps the most recent verbatim), and an evolving generic identity seeded by the
+  **seeding interview** (a re-runnable, ~12-essential + 7-optional get-to-know-you whose answers
+  become the operator's highest-provenance orienting facts).
+- **Self-knowledge** — it bakes its own docs (the README, by default) into memory in the nightly
+  cycle, so it can answer about what it is and how it works, grounded in its own documentation.
 - **Temporal grounding** — an always-on clock/calendar sense (date, season, "3 days ago" on recalled
   facts), a zero-cost intercept for plain time questions, and an awareness baseline that notices when
   you've been away longer than usual *for your own rhythm*.
@@ -97,6 +100,10 @@ On top of that:
 - **The burst worker** — post-response cognition (sentinel, self-model, working memory, sleep,
   narratives) scheduled into the idle window after each reply: pent-up-demand priority, interruptible,
   with results that can surface into the next turn (DESIGN §5a).
+- **Self-observability** — fail-loud, but also fail-*aware*: it captures its own recent errors and
+  surfaces them (plus backend-fleet health: nodes up/down, per-node speeds) into the turn's context
+  and the Mind tab, so the model knows when it's degraded — and the nightly cycle digests them
+  (DESIGN §10).
 - **Session history** — a durable, restorable conversation log; the web UI switches between past
   conversations and the model replays the active one for real continuity.
 - **Visual memory graph** — the chat pane flips to a drifting "galaxy" of memory blobs + entities
@@ -133,6 +140,47 @@ On top of that:
   a documented, optionally token-authenticated HTTP API ([`docs/API.md`](docs/API.md)). Mimir is a
   *brain with endpoints, no built-in hands*: bring your own IO (voice, avatar, Home Assistant, an
   agent framework — or a relay where two Mimirs talk to each other).
+
+## Integration API — a brain with endpoints, no built-in hands
+
+Mimir ships **no IO of its own** (no voice, avatar, Home Assistant, social) — on purpose. You drive
+it through a small, stable surface and build whatever front-end you want on top: a voice loop, an
+avatar, a home-assistant bridge, an agent framework, or a relay where **two Mimirs talk to each
+other**. Full contract in [`docs/API.md`](docs/API.md); the essentials:
+
+**In Python (the cleanest path):**
+```python
+from mimir import Mimir
+m = Mimir.from_config("mimir.toml")
+print(m.turn("My garlic goes in around October.", user="greg").reply)
+print(m.turn("When do I plant the garlic?", user="greg").reply)   # recalls it, attributed
+```
+
+**Over HTTP** — `python -m mimir.server --config mimir.toml` serves the UI *and* the API on one port:
+```bash
+curl -s http://127.0.0.1:8765/api/turn \
+  -H "Content-Type: application/json" \
+  -d '{"text": "hello", "user": "greg"}'
+# → {"reply": "...", "introspect": {context accounting: sources, tiers, tokens}}
+```
+- **`user` is the speaker's identity** — the seam for multi-speaker and agent-to-agent. The server,
+  not the caller, decides how much each speaker is *believed*: `[identity] primary_user` → top tier,
+  `trusted_users` → trusted, **anyone else** (an unknown caller, a peer AI) is attributed but stored
+  at conversation tier, not as fact. So an exposed endpoint can't launder claims into trusted memory.
+- **`POST /api/turn/stream`** streams the reply token-by-token (Server-Sent Events) for low-latency
+  voice/chat front-ends.
+- **`GET /api/health`** — instant, unauthenticated liveness (`{ok, busy, embed_mode, nodes_up}`).
+
+**Security (opt-in, off by default):** set `[server] api_token` (or the env var named by
+`api_token_env`, default `MIMIR_API_TOKEN`) and every `/api/*` route requires
+`Authorization: Bearer <token>`. The **local browser UI is exempt by default** so a fresh run is
+never blocked — the token guards *remote/integration* callers; `[server] secure_ui = true` requires
+it locally too. `[server] cors_origins` allows browser front-ends on other origins.
+
+**Two Mimirs hanging out:** give each instance the same API, then a tiny relay loops one's reply into
+the other's `POST /api/turn` (tagged with its `user` name). Each remembers the other as a peer — and,
+per the trust policy above, won't take the other's hallucinations as gospel. A worked relay example
+is in [`docs/API.md`](docs/API.md).
 
 ## Runtime contract
 
