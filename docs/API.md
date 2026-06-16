@@ -156,6 +156,7 @@ weight. The caller picks the name; the server picks the trust.
 
 ## Other routes
 
-The full route list is in `server.py`'s module docstring (identity, onboarding, memories, graph,
-sessions, sleep/deliberate, fleet, forum, settings, diagnostics). They're all under `/api/` and so
-all behind the same token. The turn endpoints above are the ones most integrations need.
+The turn endpoints above are what most integrations need. The web UI is driven by a wider set —
+identity, onboarding, mind, memories, graph, sessions, settings, sleep, deliberate, council, forum,
+fleet/*, wiki/status, ingest — all under `/api/` and so all behind the same token (except
+`/api/health`). The authoritative list is the `do_GET`/`do_POST` dispatch in `server.py`.
