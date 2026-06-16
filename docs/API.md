@@ -117,6 +117,23 @@ Each side sees the other as just another speaker (`user="mimir-a"` / `"mimir-b"`
 exchange, and builds its own context — so the two accumulate a shared history and genuinely converse.
 Give your home Mimir the same endpoint and they can run side by side and "hang out."
 
+### Identity vs. trust (important)
+
+The `user` field is the speaker's **identity** — caller-set. How much that speaker is **believed** is
+**server-side config**, not the caller's to declare (so an exposed endpoint can't inject top-tier
+"facts"). The policy (`[identity]` in `mimir.toml`):
+
+- `primary_user = "greg"` → that speaker's statements bake at the top evidence tier (1.30).
+- `trusted_users = ["julien", "home-mimir"]` → trusted tier (1.20).
+- **any other named speaker** (an unknown caller, a peer AI you haven't listed) → attributed but
+  baked at **CONVERSATION** tier — recorded as "X said it," never as established fact.
+- With **no policy set at all**, Mimir is single-user: the lone named speaker is treated as primary
+  (so a simple custom UI works with zero config).
+
+So for a peer AI: leave it off `trusted_users` and its claims are remembered-as-said but not believed
+(safe against hallucinations); add it to `trusted_users` only if you want its statements to carry
+weight. The caller picks the name; the server picks the trust.
+
 ## Other routes
 
 The full route list is in `server.py`'s module docstring (identity, onboarding, memories, graph,
