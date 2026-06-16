@@ -8,6 +8,15 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Changed
+- **A server-side trust policy for who gets believed (`[identity] trusted_users`).** The caller
+  declares the speaker (`user`); the *config* decides how much that speaker is believed — never the
+  caller — so an exposed API can't self-assert trust. `primary_user` → top tier (1.30);
+  `trusted_users` (new) → trusted tier (1.20); any **other named speaker** (an unknown API caller, a
+  peer AI, a guest) is now **attributed but baked at CONVERSATION tier, not as fact** (previously any
+  named non-primary speaker was auto-trusted). Zero-config single-user is unchanged: with no policy
+  set, the lone named speaker is the primary, so a build-your-own-UI "just works." This makes
+  agent-to-agent safe (a peer's hallucinations don't enter as top-tier memory) without any bespoke
+  wiring — Mimir stays a clean responding participant.
 - **Consolidation prunes stale single-latest rows.** Working-memory and self-model rows accumulate
   one-per-synthesis, but only the latest of each is ever used (recency, limit 1) — pure dead weight on
   a long-lived deployment. The sleep cycle's consolidate pass now prunes them (keeps 2 working-memory,

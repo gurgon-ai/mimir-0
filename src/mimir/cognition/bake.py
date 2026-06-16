@@ -53,14 +53,30 @@ def _parse_bake(raw: str) -> tuple[list[str], list[list[str]]] | None:
     return facts, triples
 
 
-def _tier_and_provenance(user: str | None, primary_user: str | None) -> tuple[EvidenceTier, str]:
-    """Assign the evidence tier from the source of the statement (DESIGN §3b)."""
+def _tier_and_provenance(
+    user: str | None, primary_user: str | None, trusted_users: list[str] | None = None,
+) -> tuple[EvidenceTier, str]:
+    """Map *who said it* → an evidence tier (DESIGN §3b). A server-side trust policy: the caller
+    declares the speaker (``user``), the config decides how much that speaker is believed — not the
+    caller, so an open/exposed API can't let anyone launder claims into top-tier memory.
+
+    - ``primary_user`` is the operator → ``STATED_BY_PRIMARY_USER`` (1.30).
+    - ``trusted_users`` are additional believed identities → ``STATED_BY_TRUSTED`` (1.20).
+    - any other *named* speaker (an unrecognized caller, a peer AI, a guest) → ``CONVERSATION``:
+      attributed to them, but not treated as established fact.
+    - ``user is None`` (unattributed call) → ``CONVERSATION``.
+
+    Zero-config convenience: with NO policy set at all (no primary, no trusted list), the lone
+    speaker IS treated as the primary — so a simple single-user build-your-own-UI just works.
+    """
+    trusted = trusted_users or ()
     if user is None:
         return EvidenceTier.CONVERSATION, "stated in conversation"
-    # Single-user mode (no configured primary): the one speaker IS the primary user.
-    if primary_user is None or user == primary_user:
+    if user == primary_user or (primary_user is None and not trusted):
         return EvidenceTier.STATED_BY_PRIMARY_USER, f"stated by {user}"
-    return EvidenceTier.STATED_BY_TRUSTED, f"stated by {user}"
+    if user in trusted:
+        return EvidenceTier.STATED_BY_TRUSTED, f"stated by {user}"
+    return EvidenceTier.CONVERSATION, f"stated by {user}"
 
 
 def bake(
@@ -71,6 +87,7 @@ def bake(
     turn_text: str,
     user: str | None,
     primary_user: str | None,
+    trusted_users: list[str] | None = None,
 ) -> list[Memory]:
     """Extract, attribute, embed, and store durable facts from this turn's user text.
 
@@ -91,7 +108,7 @@ def bake(
         return []
     facts, triples = parsed
 
-    tier, provenance = _tier_and_provenance(user, primary_user)
+    tier, provenance = _tier_and_provenance(user, primary_user, trusted_users)
     if triples:
         store_triples(storage, triples, user=user, provenance=provenance)
     stored: list[Memory] = []

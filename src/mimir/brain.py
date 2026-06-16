@@ -595,6 +595,7 @@ class Mimir:
                 turn_text=text,
                 user=user,
                 primary_user=self.config.primary_user,
+                trusted_users=self.config.trusted_users,
             )
             record_exchange(self._storage, user=user, user_text=text, reply=reply)
             record_conversation_turn(self._storage, user=user, user_text=text, reply=reply,
@@ -701,6 +702,7 @@ class Mimir:
                 turn_text=text,
                 user=user,
                 primary_user=self.config.primary_user,
+                trusted_users=self.config.trusted_users,
             )
             record_exchange(self._storage, user=user, user_text=text, reply=reply)
             record_conversation_turn(self._storage, user=user, user_text=text, reply=reply,

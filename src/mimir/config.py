@@ -111,9 +111,13 @@ class Config:
     # Optional offline encyclopedia (Kiwix/ZIM over HTTP) — a live, attributed reference layer.
     wiki: WikiConfig | None = None
     identity: str = DEFAULT_IDENTITY
-    # The owner whose statements earn the top evidence tier. If None, Mimir runs in
-    # single-user mode and treats whoever speaks as the primary user (DESIGN §3b).
+    # The owner whose statements earn the top evidence tier. If None (and no trusted_users), Mimir
+    # runs in single-user mode and treats whoever speaks as the primary user (DESIGN §3b).
     primary_user: str | None = None
+    # Additional believed identities → STATED_BY_TRUSTED. Any *other* named speaker (an unknown API
+    # caller, a peer system, a guest) is attributed but baked at CONVERSATION tier, not as fact —
+    # the server-side trust policy, so an exposed API can't self-assert trust. Empty = no extra.
+    trusted_users: list[str] = field(default_factory=list)
     # Foundational identity anchors (name/operator/location/purpose), set declaratively here
     # for non-interactive deployments. Re-established (upserted) at boot. The interview sets
     # the same anchors interactively. See cognition/identity.py.
@@ -306,6 +310,7 @@ def load_config(path: str | Path) -> Config:
         primary_user=(
             str(identity_raw["primary_user"]) if "primary_user" in identity_raw else None
         ),
+        trusted_users=_as_str_list(identity_raw.get("trusted_users", [])),
         identity_anchors={
             k: str(identity_raw[k]) for k in anchor_keys if k in identity_raw
         },

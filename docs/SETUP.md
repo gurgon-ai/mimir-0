@@ -376,6 +376,9 @@ path = "data/mimir.db"          # required; SQLite file (created on first run)
 text = "You are Mimir..."       # optional; the always-on self-model / persona
 primary_user = "alex"           # optional; this user's statements earn the top evidence tier.
                                 # Omit for single-user mode (whoever speaks is treated as primary).
+trusted_users = ["sam"]         # optional; also believed (trusted tier). Any OTHER named speaker
+                                # (unknown API caller, peer AI, guest) is attributed but baked at
+                                # conversation tier, not as fact — the server-side trust policy.
 
 [embeddings]
 mode = "bootstrap"              # "bootstrap" | "endpoint" | "degraded"
