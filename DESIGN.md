@@ -377,11 +377,14 @@ too slow for chat.* Answering fast and grounding *after the fact* keeps latency 
 switch** governs depth: a text UI (read time) can afford more post-response work than a voice UI
 (which needs it fastest) — so it is a config policy, not a fixed cost.
 
-**Current state.** Mimir-0 has the bones: the attention governor, the pool's priority tiers + busy
-deferral, and a *fixed* slice of post-response background cognition (sentinel, self-model, working
-memory) **[partial]**. The general burst-window scheduler (two classes, pent-up priority, surfaces,
-idle takeover) and output-side bidirectional RAG are **[proposed]** — and compose directly with the
-inference engine, which is *built* to be distributed-and-idle-aware rather than single-shot.
+**Current state.** The burst-window scheduler is **[landed]** (`cognition/burst.py`): two task
+classes, pent-up priority, interruptible, surfaces. Post-response cognition (sentinel, self-model,
+working memory) routes through it, as does **output-side bidirectional RAG [landed]** — after the
+model replies, a burst task retrieves memory relevant to *its own reply* and surfaces it into the
+next turn's prompt, so a thread the model itself opened gets grounded, not just the user's input (it
+excludes the facts just baked from that reply, so it's not an echo; `Mimir._output_rag`). Still
+**[proposed]**: idle-takeover continuous mode (the cap lifting after long quiet). All of it composes
+with the inference engine, which is *built* to be distributed-and-idle-aware rather than single-shot.
 
 **The wall-clock sleep cycle — heavy maintenance needs a real window, not scraps. [landed]** The
 burst worker's premise is that the model idles while the user reads the reply. Two things break it:

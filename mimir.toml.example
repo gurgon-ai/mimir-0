@@ -72,6 +72,13 @@ check_interval_s = 900       # how often the daemon checks the clock (15 min)
 # turns off the hot path. Left for back-compat / headless setups without a steady clock.
 every = 0
 
+[output_rag]
+# Bidirectional (output-triggered) RAG: after the model replies, retrieve memory relevant to its OWN
+# reply (in the burst, off the hot path) and surface it into the next turn — so a thread the model
+# opened gets grounded, not just what you asked. Excludes facts just baked from that reply.
+enabled = true
+top_k = 3
+
 [deliberation]
 # During the sleep cycle, the system surfaces its OWN conflicts — graph tensions (a subject with two
 # values under a non-functional relation) and divergent near-duplicate memories — and submits the few

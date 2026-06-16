@@ -865,6 +865,8 @@ class Mimir:
                              trigger=lambda ctx: self._due("self_model"))
         self._burst.register("working_memory", self._working_memory_task, base_priority=25.0,
                              trigger=lambda ctx: self._due("working_memory"))
+        self._burst.register("output_rag", self._output_rag_task, base_priority=20.0,
+                             trigger=lambda ctx: self.config.output_rag_enabled)
         self._burst.register("sleep", self._sleep_task, base_priority=60.0,
                              trigger=lambda ctx: self._due("sleep"))
 
@@ -916,6 +918,36 @@ class Mimir:
             except BaseException as exc:
                 log.error("working-memory refresh failed (turn unaffected): %s", exc, exc_info=True)
             return BurstResult()
+        return run
+
+    def _output_rag(self, reply: str, user: str | None) -> str | None:
+        """Bidirectional RAG (DESIGN §5a): retrieve memory relevant to the model's OWN reply, to
+        surface into the next turn — so a thread the model itself opened gets grounded. Excludes the
+        facts just baked from this very reply (they'd be a redundant echo). Returns a surface, or
+        ``None``. Off the hot path (burst); a failure must never break the turn."""
+        text = (reply or "").strip()
+        if len(text.split()) < 4:
+            return None  # a trivial reply — nothing worth a retrieval pass
+        query_vec = self._embedder.embed(text)
+        now = time.time()
+        candidates = [
+            m for m in list_memories(self._storage, user=user, kind=MemoryKind.MEMORY)
+            if now - m.created_at > 10  # skip what was just baked from this turn (an echo)
+        ]
+        scored = retrieve(text, query_vec, candidates, top_k=max(1, self.config.output_rag_top_k))
+        if not scored:
+            return None
+        lines = "\n".join(f"- {s.memory.text}" for s in scored)
+        return f"Possibly relevant from memory, on what you last said:\n{lines}"
+
+    def _output_rag_task(self, ctx: ResponseContext) -> Callable[[], BurstResult]:
+        def run() -> BurstResult:
+            try:
+                note = self._output_rag(ctx.reply, ctx.user)
+            except BaseException as exc:
+                log.error("output-rag failed (turn unaffected): %s", exc, exc_info=True)
+                return BurstResult()
+            return BurstResult(surface=note) if note else BurstResult()
         return run
 
     def _sleep_task(self, ctx: ResponseContext) -> Callable[[], BurstResult]:

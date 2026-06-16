@@ -99,7 +99,9 @@ On top of that:
   fade, patterns persist), written off the hot path and injected as recent history.
 - **The burst worker** — post-response cognition (sentinel, self-model, working memory, sleep,
   narratives) scheduled into the idle window after each reply: pent-up-demand priority, interruptible,
-  with results that can surface into the next turn (DESIGN §5a).
+  with results that surface into the next turn. Includes **bidirectional (output-triggered) RAG** —
+  it retrieves memory relevant to the model's *own reply* and grounds the next turn with it, so a
+  thread the model opened isn't dropped (DESIGN §5a).
 - **Self-observability** — fail-loud, but also fail-*aware*: it captures its own recent errors and
   surfaces them (plus backend-fleet health: nodes up/down, per-node speeds) into the turn's context
   and the Mind tab, so the model knows when it's degraded — and the nightly cycle digests them

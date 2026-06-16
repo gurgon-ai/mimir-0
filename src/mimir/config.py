@@ -136,6 +136,11 @@ class Config:
     working_memory_keep_recent: int = 4
     # Deprecated turn-cadence trigger (superseded by the count-based fold above); kept for compat.
     working_memory_refresh_every: int = 4
+    # Bidirectional (output-triggered) RAG (DESIGN §5a): after the model replies, retrieve memory
+    # relevant to *its own reply* (in the burst) and surface it into the next turn — so a thread the
+    # model itself opened gets grounded, not just what the user asked. False = off.
+    output_rag_enabled: bool = True
+    output_rag_top_k: int = 3
     # Entity-graph traversal: how many hops from the query's entities, and the max connected
     # facts to inject. hops=0 disables graph retrieval (triples are still extracted/stored).
     graph_hops: int = 2
@@ -337,6 +342,8 @@ def load_config(path: str | Path) -> Config:
         working_memory_keep_recent=int(
             raw.get("working_memory", {}).get("keep_recent", 4)
         ),
+        output_rag_enabled=bool(raw.get("output_rag", {}).get("enabled", True)),
+        output_rag_top_k=int(raw.get("output_rag", {}).get("top_k", 3)),
         graph_hops=int(raw.get("entity_graph", {}).get("hops", 2)),
         graph_max_facts=int(raw.get("entity_graph", {}).get("max_facts", 8)),
         sleep_every=int(raw.get("sleep", {}).get("every", 0)),

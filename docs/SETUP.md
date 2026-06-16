@@ -406,6 +406,10 @@ window_end = "06:00"            # local HH:MM it closes (may cross midnight, e.g
 check_interval_s = 900          # how often the daemon checks the clock (15 min)
 every = 0                       # legacy turn-cadence path (superseded by the window); 0 = off
 
+[output_rag]                    # bidirectional RAG: ground the next turn in memory about the LAST reply
+enabled = true                  # after a reply, retrieve memory relevant to the model's own words
+top_k = 3                       # how many related memories to surface into the next turn
+
 [deliberation]                  # during sleep, argue the system's own conflicts via the inner council
 enabled = true                  # also toggle live in the Sleep tab; "Deliberate now" triggers it manually
 limit = 3                       # max conflicts argued per cycle (each is several model calls)

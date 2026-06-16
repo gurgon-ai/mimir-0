@@ -191,6 +191,12 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **Bidirectional (output-triggered) RAG (DESIGN §5a).** Retrieval no longer only fires on the
+  user's input — after the model replies, a burst task retrieves memory relevant to **its own reply**
+  and surfaces it into the **next turn's** context, so a thread the model itself opened gets grounded
+  (not just what the user asked). Off the hot path (one embed + local retrieval in the idle window);
+  excludes the facts just baked from that reply (no echo); top-K configurable. `[output_rag] enabled`
+  (default on), `top_k`. New: `Mimir._output_rag()`.
 - **Integration API + a security layer — a brain with endpoints, no built-in hands (DESIGN §8).**
   Mimir 0 deliberately ships no IO of its own; instead the HTTP surface is now a documented,
   optionally-authenticated **integration API** so you build your own (voice, avatar, Home Assistant,
