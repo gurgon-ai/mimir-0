@@ -54,6 +54,7 @@ from .cognition.identity import (
     render_anchors,
 )
 from .cognition.ingest import IngestResult, ingest_document
+from .cognition.inner_life import compose_thought, gather_stimuli, pick_stimulus, should_think
 from .cognition.narratives import render_recent_history, run_narrative_cycle
 from .cognition.onboarding import (
     onboarding_profile,
@@ -121,6 +122,7 @@ from .storage.repo import (
     record_conversation_turn,
     record_interaction,
     retier_by_provenance,
+    save_memory,
     set_forum_thread_status,
     set_model_enabled,
     set_node_enabled,
@@ -250,6 +252,15 @@ class Mimir:
         self._stop_sleep = threading.Event()
         self._sleep_scheduler: threading.Thread | None = None
         self._start_sleep_scheduler()
+        # The live inner life: a low-frequency idle loop that thinks between turns (DESIGN §5a).
+        # OFF by default (it spends idle compute), routed off the chat model, yields to live turns.
+        # Reads effective settings each tick so the UI toggle/cadence take effect without a restart.
+        self._last_turn_at = 0.0      # wall-clock end of last turn (the inner-life idle floor)
+        self._last_thought_at = 0.0   # wall-clock of last inner-life thought (the cadence gate)
+        self._last_thought_kind: str | None = None
+        self._stop_inner = threading.Event()
+        self._inner_life: threading.Thread | None = None
+        self._start_inner_life()
 
         # Establish any identity anchors declared in config (idempotent upsert at boot), so a
         # non-interactive deployment is grounded without running the interactive interview.
@@ -619,6 +630,7 @@ class Mimir:
                                      session_id=sid)
         finally:
             self._turn_active = False
+            self._last_turn_at = time.time()  # start the inner-life idle floor (DESIGN §5a)
 
         # 5. Fire the burst window: sentinel + any due self-model/working-memory/sleep, scheduled
         #    and run off the hot path (DESIGN §5a). The next turn settles it.
@@ -726,6 +738,7 @@ class Mimir:
                                      session_id=sid)
         finally:
             self._turn_active = False
+            self._last_turn_at = time.time()  # start the inner-life idle floor (DESIGN §5a)
 
         self._burst.signal(ResponseContext(
             user_text=text, reply=reply, user=user, turn_index=self._turn_count
@@ -1000,6 +1013,8 @@ class Mimir:
             "sleep_window_start": self.config.sleep_window_start,
             "sleep_window_end": self.config.sleep_window_end,
             "deliberation_enabled": self.config.deliberation_enabled,
+            "inner_life_enabled": self.config.inner_life_enabled,
+            "inner_life_cadence_s": self.config.inner_life_cadence_s,
         }
 
     def _overrides(self) -> dict[str, Any]:
@@ -1041,8 +1056,10 @@ class Mimir:
                         f"unknown timezone: {val!r} (install the optional `tzdata` package "
                         f"for full IANA support)"
                     )
-            elif key in ("sleep_enabled", "deliberation_enabled"):
+            elif key in ("sleep_enabled", "deliberation_enabled", "inner_life_enabled"):
                 val = bool(val)
+            elif key == "inner_life_cadence_s":
+                val = max(30.0, float(val))  # floor at 30s so a typo can't hammer the fleet
             overrides[key] = val
         kv_set(self._storage, self._SETTINGS_KEY, json.dumps(overrides))
         return self.settings()
@@ -1193,6 +1210,112 @@ class Mimir:
         scheduler = threading.Thread(target=_loop, name="mimir-sleep-cycle", daemon=True)
         scheduler.start()
         self._sleep_scheduler = scheduler
+
+    # -- the live inner life: low-frequency idle thinking (DESIGN §5a) -----------------
+
+    def _inner_life_enabled(self) -> bool:
+        return bool(self._overrides().get("inner_life_enabled", self.config.inner_life_enabled))
+
+    def _inner_life_cadence(self) -> float:
+        val = self._overrides().get("inner_life_cadence_s", self.config.inner_life_cadence_s)
+        try:
+            return max(30.0, float(val))
+        except (TypeError, ValueError):
+            return self.config.inner_life_cadence_s
+
+    def _pool_degraded(self) -> bool:
+        """Whether the fleet is in no shape to spend idle compute — nothing reachable."""
+        try:
+            return int(self.pool_health().get("nodes_up", 0)) <= 0
+        except Exception:  # health is best-effort; assume OK rather than block forever (§10)
+            return False
+
+    def _inner_life_chat(self, messages: list[dict[str, str]]) -> str:
+        """Route an inner-life reflection OFF the chat model: the loose ``background`` model if the
+        fleet has qualified one, else the reasoning role. Never the warm chat model (keeps turns
+        fast and avoids an expensive reload of the identity-bearing model)."""
+        name = self.background_model()
+        if name:
+            return self._model.chat_with_model(name, messages)
+        return self._model.chat("reasoning", messages)
+
+    def run_inner_life_tick(self, *, force: bool = False) -> dict[str, Any]:
+        """One inner-life cycle: gate → pick a stimulus → compose one cheap reflection → store it as
+        a low-confidence, decaying memory (it 'earns its way' back via recall). The daemon calls it
+        on its cadence; ``force`` (manual 'think now') bypasses the enable/cadence/idle/health gates
+        but still yields to a live turn. Returns a small report; never raises (§10)."""
+        now = time.time()
+        if force:
+            if self._turn_active:
+                return {"ran": False, "reason": "turn in flight"}
+        else:
+            ok, reason = should_think(
+                enabled=self._inner_life_enabled(),
+                turn_active=self._turn_active,
+                degraded=self._pool_degraded(),
+                now=now,
+                last_turn_at=self._last_turn_at,
+                last_thought_at=self._last_thought_at,
+                cadence_s=self._inner_life_cadence(),
+                idle_floor_s=self.config.inner_life_idle_floor_s,
+            )
+            if not ok:
+                return {"ran": False, "reason": reason}
+        try:
+            return self._do_inner_life(now)
+        except BaseException as exc:  # idle musing must never destabilise the process (§10)
+            log.error("inner life: tick failed: %s", exc, exc_info=True)
+            return {"ran": False, "reason": f"error: {exc}"}
+
+    def _do_inner_life(self, now: float) -> dict[str, Any]:
+        errors = [str(r.get("message", "")) for r in self.recent_errors(limit=1)]
+        wm = current_working_memory(self._storage) or ""
+        stimuli = gather_stimuli(
+            self._storage, embedder=self._embedder,
+            recent_errors=errors, working_memory_text=wm,
+        )
+        stim = pick_stimulus(stimuli, avoid_kind=self._last_thought_kind)
+        if stim is None:
+            return {"ran": False, "reason": "no stimulus"}
+        thought = compose_thought(self._inner_life_chat, stim)
+        if not thought:
+            return {"ran": False, "reason": "empty thought"}
+        mem = Memory(
+            text=thought,
+            kind=MemoryKind.MEMORY,
+            evidence_tier=EvidenceTier.INFERRED,
+            confidence=0.3,  # a musing, not a fact — low belief, decays unless reinforced
+            salience=0.6,
+            embedding=self._embedder.embed(thought),
+            provenance="inner life",
+        )
+        save_memory(self._storage, mem)
+        self._last_thought_at = now
+        self._last_thought_kind = stim.kind
+        log.info("inner life: mused on %s (mem %s)", stim.kind, mem.id)
+        return {"ran": True, "kind": stim.kind, "thought": thought, "memory_id": mem.id}
+
+    def _start_inner_life(self) -> None:
+        """Daemon: every check interval run one inner-life tick (which self-gates on
+        enable/cadence/idle/health). Always started so the UI toggle takes effect live; the tick is
+        a cheap no-op while disabled."""
+        if self._inner_life is not None or self.config.inner_life_check_interval_s <= 0:
+            return
+        interval = max(5.0, self.config.inner_life_check_interval_s)
+
+        def _loop() -> None:
+            log.info("inner life: idle loop started (checks every %.0fs)", interval)
+            while not self._stop_inner.wait(timeout=interval):
+                try:
+                    self.run_inner_life_tick()
+                except StorageError:  # raced a close() — the store is gone; stop quietly (§10)
+                    return
+                except Exception as exc:  # the loop must never die on a transient error (§10)
+                    log.error("inner life: loop tick failed: %s", exc, exc_info=True)
+
+        thread = threading.Thread(target=_loop, name="mimir-inner-life", daemon=True)
+        thread.start()
+        self._inner_life = thread
 
     # -- self-observability: recent errors into context + a nightly digest (DESIGN §10) ----
 
@@ -1724,12 +1847,16 @@ class Mimir:
         self._burst.stop()
         self._stop_idle.set()
         self._stop_sleep.set()
+        self._stop_inner.set()
         if self._idle_prober is not None:
             self._idle_prober.join(timeout=5)
             self._idle_prober = None
         if self._sleep_scheduler is not None:
             self._sleep_scheduler.join(timeout=5)
             self._sleep_scheduler = None
+        if self._inner_life is not None:
+            self._inner_life.join(timeout=5)
+            self._inner_life = None
         self._model.stop_prober()
         self._storage.close()
 

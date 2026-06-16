@@ -87,6 +87,19 @@ top_k = 3
 enabled = true
 limit = 3                    # max conflicts argued per cycle (each is several model calls)
 
+[inner_life]
+# The live inner life (DESIGN §5a): between conversations, on a slow cadence, the system reflects on
+# ONE universal stimulus — a recent error, an un-deliberated conflict, a salient memory, the
+# working-memory thread — with a cheap background model, and keeps the thought as a low-confidence,
+# decaying memory that resurfaces only if it later turns out relevant (it "earns its way" back; it is
+# never force-injected). It routes OFF the chat model and yields instantly to a live turn, but it does
+# use spare compute — so it's OFF by default. Toggle + cadence are also live in the Sleep tab, and a
+# "Think now" button forces one cycle.
+enabled = false              # opt in to let it think during idle time
+cadence_s = 300              # at most one thought this often (~5 min); lower it if you have GPU to spare
+idle_floor_s = 30            # stay quiet at least this long after a turn before musing
+check_interval_s = 20        # daemon wake cadence (it self-gates on cadence_s)
+
 [server]
 # Reference web server / integration API (see docs/API.md). Auth is off by default (open localhost).
 # Set a token to require `Authorization: Bearer <token>` on every /api/* route — or use the env var

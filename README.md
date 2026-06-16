@@ -120,6 +120,11 @@ On top of that:
   verdicts become recallable understanding (DESIGN §5a). Personas **fan across the whole fleet** (one
   node each, in parallel), and every debate persists to a **forum** view (toggle over the chat, like
   the graph) you can read, comment on, and keep house in.
+- **Live inner life** — between conversations it can **think on its own**: on a gentle, you-set
+  cadence it reflects on a recent exchange, a memory, a tension in what it knows, or an error it hit,
+  and keeps the thought as a low-confidence note that resurfaces only if it later turns out relevant.
+  It runs *off* the chat model and yields the instant you type, but it does use spare compute — so
+  it's **off by default**; flip it on and set the pace in the Sleep tab (DESIGN §5a).
 - **Distributed fleet + qualifying tournament** — point it at your LAN and it discovers every
   `ollama serve` (zero setup on those machines), routes each request to a node that has the model,
   and **qualifies** them on a measured battery (talk, tools, code, reasoning, discipline, and an

@@ -195,6 +195,19 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   slow model reads as grinding, not hung.
 
 ### Added
+- **The live inner life — thinking in the long quiet (DESIGN §5a).** A new idle loop
+  (`cognition/inner_life.py`) reclaims the time *between* conversations (the burst worker only
+  reclaims the few seconds after a reply). On a slow, user-tunable cadence (default one thought every
+  ~5 min) a daemon picks ONE universal stimulus — a recent error, an un-deliberated conflict, the most
+  salient memory, the working-memory thread — and composes a brief first-person reflection with a
+  cheap background model. The thought is stored as a low-confidence, decaying memory
+  (`provenance="inner life"`, `INFERRED`, confidence 0.3) that **earns its way** back via ordinary
+  recall — never force-injected. Built to two hard rules: **chat priority** (routes *off* the chat
+  model, yields the instant a turn starts via `should_think`, holds a post-turn idle floor, long
+  cadence) and **edge cost** (one model call per cycle, paused when the fleet is down, **off by
+  default**). On/off + cadence are live in the Sleep tab and `[inner_life]` config; a "Think now"
+  button (`POST /api/inner_life/run`) forces one cycle. This is the first step of idle-takeover
+  continuous mode; the deep-idle two-voice dialogue is still to come. `Mimir.run_inner_life_tick`.
 - **Bidirectional (output-triggered) RAG (DESIGN §5a).** Retrieval no longer only fires on the
   user's input — after the model replies, a burst task retrieves memory relevant to **its own reply**
   and surfaces it into the **next turn's** context, so a thread the model itself opened gets grounded
