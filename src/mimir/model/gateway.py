@@ -19,7 +19,7 @@ from ..config import AUTO_MODEL, RoleSpec
 from ..errors import ModelGatewayError, ProviderError
 from .pool import ProviderPool
 from .priority import DEFAULT_ROLE_PRIORITY, Priority
-from .provider import Message, ModelInfo, Provider
+from .provider import Message, ModelInfo, Provider, is_embedding_model
 
 log = logging.getLogger("mimir.model")
 
@@ -122,7 +122,7 @@ class ModelGateway:
             want_embed = role == "embed"
             picks = [
                 m for m in self._pool.available_models()
-                if ("embed" in m.lower()) == want_embed and m not in self._disabled_models
+                if is_embedding_model(m) == want_embed and m not in self._disabled_models
             ]
             if not picks:
                 raise ModelGatewayError(

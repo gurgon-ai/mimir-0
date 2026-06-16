@@ -21,6 +21,19 @@ Message = dict[str, str]
 
 _PARAMS_RE = re.compile(r"([\d.]+)\s*[bB]")
 
+# Substrings that mark a model as embeddings-only (no chat endpoint). Ollama reports this via
+# `capabilities`, but the live routing path only has model *names* — and several embedding models
+# don't contain "embed" (all-minilm, bge, gte, mxbai, …), so a bare "embed" check misses them and
+# the router/council tries to chat with them (HTTP 400). Practical, not exhaustive.
+_EMBEDDING_MARKERS = ("embed", "minilm", "bge", "gte", "mxbai", "arctic-embed", "nomic")
+
+
+def is_embedding_model(name: str) -> bool:
+    """Heuristic: is this model name an embeddings-only model (no chat)? Used to keep embedding
+    models out of chat routing, the council roster, and `auto` chat-role resolution."""
+    lowered = (name or "").lower()
+    return any(marker in lowered for marker in _EMBEDDING_MARKERS)
+
 
 @dataclass(slots=True)
 class ModelInfo:
