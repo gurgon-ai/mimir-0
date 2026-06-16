@@ -270,3 +270,60 @@ def test_get_stats_reports_down_nodes() -> None:
     stats = pool.get_stats()
     assert stats["nodes_up"] == 1
     assert stats["down"] == ["B"]
+
+
+class TimeoutProvider(FleetProvider):
+    """A dead/molasses node: every chat hits the time limit (transient + timeout)."""
+
+    def __init__(self, name: str, models: list[str]) -> None:
+        super().__init__(name, models)
+        self.attempts = 0
+
+    def chat(self, model: str, messages: list[Message], params: dict[str, object]) -> str:
+        self.attempts += 1
+        raise ProviderError(f"{self.name} timed out", transient=True, timeout=True)
+
+
+class RecordingProvider(FleetProvider):
+    """Records the last model it was asked for (to prove which model routing chose)."""
+
+    def __init__(self, name: str, models: list[str]) -> None:
+        super().__init__(name, models)
+        self.last_model: str | None = None
+
+    def chat(self, model: str, messages: list[Message], params: dict[str, object]) -> str:
+        self.last_model = model
+        return super().chat(model, messages, params)
+
+
+def test_timeout_is_not_retried_and_cools_the_node_down() -> None:
+    dead = TimeoutProvider("DEAD", ["m"])
+    pool = ProviderPool([("DEAD", dead)], max_retries=2, sleep=_noop_sleep)
+    pool.refresh()
+    with pytest.raises(ProviderError):
+        pool.chat("m", [], {}, priority=Priority.CHAT_CRITICAL)
+    assert dead.attempts == 1                       # a timeout is NOT retried (would've been 3)
+    assert "DEAD" in pool.get_stats()["saturated"]  # one timeout → cooled down (skipped next time)
+
+
+def test_failover_past_a_timed_out_node() -> None:
+    dead = TimeoutProvider("DEAD", ["m"])
+    good = FleetProvider("GOOD", ["m"])
+    pool = ProviderPool([("DEAD", dead), ("GOOD", good)], max_retries=2, sleep=_noop_sleep)
+    pool.refresh()
+    assert pool.chat("m", [], {}, priority=Priority.CHAT_CRITICAL) == "reply-from-GOOD"
+    assert dead.attempts == 1   # tried once, timed out, failed over — no 120s×3
+
+
+def test_disabled_model_reroutes_a_role() -> None:
+    from mimir.config import RoleSpec
+    from mimir.model.gateway import ModelGateway
+    p = RecordingProvider("A", ["pinned", "good"])
+    pool = ProviderPool([("A", p)], sleep=_noop_sleep)
+    pool.refresh()
+    gw = ModelGateway(pool, {"chat": RoleSpec(model="pinned")})
+    gw.chat("chat", [])
+    assert p.last_model == "pinned"
+    gw.set_disabled_models({"pinned"})              # user disables the pinned model
+    gw.chat("chat", [])
+    assert p.last_model == "good"                    # role re-resolves to the enabled model
