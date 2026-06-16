@@ -32,7 +32,7 @@ from typing import TypeVar
 from ..errors import ProviderError
 from .latency import LatencyStat, normalize_latency
 from .priority import Priority
-from .provider import Message, ModelInfo, Provider
+from .provider import Message, ModelInfo, Provider, is_embedding_model
 
 log = logging.getLogger("mimir.model.pool")
 
@@ -192,7 +192,7 @@ class ProviderPool:
         used: set[str] = set()
         placements: list[tuple[str, str]] = []
         for endpoint in eps:
-            options = sorted(m for m in endpoint.models if "embed" not in m.lower())
+            options = sorted(m for m in endpoint.models if not is_embedding_model(m))
             if not options:
                 continue
             pick = next((m for m in options if m not in used), options[0])

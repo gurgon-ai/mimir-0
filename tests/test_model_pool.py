@@ -7,7 +7,7 @@ import pytest
 from mimir.errors import ProviderError
 from mimir.model.pool import ProviderPool
 from mimir.model.priority import Priority
-from mimir.model.provider import Message
+from mimir.model.provider import Message, is_embedding_model
 
 
 class FakeProvider:
@@ -327,3 +327,13 @@ def test_disabled_model_reroutes_a_role() -> None:
     gw.set_disabled_models({"pinned"})              # user disables the pinned model
     gw.chat("chat", [])
     assert p.last_model == "good"                    # role re-resolves to the enabled model
+
+
+def test_is_embedding_model_catches_names_without_embed() -> None:
+    # The bug: embedding models without "embed" in the name (all-minilm, bge, gte, mxbai) slipped
+    # through into chat routing / the council and 400'd ("does not support chat").
+    for name in ["all-minilm:latest", "bge-large", "gte-small", "mxbai-embed-large",
+                 "nomic-embed-text:v1.5", "snowflake-arctic-embed"]:
+        assert is_embedding_model(name), name
+    for name in ["gemma3:12b", "deepseek-r1:8b", "qwen2.5:14b", "llama3.1:8b"]:
+        assert not is_embedding_model(name), name

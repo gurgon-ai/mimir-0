@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from ..embed.base import Embedder
 from ..model.gateway import ModelGateway
+from ..model.provider import is_embedding_model
 from ..prompts import (
     COUNCIL_PERSONAS,
     COUNCIL_SYNTH_SYSTEM,
@@ -51,7 +52,7 @@ class CouncilResult:
 
 def _eligible_models(model: ModelGateway) -> list[str]:
     """Discovered models eligible to host a persona — embedding models filtered out."""
-    discovered = [m for m in model.available_models() if "embed" not in m.lower()]
+    discovered = [m for m in model.available_models() if not is_embedding_model(m)]
     if discovered:
         return discovered
     return [model.default_council_model()]  # nothing discovered → fall back to a configured model

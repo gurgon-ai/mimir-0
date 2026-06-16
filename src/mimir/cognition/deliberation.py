@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from ..embed.base import Embedder, cosine
 from ..model.gateway import ModelGateway
 from ..storage.gateway import StorageGateway
-from ..storage.models import MemoryKind
+from ..storage.models import EvidenceTier, MemoryKind
 from ..storage.repo import browse_triples, list_memories
 from .sleep import FUNCTIONAL_RELATIONS, NEAR_DUP_COSINE
 
@@ -37,6 +37,12 @@ log = logging.getLogger("mimir.deliberation")
 # (which merges at >= NEAR_DUP_COSINE) — close enough to be a tension, far enough to be a real one.
 TENSION_COSINE_LO = 0.84
 _MAX_MEMORIES_SCANNED = 200  # cap the O(n^2) near-duplicate scan to the most salient memories
+
+# Tiers the council should NOT argue over: DOCUMENT chunks are reference material whose overlapping
+# windows look like near-duplicates but aren't beliefs in tension; INFERRED is the system's OWN
+# output (inner-life musings, prior verdicts) — arguing it just loops on itself. Real tensions live
+# among what someone *stated* (primary/trusted/conversation/peer).
+_NON_BELIEF_TIERS = frozenset({EvidenceTier.DOCUMENT, EvidenceTier.INFERRED})
 
 _CURATOR_SYSTEM = (
     "You triage a list of open questions/tensions found in an AI's own memory. Choose the few most "
@@ -88,7 +94,10 @@ def _memory_conflicts(storage: StorageGateway, embedder: Embedder | None) -> lis
     if embedder is None or not embedder.mode.is_semantic:
         # Only real (endpoint) embeddings are semantic; lexical-hash cosine here would be noise.
         return []
-    memories = [m for m in list_memories(storage, user=None, kind=MemoryKind.MEMORY) if m.embedding]
+    memories = [
+        m for m in list_memories(storage, user=None, kind=MemoryKind.MEMORY)
+        if m.embedding and not m.archived and m.evidence_tier not in _NON_BELIEF_TIERS
+    ]
     memories.sort(key=lambda m: m.salience, reverse=True)
     memories = memories[:_MAX_MEMORIES_SCANNED]
     conflicts: list[Conflict] = []

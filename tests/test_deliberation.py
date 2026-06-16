@@ -65,3 +65,30 @@ def test_deliberation_disabled_is_noop(brain: Mimir) -> None:
     brain.update_settings({"deliberation_enabled": False})
     report = brain.deliberate_open_questions()  # non-force respects the toggle
     assert report["enabled"] is False and report["ran"] == []
+
+
+def test_memory_conflicts_skip_documents_and_self_output(brain: Mimir) -> None:
+    # Regression: the council was "reconciling" overlapping README/DESIGN chunks (DOCUMENT) and its
+    # own musings/verdicts (INFERRED). Only what someone *stated* should surface as a tension.
+    from types import SimpleNamespace
+
+    from mimir.embed.base import EmbeddingMode
+    from mimir.storage.models import EvidenceTier, Memory
+    from mimir.storage.repo import save_memory
+
+    semantic = SimpleNamespace(mode=EmbeddingMode.ENDPOINT)  # _memory_conflicts needs semantic mode
+    va, vb = [1.0, 0.0, 0.0], [0.92, 0.39, 0.0]  # cosine ~0.92 — inside the tension band
+
+    def pair(tier: EvidenceTier, prov: str, a: str, b: str) -> None:
+        save_memory(brain._storage, Memory(text=a, embedding=va, evidence_tier=tier,
+                                           user="g", provenance=prov))
+        save_memory(brain._storage, Memory(text=b, embedding=vb, evidence_tier=tier,
+                                           user="g", provenance=prov))
+
+    pair(EvidenceTier.DOCUMENT, "README.md", "the fleet qualifies models", "the fleet qualifies it")
+    pair(EvidenceTier.INFERRED, "inner life", "i wonder about the fleet", "i keep wondering on it")
+    assert surface_conflicts(brain._storage, embedder=semantic) == []  # reference + self → nothing
+
+    pair(EvidenceTier.CONVERSATION, "stated by g", "gate is north", "gate sits at the north fence")
+    keys = [c.key for c in surface_conflicts(brain._storage, embedder=semantic)]
+    assert any(k.startswith("mem:") for k in keys)  # the stated pair IS a real tension

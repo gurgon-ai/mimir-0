@@ -1832,6 +1832,12 @@ function toggleForum() {
 $("forumToggle").addEventListener("click", toggleForum);
 
 function forumWhen(ts) { return ts ? new Date(ts * 1000).toLocaleString() : ""; }
+// Collapse whitespace/newlines and truncate — keeps a long, multi-line question to one tidy line
+// in the thread list (the full text shows, wrapped, in the thread view).
+function forumClip(s, n) {
+  const flat = (s || "").replace(/\\s+/g, " ").trim();
+  return flat.length > n ? flat.slice(0, n - 1) + "…" : flat;
+}
 
 async function loadForumList() {
   const el = $("forumView");
@@ -1853,7 +1859,7 @@ async function loadForumList() {
         ? '<span style="color:#8896a6;">● closed</span>'
         : '<span style="color:#7fd17f;">● open</span>';
       return `<div class="mem forum-thread" data-id="${t.id}" style="cursor:pointer;">` +
-        `<div class="text"><b>${escapeHtml(t.question)}</b></div>` +
+        `<div class="text"><b>${escapeHtml(forumClip(t.question, 160))}</b></div>` +
         `<div class="meta">${badge} · ${escapeHtml(t.source)} · ${t.posts} posts · ${forumWhen(t.created_at)}</div></div>`;
     }).join("");
     el.querySelectorAll(".forum-thread").forEach(d =>
@@ -1884,7 +1890,8 @@ async function openForumThread(id) {
   const closed = t.status === "closed";
   const head =
     '<button class="secondary" id="forumBack" type="button">← All threads</button>' +
-    `<h2 style="margin:10px 0 4px;">${escapeHtml(t.question)}</h2>` +
+    `<div style="font-weight:600; font-size:1.05em; white-space:pre-wrap; margin:10px 0 4px; ` +
+    `max-height:220px; overflow:auto;">${escapeHtml(t.question)}</div>` +
     `<div class="hint" style="margin-bottom:10px;">${escapeHtml(t.source)} · ${closed ? "closed" : "open"} · ${forumWhen(t.created_at)} ` +
     `<button class="secondary" id="forumStatus" type="button">${closed ? "Reopen" : "Close"}</button> ` +
     `<button class="secondary" id="forumDelThread" type="button">Delete thread</button></div>`;

@@ -23,6 +23,22 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   Build your own front-end → `speaker_kind="human"` (users are treated as users). Wire another agent
   in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
 
+### Fixed
+- **The council stopped trying to chat with embedding models.** The embedding-model filter was a bare
+  `"embed" in name` check everywhere (routing, `auto` role resolution, council roster), so embedding
+  models without "embed" in the name — `all-minilm`, `bge`, `gte`, `mxbai` — slipped through and the
+  council kept assigning one as a persona, 400-ing ("does not support chat") every deliberation.
+  Centralized `model.provider.is_embedding_model()` (a broader name heuristic) and used it in the
+  pool, gateway, and council.
+- **Self-directed deliberation stopped "reconciling" reference material and its own musings.** The
+  near-duplicate conflict scan included DOCUMENT chunks (overlapping README/DESIGN windows from the
+  self-knowledge bake looked like near-duplicates) and INFERRED memories (inner-life musings, prior
+  council verdicts) — so the council argued giant doc fragments against each other and looped on its
+  own output. It now considers only *stated* beliefs (excludes DOCUMENT/INFERRED and archived rows).
+- **Forum readability.** Long, multi-line, markdown-laden questions no longer render as one giant bold
+  blob: the thread list shows a clipped single-line summary, and the thread view wraps the full
+  question in a height-capped, scrollable block.
+
 ### Changed
 - **Memory distillation: the store now fades and prunes instead of only accumulating.** A bridge-test
   audit found over-retention (aux-store rows piling up, the salience axis flat at 1.0, nothing ever
