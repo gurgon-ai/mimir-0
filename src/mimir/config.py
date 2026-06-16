@@ -174,6 +174,11 @@ class Config:
     # ``cors_origins`` = browser origins allowed to call it (``["*"]`` for any); empty = same site.
     api_token: str | None = None
     cors_origins: list[str] = field(default_factory=list)
+    # When a token is set it always guards REMOTE callers, but the local browser UI (same machine,
+    # 127.0.0.1) is exempt by default — so a fresh run isn't blocked by a token wall. Flip this on
+    # to require the token for the local UI too (e.g. a shared box, or behind a reverse proxy where
+    # every request looks local — then enable this or have the proxy do auth).
+    secure_ui: bool = False
     # Procedural memory: how many matching procedures to inject, and the minimum trigger match.
     procedural_top_k: int = 3
     procedural_min_match: float = 0.3
@@ -355,6 +360,7 @@ def load_config(path: str | Path) -> Config:
             or None
         ),
         cors_origins=_as_str_list(raw.get("server", {}).get("cors_origins", [])),
+        secure_ui=bool(raw.get("server", {}).get("secure_ui", False)),
         procedural_top_k=int(raw.get("procedural", {}).get("top_k", 3)),
         procedural_min_match=float(raw.get("procedural", {}).get("min_match", 0.3)),
         timezone=(str(raw["locale"]["timezone"]) if raw.get("locale", {}).get("timezone")

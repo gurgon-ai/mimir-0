@@ -88,6 +88,9 @@ limit = 3                    # max conflicts argued per cycle (each is several m
 # api_token_env = "MIMIR_API_TOKEN"   # env var to read the token from (wins over api_token above).
                                       # Running two instances on one box? Give each its own var name.
 # cors_origins = ["https://my-avatar.local"]   # browser origins allowed to call the API; ["*"] = any
+# secure_ui = false   # the local browser UI is token-exempt by default (a fresh run is never blocked
+                      # by a token wall; the token still guards remote callers). Set true to require
+                      # the token for the local UI too (shared box / behind a reverse proxy).
 
 [self_knowledge]
 # Bake a doc describing what the system is and how it works into memory in the nightly cycle, so it

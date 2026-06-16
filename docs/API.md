@@ -43,16 +43,24 @@ api_token_env = "MIMIR0_TOKEN"   # this instance reads $MIMIR0_TOKEN (default: M
 saves a step when one instance calls another. Separate vars only matter if you want to rotate or
 revoke them independently.)
 
-When a token is set, **every `/api/*` route** requires it:
+When a token is set, **remote** callers must send it:
 
 ```
 Authorization: Bearer a-long-random-string
 ```
 
-Without it (or with the wrong one) the API returns **`401 {"error":"unauthorized"}`**. The page
-shell (`/`) stays open so the bundled web UI can prompt you for the token once (it stores it locally
-and sends it thereafter). CORS preflight (`OPTIONS`) is unauthenticated, as browsers require; the
-allowed-origin header is echoed only for origins in `cors_origins`.
+…or the API returns **`401 {"error":"unauthorized"}`**.
+
+**The local browser UI is exempt by default.** Requests from the same machine (`127.0.0.1`) skip the
+token, so opening the UI on the box that runs Mimir is never blocked by a token wall — even with a
+token set. The token guards **remote/integration** callers; the operator at the local UI just works.
+Set `[server] secure_ui = true` to require the token for the local UI too (a shared box, or behind a
+reverse proxy where every request looks local — enable this, or have the proxy do auth). When the UI
+*is* gated (remote, or `secure_ui`), it prompts for the token once and stores it locally.
+
+`GET /api/health` is **always** exempt (liveness probes need no credentials). CORS preflight
+(`OPTIONS`) is unauthenticated, as browsers require; the allowed-origin header is echoed only for
+origins in `cors_origins`.
 
 ## The turn endpoint
 

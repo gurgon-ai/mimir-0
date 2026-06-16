@@ -182,8 +182,11 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   enables browser frontends on other origins (with an `OPTIONS` preflight). The `user` field on
   `POST /api/turn` is the **speaker identity** — the seam for agent-to-agent. The token's env var
   name is configurable (`[server] api_token_env`, default `MIMIR_API_TOKEN`) so two instances on one
-  machine don't collide. Full contract in [`docs/API.md`](docs/API.md). New config: `[server]
-  api_token`, `api_token_env`, `cors_origins`.
+  machine don't collide. **The local browser UI is token-exempt by default** (a same-machine request
+  skips the token, so a fresh run is never blocked by a token wall — the token still guards
+  remote/integration callers); `[server] secure_ui = true` requires it for the local UI too, and
+  `GET /api/health` is always exempt. Full contract in [`docs/API.md`](docs/API.md). New config:
+  `[server] api_token`, `api_token_env`, `cors_origins`, `secure_ui`.
 - **Self-knowledge — the system bakes its own README into memory so it knows what it is.** A
   `self_knowledge` phase in the sleep cycle ingests a configured doc (default `README.md`) through the
   document pipeline into recallable, `DOCUMENT`-tier memory tagged with its source — so "what are you
