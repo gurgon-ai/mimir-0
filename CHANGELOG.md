@@ -94,6 +94,12 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   before any benchmark.
 
 ### Fixed
+- **Memory graph no longer "explodes" on first load.** The force sim had no distance floor on
+  repulsion (near-coincident nodes — e.g. high-importance ones all pulled toward the tiny central
+  ring — got astronomical kicks), no velocity clamp, and no position bound, so dots flew off-screen
+  for ~a minute before settling. Now repulsion is floored, per-frame velocity is clamped, positions
+  are hard-capped to the viewport, and the layout **pre-settles off-screen** so the first visible
+  frame is already calm. (Verified bounded even when every node starts coincident.)
 - **The web UI columns scroll independently; the chat header + input bar stay put.** The page used a
   brittle `height: calc(100vh - 50px)` and missing flex `min-height:0`, so the whole window scrolled
   as one. Now the app fills the viewport and never scrolls as a whole: the left column's **chat log
