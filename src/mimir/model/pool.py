@@ -419,6 +419,8 @@ class ProviderPool:
                 result, elapsed = self._attempt(endpoint, fn, attempt_retries)
             except ProviderError as exc:
                 self._record_failure(endpoint)
+                if exc.timeout:
+                    self._cooldown(endpoint)  # one timeout → skip this node for a while (DESIGN §5)
                 last_exc = exc
                 if not exc.transient:
                     raise  # permanent failure — failover won't help
@@ -457,7 +459,9 @@ class ProviderPool:
             try:
                 result = fn(endpoint.provider)
             except ProviderError as exc:
-                if exc.transient and attempt < max_retries:
+                # A timeout means the node took the whole deadline and still didn't answer —
+                # retrying just burns another deadline. Don't; let _route fail over + cool it down.
+                if exc.transient and not exc.timeout and attempt < max_retries:
                     wait = self._backoff_base_s * (2**attempt)  # 1s, 2s, 4s, ...
                     with self._lock:
                         self._stats["retries"] += 1
@@ -543,6 +547,14 @@ class ProviderPool:
                     self._sat_window_s,
                     self._sat_cooldown_s,
                 )
+
+    def _cooldown(self, endpoint: _Endpoint) -> None:
+        """Skip an endpoint for the cooldown window after a single timeout — one strike, because a
+        timeout (vs a quick busy error) means the node won't answer soon (DESIGN §5)."""
+        with self._lock:
+            endpoint.saturated_until = self._clock() + self._sat_cooldown_s
+        log.warning("model: endpoint %r timed out — cooling it down for %.0fs (routing skips it)",
+                    endpoint.name, self._sat_cooldown_s)
 
     def _record_success(self, endpoint: _Endpoint) -> None:
         with self._lock:

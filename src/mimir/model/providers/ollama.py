@@ -173,9 +173,12 @@ class OllamaProvider:
                 transient=True,
             ) from exc
         except TimeoutError as exc:
-            # Socket timeout — the backend is slow/busy, not broken. Transient.
+            # Socket timeout — the node took the full deadline and still didn't answer. Transient
+            # (worth failing over), but flagged ``timeout`` so the pool stops retrying it and cools
+            # it down instead of burning another full deadline on a node that isn't answering.
             raise ProviderError(
-                f"Ollama request to {path} timed out after {deadline}s", transient=True
+                f"Ollama request to {path} timed out after {deadline}s",
+                transient=True, timeout=True,
             ) from exc
         try:
             parsed: dict[str, Any] = json.loads(raw)

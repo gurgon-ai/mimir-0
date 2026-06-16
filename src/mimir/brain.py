@@ -255,13 +255,17 @@ class Mimir:
         if config.identity_anchors:
             establish_identity(self._storage, config.identity_anchors)
 
-        # Apply any per-node vetoes to the pool up front, so a disabled box is never routed to.
+        # Apply any per-node / per-model vetoes to the pool up front, so a disabled box or model is
+        # never routed to (the model veto re-resolves a role that points at a disabled model).
         self._model.set_disabled_nodes(disabled_nodes(self._storage))
+        self._model.set_disabled_models(disabled_models(self._storage))
 
         # Resolve `auto` roles now for the local/single-provider path (inventory is ready). The
         # fleet path resolves in _init_fleet once its background inventory lands; until then the
         # gateway stop-gaps `auto` to any reachable model so turns never fail (DESIGN §4).
         self._resolve_auto_roles()
+        # Re-apply persisted manual role pins (survive restart; override config + auto). DESIGN §4.
+        self._restore_role_pins()
 
     def _init_fleet(self, refresh_interval_s: float) -> None:
         """Inventory the fleet once, then start the active-health prober (off the boot path)."""
@@ -1397,11 +1401,12 @@ class Mimir:
     def set_model_enabled(self, model: str, enabled: bool) -> dict[str, str]:
         """Enable or disable a model for `auto` routing (a user's bias veto; DESIGN §4).
 
-        Disabling a model excludes it from every recommendation and `auto` resolution; if it was
-        serving an auto role, that role is immediately re-resolved to the next-best model. Returns
-        the auto roles that moved as a result.
+        Disabling a model excludes it from recommendations, `auto` resolution, AND live routing — a
+        role pointing at it (even a manual pin or config default) re-resolves to the next-best
+        enabled model. Returns the roles that moved as a result.
         """
         set_model_enabled(self._storage, model, enabled)
+        self._model.set_disabled_models(disabled_models(self._storage))  # enforce at routing too
         return self._resolve_auto_roles()
 
     def set_node_enabled(self, node: str, enabled: bool) -> dict[str, str]:
@@ -1441,8 +1446,40 @@ class Mimir:
         self.config.roles[role] = RoleSpec(model=model, params=existing.params if existing else {})
         self._auto_roles.discard(role)
         self._model.set_role_fallbacks(role, [])
+        self._persist_role_pin(role, model, node)  # survive restart (DESIGN §4)
         log.info("role %r manually pinned to %s%s", role, model, f" on {node}" if node else "")
         return {r: s.model for r, s in self._model.roles_view().items()}
+
+    _ROLE_PINS_KEY = "role_pins"
+
+    def _persist_role_pin(self, role: str, model: str, node: str | None) -> None:
+        raw = kv_get(self._storage, self._ROLE_PINS_KEY)
+        try:
+            pins = json.loads(raw) if raw else {}
+        except (ValueError, TypeError):
+            pins = {}
+        pins[role] = {"model": model, "node": node}
+        kv_set(self._storage, self._ROLE_PINS_KEY, json.dumps(pins))
+
+    def _restore_role_pins(self) -> None:
+        """Re-apply manual role pins saved by ``set_role`` so they survive a restart (they override
+        config + auto). A pin whose model is now disabled is skipped (the gateway re-resolves)."""
+        raw = kv_get(self._storage, self._ROLE_PINS_KEY)
+        if not raw:
+            return
+        try:
+            pins = json.loads(raw)
+        except (ValueError, TypeError):
+            return
+        disabled = disabled_models(self._storage)
+        for role, pin in (pins or {}).items():
+            model = (pin or {}).get("model")
+            if not model or model in disabled:
+                continue
+            self._model.set_role_model(role, model, (pin or {}).get("node"))
+            self._auto_roles.discard(role)
+            self._model.set_role_fallbacks(role, [])
+            log.info("role %r restored to pinned %s", role, model)
 
     def role_nodes(self) -> dict[str, str]:
         """The per-role node pins (role → node) the gateway is honouring, for the UI."""

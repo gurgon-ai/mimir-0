@@ -39,6 +39,9 @@ class ModelGateway:
         # Optional per-role *node* pin: route a role to a specific fleet node (e.g. keep it on an
         # edge box, off the local beast). Preferred, with fallback to routing if it's down.
         self._role_nodes: dict[str, str] = {}
+        # Models the user disabled — excluded from routing: a role pinned/auto'd to a disabled model
+        # re-resolves to an enabled one, and disabled models drop out of fallback chains.
+        self._disabled_models: set[str] = set()
         if isinstance(provider, ProviderPool):
             self._pool = provider
         elif isinstance(provider, list):
@@ -100,8 +103,11 @@ class ModelGateway:
         chain = self._fallbacks.get(role)
         if chain:
             known = self._pool.known_models()
-            present = [m for m in chain if m in known] if known else []
-            return (present or chain), params
+            usable = [m for m in chain
+                      if m not in self._disabled_models and (not known or m in known)]
+            if usable:
+                return usable, params
+            # whole chain disabled/vanished → fall through to single resolution
         return [self._role(role).model], params
 
     def _role(self, role: str) -> RoleSpec:
@@ -110,19 +116,26 @@ class ModelGateway:
             raise ModelGatewayError(
                 f"no model configured for role {role!r}; known roles: {sorted(self._roles)}"
             )
-        if spec.model == AUTO_MODEL:
-            # The brain resolves `auto` to a concrete model once inventory lands (DESIGN §4); until
-            # then, stop-gap to any reachable model so a turn never fails on an unresolved role.
+        # AUTO, or a model the user has DISABLED → resolve to the best enabled reachable model, so
+        # disabling a model (or a config-pinned one going dark) re-routes the role, not stalls it.
+        if spec.model == AUTO_MODEL or spec.model in self._disabled_models:
             want_embed = role == "embed"
             picks = [
-                m for m in self._pool.available_models() if ("embed" in m.lower()) == want_embed
+                m for m in self._pool.available_models()
+                if ("embed" in m.lower()) == want_embed and m not in self._disabled_models
             ]
             if not picks:
                 raise ModelGatewayError(
-                    f"role {role!r} is set to 'auto' but no suitable model is reachable yet"
+                    f"role {role!r} has no enabled, reachable model (disabled: "
+                    f"{sorted(self._disabled_models)})"
                 )
             return RoleSpec(model=picks[0], params=spec.params)
         return spec
+
+    def set_disabled_models(self, names: set[str]) -> None:
+        """Veto models by name — excluded from routing/resolution (the brain syncs this from the
+        user's pool toggles). A role pointing at one re-resolves to an enabled model."""
+        self._disabled_models = set(names)
 
     def _priority(self, role: str, override: Priority | None) -> Priority:
         if override is not None:

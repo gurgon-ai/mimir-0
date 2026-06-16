@@ -94,6 +94,19 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   before any benchmark.
 
 ### Fixed
+- **Fleet robustness — a dead/slow node no longer wedges turns (and the API).** A node that timed out
+  was retried 120 s × 3 *and* failed over to the next slow node, so one turn could take minutes and —
+  since `_turn` holds the brain lock — hang the whole API. Now a **timeout is not retried** (the node
+  took the full deadline; retrying just burns another) and the node is **cooled down** (skipped by
+  routing for a window) on a single strike. New `ProviderError.timeout`, `pool._cooldown()`.
+- **Disabling a model now actually stops routing to it.** Disabling a model in the pool used to affect
+  only `auto` selection + recommendations, not live routing — so a role pinned (or config-set) to it
+  kept using it. The veto is now pushed to the gateway (`set_disabled_models`): a role pointing at a
+  disabled model **re-resolves to the best enabled model**, and disabled models drop out of fallback
+  chains.
+- **Manual role pins survive a restart.** A model picked for a role in the UI was in-memory only and
+  reverted to the config default on restart. Pins (model + node) now persist in `kv` and are
+  re-applied on boot (overriding config + auto).
 - **Memory graph no longer "explodes" on first load.** The force sim had no distance floor on
   repulsion (near-coincident nodes — e.g. high-importance ones all pulled toward the tiny central
   ring — got astronomical kicks), no velocity clamp, and no position bound, so dots flew off-screen

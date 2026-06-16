@@ -352,3 +352,13 @@ def test_brain_resolves_auto_roles_at_boot(db_path: str) -> None:
         assert roles["bake"].model == "mock-b"  # pin untouched
     finally:
         m.close()
+
+
+def test_manual_role_pin_persists_across_restart(mock_config: Config) -> None:
+    # A manual model selection must survive a restart (it's saved to kv, re-applied on boot).
+    with Mimir(mock_config) as m:
+        m.set_role("chat", "hand-picked-model")
+        assert m._model.roles_view()["chat"].model == "hand-picked-model"
+    with Mimir(mock_config) as m2:                  # same DB → pin restored
+        assert m2._model.roles_view()["chat"].model == "hand-picked-model"
+        assert "chat" not in m2._auto_roles         # a pin leaves the auto set

@@ -49,9 +49,10 @@ class ProviderError(MimirError):
     to back off instead of corrupting state against a busy backend (DESIGN §5).
     """
 
-    def __init__(self, message: str, *, transient: bool = False) -> None:
+    def __init__(self, message: str, *, transient: bool = False, timeout: bool = False) -> None:
         super().__init__(message)
         self.transient = transient
+        self.timeout = timeout  # the call hit its time limit — node is dead/molasses, not just busy
 
 
 class ModelGatewayError(MimirError):
