@@ -110,11 +110,20 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- auth + CORS (the integration security layer; DESIGN §8) ----------------------
 
+    def _is_local(self) -> bool:
+        """Whether the request came from this machine (the local browser UI / a co-located caller)."""
+        host = (self.client_address[0] if self.client_address else "").lower()
+        return host in ("127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost")
+
     def _authorized(self) -> bool:
-        """True if the request may hit ``/api/*``. Open when no token is configured (localhost dev);
-        otherwise requires ``Authorization: Bearer <token>`` (constant-time compared)."""
+        """True if the request may hit ``/api/*``. Open when no token is configured. With a token,
+        the **local** UI is exempt by default (so a fresh run isn't blocked) and only remote callers
+        must present ``Authorization: Bearer <token>``; ``[server] secure_ui`` requires it locally too.
+        """
         token = self.server.brain.config.api_token
         if not token:
+            return True
+        if self._is_local() and not self.server.brain.config.secure_ui:
             return True
         header = self.headers.get("Authorization", "")
         prefix = "Bearer "

@@ -414,6 +414,8 @@ limit = 3                       # max conflicts argued per cycle (each is severa
 # api_token = "..."             # require Authorization: Bearer <token> on /api/* (env var wins)
 # api_token_env = "MIMIR_API_TOKEN"  # which env var holds the token; give co-located instances their own
 # cors_origins = ["*"]          # browser origins allowed to call the API; empty = same-origin only
+# secure_ui = false             # the LOCAL UI is token-exempt by default (first run isn't blocked);
+                                # set true to require the token for the local UI too
 
 [self_knowledge]                # bake a doc describing the system into memory each nightly cycle
 doc = "README.md"               # path (relative to the working dir); empty/unset disables it

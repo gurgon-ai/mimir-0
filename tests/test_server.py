@@ -519,6 +519,7 @@ def test_mind_exposes_recent_errors(base_url: str) -> None:
 def secured_url(mock_config: Config) -> Iterator[str]:
     mock_config.api_token = "s3cret"
     mock_config.cors_origins = ["https://avatar.local"]
+    mock_config.secure_ui = True  # enforce the token even locally (tests connect via 127.0.0.1)
     brain = Mimir(mock_config)
     server = create_server(brain, "127.0.0.1", 0)
     port = server.server_address[1]
@@ -529,6 +530,29 @@ def secured_url(mock_config: Config) -> Iterator[str]:
     finally:
         server.shutdown()
         brain.close()
+
+
+@pytest.fixture
+def token_local_url(mock_config: Config) -> Iterator[str]:
+    # A token is set, but secure_ui is left off (the default) — so the LOCAL UI is exempt.
+    mock_config.api_token = "s3cret"
+    brain = Mimir(mock_config)
+    server = create_server(brain, "127.0.0.1", 0)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.shutdown()
+        brain.close()
+
+
+def test_local_ui_exempt_from_token_by_default(token_local_url: str) -> None:
+    # Token set + secure_ui off → a same-machine request needs no token (first run isn't blocked).
+    assert _req("GET", token_local_url + "/api/state")[0] == 200
+    assert _json("POST", token_local_url + "/api/turn",
+                 {"text": "hi", "user": "greg"})[0] == 200
 
 
 def _req(method: str, url: str, headers: dict | None = None) -> tuple[int, dict]:
