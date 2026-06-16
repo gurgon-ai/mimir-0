@@ -26,6 +26,7 @@ def mock_config(db_path: str) -> Config:
         provider=ProviderSpec(type="mock"),
         embed_mode=EmbeddingMode.BOOTSTRAP,
         self_knowledge_doc=None,  # hermetic: don't bake the real README in unrelated tests
+        output_rag_enabled=False,  # hermetic: don't surface output-RAG notes in unrelated turns
     )
 
 
