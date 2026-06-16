@@ -8,6 +8,10 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Changed
+- **`Mimir.retier_speaker(name, tier)` — re-tier a speaker's baked memories.** Maintenance for when a
+  speaker was ingested at the wrong trust level (e.g. a peer AI baked as `stated_by_primary_user`
+  before `[identity] primary_user` was set): drops every memory with provenance `stated by <name>` to
+  a lower tier (default `conversation` — attributed, not believed as fact). `repo.retier_by_provenance`.
 - **A server-side trust policy for who gets believed (`[identity] trusted_users`).** The caller
   declares the speaker (`user`); the *config* decides how much that speaker is believed — never the
   caller — so an exposed API can't self-assert trust. `primary_user` → top tier (1.30);
