@@ -710,6 +710,19 @@ def delete_memories(gateway: StorageGateway, ids: list[int]) -> int:
     return gateway.submit(_write)
 
 
+def retier_by_provenance(gateway: StorageGateway, provenance: str, tier: EvidenceTier) -> int:
+    """Re-tier every memory with this exact ``provenance`` to ``tier``. Maintenance for when a
+    speaker was ingested at the wrong trust level (e.g. a peer baked before ``primary_user`` was
+    set). Returns the number of rows changed."""
+    def _write(conn: sqlite3.Connection) -> int:
+        cur = conn.execute(
+            "UPDATE memories SET evidence_tier = ? WHERE provenance = ?", (tier.key, provenance)
+        )
+        return cur.rowcount
+
+    return gateway.submit(_write)
+
+
 def bump_memory(
     gateway: StorageGateway, memory_id: int, *, access_count: int, salience: float
 ) -> None:

@@ -96,7 +96,7 @@ from .model.providers.ollama import OllamaProvider
 from .retrieval.hybrid import retrieve
 from .sanitize import StreamTagStripper, strip_epistemic_tags
 from .storage.gateway import StorageGateway
-from .storage.models import Memory, MemoryKind, Procedure
+from .storage.models import EvidenceTier, Memory, MemoryKind, Procedure
 from .storage.repo import (
     add_forum_post,
     bump_procedure_uses,
@@ -120,6 +120,7 @@ from .storage.repo import (
     record_access,
     record_conversation_turn,
     record_interaction,
+    retier_by_provenance,
     set_forum_thread_status,
     set_model_enabled,
     set_node_enabled,
@@ -501,6 +502,18 @@ class Mimir:
     def forget_memory(self, memory_id: int) -> None:
         """Permanently delete a memory (the graph editor's remove)."""
         delete_memory(self._storage, memory_id)
+
+    def retier_speaker(
+        self, speaker: str, tier: EvidenceTier = EvidenceTier.CONVERSATION
+    ) -> int:
+        """Re-tier memories baked from ``speaker`` (provenance ``stated by <speaker>``) to ``tier``.
+
+        Maintenance for when a speaker was ingested at the wrong trust level — e.g. a peer AI baked
+        as ``stated_by_primary_user`` before ``[identity] primary_user`` was set. Default drops them
+        to ``conversation`` (attributed, but not believed as fact). Returns rows changed."""
+        n = retier_by_provenance(self._storage, f"stated by {speaker}", tier)
+        log.info("retier: moved %d memory(ies) from %r to tier %s", n, speaker, tier.key)
+        return n
 
     def generate_narratives(self) -> dict[str, Any]:
         """Run the temporal-narrative cycle now (daily entry + weekly/monthly roll-up), sync.
