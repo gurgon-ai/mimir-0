@@ -1640,6 +1640,10 @@ async function loadGraphMap() {
     `${graph.nodes.length} nodes · ${graph.links.length} links — click a blob to edit` +
     `<br><span style="opacity:.7;">scroll = zoom · drag = pan · double-click = reset</span>`;
   graph.frozen = false; graph.phase = 0;
+  // Pre-settle off-screen so the first visible frame is already calm (no opening chaos). Bounded
+  // physics → safe to run many steps; capped so a huge graph can't stall the load.
+  const warm = Math.min(160, 4000 / Math.max(1, graph.nodes.length) + 40);
+  for (let s = 0; s < warm; s++) graphPhysics();
   cancelAnimationFrame(graph.raf); graphTick();
 }
 
@@ -1675,15 +1679,19 @@ function buildGraphSvg() {
   });
 }
 
-function graphTick() {
+// One physics step (no DOM). Bounded by design so it can never "explode": repulsion has a distance
+// floor (near-coincident nodes don't get astronomical kicks), velocity is clamped per frame, and a
+// hard radius cap keeps everything on-screen. Run head-less for the pre-settle, then per-frame.
+const _MAXV = 6, _MIN_D2 = 144;  // max px/frame; repulsion distance floor (12px)²
+function graphPhysics() {
   const n = graph.nodes, L = graph.links, cx = graph.w / 2, cy = graph.h / 2;
   const SPIN = 0.0004;  // very slow galaxy rotation (~2.5°/s) — easy to click
-  // Gentle "breathing": the target ring radius drifts in/out by a few percent on a slow sine.
   const breathe = 1 + 0.045 * Math.sin(graph.phase * 0.0045);
   graph.phase++;
   for (let i = 0; i < n.length; i++) {
     for (let j = i + 1; j < n.length; j++) {
-      const a = n[i], b = n[j]; const dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy + 0.01;
+      const a = n[i], b = n[j]; const dx = a.x - b.x, dy = a.y - b.y;
+      const d2 = Math.max(dx * dx + dy * dy, _MIN_D2);   // floor → bounded repulsion at small range
       const d = Math.sqrt(d2), f = 900 / d2; const fx = dx / d * f, fy = dy / d * f;
       a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
     }
@@ -1693,18 +1701,25 @@ function graphTick() {
     const d = Math.sqrt(dx * dx + dy * dy) + 0.01, f = (d - 70) * 0.006;
     const fx = dx / d * f, fy = dy / d * f; a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
   });
-  const cs = Math.cos(SPIN), sn = Math.sin(SPIN);
+  const cs = Math.cos(SPIN), sn = Math.sin(SPIN), cap = Math.min(graph.w, graph.h) * 0.6;
   n.forEach(p => {
     const dx = p.x - cx, dy = p.y - cy, r = Math.sqrt(dx * dx + dy * dy) + 1e-3;
     const fr = (p.tr * breathe - r) * 0.02;       // pull toward this node's (breathing) target ring
     p.vx += dx / r * fr; p.vy += dy / r * fr;
     p.vx *= 0.9; p.vy *= 0.9;
-    let nx = p.x + p.vx, ny = p.y + p.vy;
-    const rx = nx - cx, ry = ny - cy;             // steady slow rotation about the centre
+    const sp = Math.sqrt(p.vx * p.vx + p.vy * p.vy);   // clamp speed → never rockets off
+    if (sp > _MAXV) { p.vx = p.vx / sp * _MAXV; p.vy = p.vy / sp * _MAXV; }
+    const rx = p.x + p.vx - cx, ry = p.y + p.vy - cy;  // integrate, then slow rotation about centre
     p.x = cx + rx * cs - ry * sn; p.y = cy + rx * sn + ry * cs;
-    p.el.setAttribute("transform", `translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
+    const er = Math.sqrt((p.x - cx) ** 2 + (p.y - cy) ** 2);  // hard cap: stay in view
+    if (er > cap) { p.x = cx + (p.x - cx) / er * cap; p.y = cy + (p.y - cy) / er * cap; p.vx *= 0.5; p.vy *= 0.5; }
   });
-  L.forEach(l => {
+}
+
+function graphTick() {
+  graphPhysics();
+  graph.nodes.forEach(p => p.el.setAttribute("transform", `translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`));
+  graph.links.forEach(l => {
     l.el.setAttribute("x1", l.source.x.toFixed(1)); l.el.setAttribute("y1", l.source.y.toFixed(1));
     l.el.setAttribute("x2", l.target.x.toFixed(1)); l.el.setAttribute("y2", l.target.y.toFixed(1));
   });
