@@ -180,8 +180,10 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   `Authorization: Bearer <token>` (constant-time checked); unset = open localhost as before. The page
   shell stays open so the bundled UI prompts for the token once and stores it. `[server] cors_origins`
   enables browser frontends on other origins (with an `OPTIONS` preflight). The `user` field on
-  `POST /api/turn` is the **speaker identity** — the seam for agent-to-agent. Full contract in
-  [`docs/API.md`](docs/API.md). New config: `[server] api_token`, `cors_origins`.
+  `POST /api/turn` is the **speaker identity** — the seam for agent-to-agent. The token's env var
+  name is configurable (`[server] api_token_env`, default `MIMIR_API_TOKEN`) so two instances on one
+  machine don't collide. Full contract in [`docs/API.md`](docs/API.md). New config: `[server]
+  api_token`, `api_token_env`, `cors_origins`.
 - **Self-knowledge — the system bakes its own README into memory so it knows what it is.** A
   `self_knowledge` phase in the sleep cycle ingests a configured doc (default `README.md`) through the
   document pipeline into recallable, `DOCUMENT`-tier memory tagged with its source — so "what are you

@@ -31,6 +31,18 @@ cors_origins = ["https://my-avatar.local"]   # browser origins allowed to call t
 export MIMIR_API_TOKEN="a-long-random-string"   # overrides the config value
 ```
 
+**Running more than one instance on the same machine?** The env var name is configurable, so a token
+set for one doesn't bleed into another. Point each instance at its own variable:
+
+```toml
+[server]
+api_token_env = "MIMIR0_TOKEN"   # this instance reads $MIMIR0_TOKEN (default: MIMIR_API_TOKEN)
+```
+
+(Sharing one token across instances is fine too — a token is just a shared secret, and it even
+saves a step when one instance calls another. Separate vars only matter if you want to rotate or
+revoke them independently.)
+
 When a token is set, **every `/api/*` route** requires it:
 
 ```

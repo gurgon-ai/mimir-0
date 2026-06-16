@@ -168,9 +168,10 @@ class Config:
     # about itself. Empty disables. Path is relative to the working directory (the repo root).
     self_knowledge_doc: str | None = "README.md"
     # Web server / integration API (DESIGN §8: a brain with endpoints, no built-in hands).
-    # ``api_token`` (or env ``MIMIR_API_TOKEN``, which wins) gates every ``/api/*`` route via an
-    # ``Authorization: Bearer <token>`` check; unset = open (localhost dev). ``cors_origins`` = the
-    # browser origins allowed to call it (``["*"]`` for any); empty = same-origin only.
+    # ``api_token`` (or the env var named by ``[server] api_token_env``, default MIMIR_API_TOKEN,
+    # which wins) gates every ``/api/*`` route via a Bearer check; unset = open (localhost dev). Run
+    # two instances on one box? Give each its own ``api_token_env`` so their tokens don't collide.
+    # ``cors_origins`` = browser origins allowed to call it (``["*"]`` for any); empty = same site.
     api_token: str | None = None
     cors_origins: list[str] = field(default_factory=list)
     # Procedural memory: how many matching procedures to inject, and the minimum trigger match.
@@ -344,9 +345,15 @@ def load_config(path: str | Path) -> Config:
         ),
         error_context_max=int(raw.get("diagnostics", {}).get("error_context_max", 5)),
         self_knowledge_doc=(raw.get("self_knowledge", {}).get("doc", "README.md") or None),
-        # Env var wins over config so secrets needn't live in the TOML file.
-        api_token=(os.environ.get("MIMIR_API_TOKEN") or raw.get("server", {}).get("api_token")
-                   or None),
+        # Token resolution: the env var named by `api_token_env` (default MIMIR_API_TOKEN) wins over
+        # the config value, so secrets needn't live in the file. Running two instances on one box?
+        # Point each at its own var (e.g. api_token_env = "MIMIR0_TOKEN") so one's MIMIR_API_TOKEN
+        # doesn't bleed into the other.
+        api_token=(
+            os.environ.get(raw.get("server", {}).get("api_token_env", "MIMIR_API_TOKEN"))
+            or raw.get("server", {}).get("api_token")
+            or None
+        ),
         cors_origins=_as_str_list(raw.get("server", {}).get("cors_origins", [])),
         procedural_top_k=int(raw.get("procedural", {}).get("top_k", 3)),
         procedural_min_match=float(raw.get("procedural", {}).get("min_match", 0.3)),

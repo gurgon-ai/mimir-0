@@ -1385,22 +1385,28 @@ function applyAssistantName(name) {
   document.querySelectorAll(".msg.mimir .who").forEach(el => { el.textContent = ASSISTANT_NAME; });
 }
 
-// Optional API token: stored locally, sent as a bearer header; prompted for on a 401 (so the same
-// UI works whether the server is open localhost or token-gated for remote/integration use).
+// Optional API token: stored locally, sent as a bearer header. On a 401 we prompt ONCE (many
+// requests fire on load — without this guard each would pop its own prompt and look like the token
+// was rejected), store it, and reload so every request re-runs cleanly with the token from the start.
 function authHeaders() {
   const t = localStorage.getItem("mimirToken");
   return t ? { "Authorization": "Bearer " + t } : {};
 }
+let _tokenPrompted = false;
 function promptForToken() {
-  const t = window.prompt("This Mimir requires an API token:");
-  if (t) { localStorage.setItem("mimirToken", t.trim()); return true; }
-  return false;
+  if (_tokenPrompted) return;            // a prompt is already handled this page load
+  _tokenPrompted = true;
+  const cur = localStorage.getItem("mimirToken");
+  const msg = cur ? "That API token was rejected. Enter the correct one:" : "This Mimir requires an API token:";
+  const t = window.prompt(msg, "");
+  if (t && t.trim()) { localStorage.setItem("mimirToken", t.trim()); location.reload(); }
+  else if (cur) { localStorage.removeItem("mimirToken"); }   // cleared a bad token; refresh to retry
 }
-async function api(method, path, body, _retried) {
+async function api(method, path, body) {
   const opt = { method, headers: { ...authHeaders() } };
   if (body !== undefined) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
   const r = await fetch(path, opt);
-  if (r.status === 401 && !_retried && promptForToken()) return api(method, path, body, true);
+  if (r.status === 401) { promptForToken(); throw new Error("API token required"); }
   const data = await r.json();
   if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
   return data;
@@ -1427,7 +1433,7 @@ async function streamTurn(text) {
   let started = false;
   const begin = () => { if (!started) { started = true; body.classList.remove("thinking"); body.textContent = ""; } };
   const resp = await fetch("/api/turn/stream", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ text, user: "operator" }) });
-  if (resp.status === 401 && promptForToken()) { body.classList.remove("thinking"); return streamTurn(text); }
+  if (resp.status === 401) { promptForToken(); body.classList.remove("thinking"); body.textContent = "API token required."; return; }
   if (!resp.ok) { body.classList.remove("thinking"); const e = await resp.json().catch(() => ({ error: "HTTP " + resp.status })); throw new Error(e.error); }
   const reader = resp.body.getReader(); const dec = new TextDecoder();
   let buf = "", introspect = null;
