@@ -133,8 +133,12 @@ class _Handler(BaseHTTPRequestHandler):
         return origin if origin in allowed else None
 
     def _gate(self) -> bool:
-        """Enforce the API token on ``/api/*``. Returns False (and sends 401) if unauthorized."""
-        if urlparse(self.path).path.startswith("/api/") and not self._authorized():
+        """Enforce the API token on ``/api/*``. Returns False (and sends 401) if unauthorized.
+        ``/api/health`` is exempt — a liveness probe must work without credentials."""
+        path = urlparse(self.path).path
+        if path == "/api/health":
+            return True
+        if path.startswith("/api/") and not self._authorized():
             self._send_json({"error": "unauthorized"}, status=401)
             return False
         return True
@@ -180,6 +184,18 @@ class _Handler(BaseHTTPRequestHandler):
             raise ValueError("expected a JSON object")
         return data
 
+    def _health(self) -> dict[str, Any]:
+        """Liveness/readiness — deliberately cheap and lock-free (no ``brain_lock``, no model call),
+        so a monitor or a peer bridge can probe it instantly even while a turn is generating.
+        ``busy`` tells a caller a turn is in flight (its reply will take as long as the node needs)."""
+        brain = self.server.brain
+        return {
+            "ok": True,
+            "busy": brain._turn_active,                       # a turn is currently generating
+            "embed_mode": brain._embedder.mode.value,
+            "nodes_up": brain._model.get_stats().get("nodes_up", 0),
+        }
+
     def _identity_payload(self) -> dict[str, Any]:
         brain = self.server.brain
         return {
@@ -197,6 +213,8 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             if route == "/":
                 self._send(200, _HTML.encode("utf-8"), "text/html; charset=utf-8")
+            elif route == "/api/health":
+                self._send_json(self._health())  # liveness — never touches the brain lock
             elif route == "/api/state":
                 self._send_json(self._state())
             elif route == "/api/identity":
@@ -354,7 +372,9 @@ class _Handler(BaseHTTPRequestHandler):
         user = body.get("user") or None
         with self.server.brain_lock:
             result = self.server.brain.turn(text, user=user)
-            self.server.brain.wait_for_sentinel()  # let the note/self-model settle
+        # Return as soon as the reply is generated. The post-turn burst (sentinel/self-model/working
+        # memory) runs OFF the hot path and the next turn settles it (DESIGN §5a) — blocking the HTTP
+        # response on it would add several model calls of latency (minutes on a small edge node).
         return {"reply": result.reply, "introspect": result.context.introspect()}
 
     def _establish(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -490,7 +510,7 @@ class _Handler(BaseHTTPRequestHandler):
                     try:
                         token = next(stream)
                     except StopIteration as stop:
-                        self.server.brain.wait_for_sentinel()
+                        # Don't block the stream's close on the burst — it settles off the hot path.
                         emit("done", {"introspect": stop.value or {}})
                         break
                     emit("token", {"text": token})

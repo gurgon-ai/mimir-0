@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
@@ -133,8 +134,15 @@ def test_mind_endpoint_reports_state(base_url: str) -> None:
     assert status == 200
     assert data["stats"]["total"] >= 1
     assert isinstance(data["anchors"], dict)
-    # turn 1 seeds a self-model (the /api/turn handler waits for background to settle)
-    assert data["self_model"] is not None
+    # turn 1 seeds a self-model, but off the hot path now (the endpoint no longer blocks on the
+    # burst) — so poll until it settles instead of assuming it's done when /api/turn returns.
+    self_model = data["self_model"]
+    for _ in range(50):
+        if self_model is not None:
+            break
+        time.sleep(0.1)
+        self_model = _json("GET", base_url + "/api/mind")[1]["self_model"]
+    assert self_model is not None
 
 
 def test_memories_browser_lists_and_searches(base_url: str) -> None:
@@ -555,3 +563,15 @@ def test_cors_preflight_and_headers(secured_url: str) -> None:
     # a disallowed origin gets no CORS header
     _, headers = _req("OPTIONS", secured_url + "/api/turn", {"Origin": "https://evil.example"})
     assert "Access-Control-Allow-Origin" not in headers
+
+
+def test_health_is_instant_unauthed_and_lockfree(base_url: str) -> None:
+    status, data = _json("GET", base_url + "/api/health")
+    assert status == 200 and data["ok"] is True
+    assert "busy" in data and "embed_mode" in data
+
+
+def test_health_works_even_when_token_is_set(secured_url: str) -> None:
+    # liveness must not require the token (monitors/peers probe it without credentials)
+    assert _req("GET", secured_url + "/api/health")[0] == 200
+    assert _req("GET", secured_url + "/api/state")[0] == 401   # but everything else still gated
