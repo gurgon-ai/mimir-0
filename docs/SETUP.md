@@ -414,6 +414,12 @@ top_k = 3                       # how many related memories to surface into the 
 enabled = true                  # also toggle live in the Sleep tab; "Deliberate now" triggers it manually
 limit = 3                       # max conflicts argued per cycle (each is several model calls)
 
+[inner_life]                    # the live inner life: think on its own during idle time (DESIGN §5a)
+enabled = false                 # OFF by default — it uses spare compute; toggle live in the Sleep tab
+cadence_s = 300                 # at most one thought this often (~5 min); set lower if you have GPU to spare
+idle_floor_s = 30               # stay quiet at least this long after a turn before musing
+check_interval_s = 20           # how often the daemon wakes to check (it self-gates on the cadence)
+
 [server]                        # reference web server / integration API — see docs/API.md
 # api_token = "..."             # require Authorization: Bearer <token> on /api/* (env var wins)
 # api_token_env = "MIMIR_API_TOKEN"  # which env var holds the token; give co-located instances their own

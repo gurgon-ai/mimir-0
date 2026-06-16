@@ -141,6 +141,16 @@ class Config:
     # model itself opened gets grounded, not just what the user asked. False = off.
     output_rag_enabled: bool = True
     output_rag_top_k: int = 3
+    # The live inner life (DESIGN §5a): a low-frequency idle loop that thinks between turns. On a
+    # long cadence it reflects on one universal stimulus (a recent error, an un-deliberated
+    # conflict, a salient memory, the working-memory thread) with a cheap background model, and
+    # stores the thought as a low-confidence, decaying memory that "earns its way" back via ordinary
+    # recall. OFF by default — it spends idle compute — and routed OFF the chat model so it never
+    # slows a turn; the operator opts in and tunes the cadence from the UI. Cadence floors at 30s.
+    inner_life_enabled: bool = False
+    inner_life_cadence_s: float = 300.0        # at most one thought this often (default ~5 min)
+    inner_life_idle_floor_s: float = 30.0      # stay quiet at least this long after a turn
+    inner_life_check_interval_s: float = 20.0  # daemon clock-check cadence (self-gates on cadence)
     # Entity-graph traversal: how many hops from the query's entities, and the max connected
     # facts to inject. hops=0 disables graph retrieval (triples are still extracted/stored).
     graph_hops: int = 2
@@ -344,6 +354,12 @@ def load_config(path: str | Path) -> Config:
         ),
         output_rag_enabled=bool(raw.get("output_rag", {}).get("enabled", True)),
         output_rag_top_k=int(raw.get("output_rag", {}).get("top_k", 3)),
+        inner_life_enabled=bool(raw.get("inner_life", {}).get("enabled", False)),
+        inner_life_cadence_s=float(raw.get("inner_life", {}).get("cadence_s", 300.0)),
+        inner_life_idle_floor_s=float(raw.get("inner_life", {}).get("idle_floor_s", 30.0)),
+        inner_life_check_interval_s=float(
+            raw.get("inner_life", {}).get("check_interval_s", 20.0)
+        ),
         graph_hops=int(raw.get("entity_graph", {}).get("hops", 2)),
         graph_max_facts=int(raw.get("entity_graph", {}).get("max_facts", 8)),
         sleep_every=int(raw.get("sleep", {}).get("every", 0)),

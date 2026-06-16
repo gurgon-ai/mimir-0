@@ -314,6 +314,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._sleep())
             elif route == "/api/deliberate/run":
                 self._send_json(self._deliberate_now())
+            elif route == "/api/inner_life/run":
+                self._send_json(self._inner_life_now())
             elif route == "/api/forum":
                 self._send_json(self._forum_action(body))
             elif route == "/api/settings":
@@ -888,6 +890,11 @@ class _Handler(BaseHTTPRequestHandler):
         with self.server.brain_lock:
             return self.server.brain.deliberate_open_questions(force=True)
 
+    def _inner_life_now(self) -> dict[str, Any]:
+        # Manual "think now": one inner-life reflection, bypassing the cadence/idle gates.
+        with self.server.brain_lock:
+            return self.server.brain.run_inner_life_tick(force=True)
+
     def _forum_thread(self, params: dict[str, list[str]]) -> dict[str, Any]:
         thread_id = int((params.get("id") or ["0"])[0])
         thread = self.server.brain.forum_thread(thread_id)
@@ -1273,14 +1280,32 @@ _HTML = """<!doctype html>
       <label style="font-weight:normal; display:block; margin-bottom:8px;">
         <input type="checkbox" id="setDeliberate"/> Reason adversarially over my own conflicts during sleep
       </label>
+
+      <h2 style="margin-top:18px;">Inner life</h2>
+      <div class="hint" style="margin-bottom:8px;">When idle, Mimir can think on its own — reflecting
+        on a recent exchange, a memory, a tension in what it knows, or an error it hit — and keep the
+        thought as a low-confidence note that resurfaces only if it later turns out relevant. It runs
+        off the chat model and yields instantly to you, but it does use spare compute. Off by default;
+        pick a gentle cadence if your hardware is modest.</div>
+      <label style="font-weight:normal; display:block; margin-bottom:8px;">
+        <input type="checkbox" id="setInnerLife"/> Let me think on my own during idle time
+      </label>
+      <div class="field" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <label style="font-weight:normal;">…at most one thought every</label>
+        <input type="number" id="setInnerCadence" min="1" max="1440" step="1" style="width:72px;"/>
+        <span class="hint">minutes</span>
+      </div>
+
       <button id="saveSleep" type="button">Save schedule</button>
       <span id="settingsMsg" class="hint" style="margin-left:10px;"></span>
       <h2 style="margin-top:18px;">Status</h2>
       <div id="sleepStatus" class="hint">—</div>
       <button class="secondary" id="sleepBtn" type="button">Run sleep now</button>
       <button class="secondary" id="delibBtn" type="button">Deliberate now</button>
+      <button class="secondary" id="innerBtn" type="button">Think now</button>
       <div id="sleepResult" class="hint"></div>
       <div id="delibResult" style="margin-top:8px;"></div>
+      <div id="innerResult" class="hint" style="margin-top:8px;"></div>
     </div>
 
     <div class="tabpane hidden" id="tab-memories">
@@ -2096,6 +2121,8 @@ async function loadSleepTab() {
     $("setEnd").value = s.sleep_window_end || "06:00";
     $("setEnabled").checked = !!s.sleep_enabled;
     $("setDeliberate").checked = !!s.deliberation_enabled;
+    $("setInnerLife").checked = !!s.inner_life_enabled;
+    $("setInnerCadence").value = Math.max(1, Math.round((s.inner_life_cadence_s || 300) / 60));
   } catch (e) { $("settingsMsg").textContent = "error: " + e.message; }
   loadSleepStatus();
 }
@@ -2109,6 +2136,8 @@ $("saveSleep").addEventListener("click", async () => {
       sleep_window_end: $("setEnd").value,
       sleep_enabled: $("setEnabled").checked,
       deliberation_enabled: $("setDeliberate").checked,
+      inner_life_enabled: $("setInnerLife").checked,
+      inner_life_cadence_s: Math.max(60, Math.round(Number($("setInnerCadence").value || 5) * 60)),
     }});
     $("settingsMsg").textContent = "Saved.";
     setTimeout(() => $("settingsMsg").textContent = "", 1500);
@@ -2142,6 +2171,17 @@ $("delibBtn").addEventListener("click", async () => {
         `<div class="text" style="color:#9fb3c8;"><b>Verdict:</b> ${escapeHtml(d.verdict)}</div></div>`).join("");
     refreshState();
   } catch (e) { $("delibResult").innerHTML = '<span class="hint">Error: ' + escapeHtml(e.message) + '</span>'; }
+});
+
+$("innerBtn").addEventListener("click", async () => {
+  $("innerResult").textContent = "Thinking…";
+  try {
+    const r = await api("POST", "/api/inner_life/run");
+    $("innerResult").textContent = r.ran
+      ? `Mused on ${r.kind}: ${r.thought}`
+      : `Skipped (${r.reason}).`;
+    refreshState();
+  } catch (e) { $("innerResult").textContent = "Error: " + e.message; }
 });
 
 $("memKind").addEventListener("change", loadMemories);

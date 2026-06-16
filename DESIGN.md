@@ -336,7 +336,8 @@ Reference design (proven in the parent system, to be rebuilt public-clean):
 > the two task classes, the slot cap, interruptibility (an injected `is_busy` predicate), and
 > surfaces. The brain routes all post-response cognition (sentinel, self-model, working memory,
 > sleep/narratives) through it instead of N raw threads; `turn()` signals it, the next turn settles
-> it. Still to come: idle-takeover continuous mode and bidirectional (output-triggered) RAG below.
+> it. Output-triggered RAG and the live inner-life loop (the first step of idle-takeover continuous
+> mode) have since landed below; the deep-idle two-voice dialogue is still to come.
 
 **The burst worker — the idle window as a first-class, scheduled resource pool.** After each
 response the engine fires a *burst window* and drains a queue of background tasks, with these
@@ -382,9 +383,24 @@ classes, pent-up priority, interruptible, surfaces. Post-response cognition (sen
 working memory) routes through it, as does **output-side bidirectional RAG [landed]** — after the
 model replies, a burst task retrieves memory relevant to *its own reply* and surfaces it into the
 next turn's prompt, so a thread the model itself opened gets grounded, not just the user's input (it
-excludes the facts just baked from that reply, so it's not an echo; `Mimir._output_rag`). Still
-**[proposed]**: idle-takeover continuous mode (the cap lifting after long quiet). All of it composes
-with the inference engine, which is *built* to be distributed-and-idle-aware rather than single-shot.
+excludes the facts just baked from that reply, so it's not an echo; `Mimir._output_rag`). All of it
+composes with the inference engine, which is *built* to be distributed-and-idle-aware rather than
+single-shot.
+
+**The live inner life — thinking in the long quiet. [landed]** The burst worker reclaims the *short*
+window right after a reply; the inner-life loop (`cognition/inner_life.py`) reclaims the *long quiet*
+between conversations — the first step of idle-takeover continuous mode. On a slow, user-tunable
+cadence (default one thought every ~5 minutes) a daemon picks ONE universal stimulus — a recent
+error, an un-deliberated conflict, the most salient memory, the working-memory thread — and composes
+a brief first-person reflection with a cheap background model. The thought is stored as a
+low-confidence, decaying memory (`provenance="inner life"`, `INFERRED`); it **earns its way** back
+into conversation only through ordinary recall, never force-injected. Two doctrines bound it: **chat
+priority** — it routes *off* the chat model, yields the instant a turn starts (`should_think`), holds
+an idle floor after each turn, and runs on a long cadence — and **edge cost** — one model call per
+cycle, paused when the fleet is down, **off by default** until the operator opts in. The cadence and
+on/off live in the UI (and `[inner_life]` config); a manual "think now" forces one cycle. Still
+**[proposed]**: the deep-idle two-voice dialogue (propose→critique with memory grounding) and
+relevance-gated active surfacing into the next turn.
 
 **The wall-clock sleep cycle — heavy maintenance needs a real window, not scraps. [landed]** The
 burst worker's premise is that the model idles while the user reads the reply. Two things break it:

@@ -88,6 +88,18 @@ SELF_MODEL_SYSTEM = (
     "the notes only."
 )
 
+INNER_LIFE_MARKER = "a brief private reflection"
+INNER_LIFE_SYSTEM = (
+    f"Think to yourself — {INNER_LIFE_MARKER}, two to four sentences in the first person, in an "
+    "idle moment between conversations. You are given one thing to dwell on (a recent exchange, "
+    "something you hold in memory, a tension in what you know, or an error you hit). React to it "
+    "honestly: notice what's open, what connects, what you're unsure of, or what you'd want to "
+    "check or do next. This is private musing, not a message to anyone and not a task — don't "
+    "address a user, don't invent facts, and don't restate your name or who you serve. Respond "
+    "with the reflection only."
+)
+
+
 # --- always-on conversational style (framework-level, regardless of identity) ------------
 # Each turn is sent as [system, user] with no prior assistant messages, so a model tends to read it
 # as a fresh start and greet every time. This blunt note (always injected) stops that.
