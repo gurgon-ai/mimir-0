@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable, Generator
@@ -662,6 +663,8 @@ class Mimir:
             procedures = self._matching_procedures(text, user)
             lib_text, lib_refs = self._library_gist(text, query_vec)
             library = self._merge_loaded_library(lib_text, loaded_pages)
+            if self.config.library_model_fetch and lib_refs:
+                library = self._with_fetch_hint(library, lib_refs)  # let the model open a page
 
             # 2. Assemble the epistemic prompt.
             bundle = build_context(
@@ -698,6 +701,9 @@ class Mimir:
                     ],
                 )
             )
+            # 3b. Model-driven Library fetch (opt-in): if the model asked to open a page, load it
+            #     and answer again with the detail in hand (docs/LIBRARY.md Phase 2).
+            reply = self._maybe_model_fetch(reply, bundle, user, sid, text)
 
             # 4. Side effects through the storage gateway: relevance bookkeeping + bake.
             record_access(self._storage, bundle.retrieved_ids)
@@ -1871,21 +1877,58 @@ class Mimir:
         refs = [{"page_id": pid, "title": page_titles.get(pid, "")} for pid in sorted(page_ids)]
         return text, refs
 
+    def _loaded_library_detail(self, page_ids: list[int]) -> str:
+        """The full Markdown of the given composite pages, as one block (empty if none load)."""
+        blocks: list[str] = []
+        for pid in page_ids or []:
+            page = self.library_page(int(pid))
+            if page and page.get("markdown"):
+                blocks.append(f"## {page['title']}\n{page['markdown']}")
+        return "Full pages you've loaded:\n\n" + "\n\n".join(blocks) if blocks else ""
+
     def _merge_loaded_library(self, gist: str | None, loaded_pages: list[int] | None) -> str | None:
         """Append the full Markdown of any composite pages the user explicitly **loaded** (the Load
         button / 'active sources') to the Library section, so a pulled page is in this turn's
         context. Detail the user chose to spend the window on — beyond the always-on gist."""
-        if not loaded_pages:
+        detail = self._loaded_library_detail(loaded_pages or [])
+        if not detail:
             return gist
-        blocks: list[str] = []
-        for pid in loaded_pages:
-            page = self.library_page(int(pid))
-            if page and page.get("markdown"):
-                blocks.append(f"## {page['title']}\n{page['markdown']}")
-        if not blocks:
-            return gist
-        detail = "Full pages you've loaded:\n\n" + "\n\n".join(blocks)
         return f"{gist}\n\n{detail}" if gist else detail
+
+    _FETCH_RE = re.compile(r"<FETCH\s+id=['\"]?(\d+)['\"]?\s*/?>", re.IGNORECASE)
+
+    def _with_fetch_hint(self, library: str | None, refs: list[dict[str, Any]]) -> str:
+        """Append the Phase-2 fetch instruction + available page ids so the model can open one."""
+        listing = ", ".join(f"{r['page_id']}: {r['title']}" for r in refs if r.get("page_id"))
+        hint = ("If you need the full source of any of these to answer, reply with exactly "
+                f"<FETCH id=N> (and nothing else) — available pages: {listing}.")
+        return f"{library}\n\n{hint}" if library else hint
+
+    def _maybe_model_fetch(
+        self, reply: str, bundle: ContextBundle, user: str | None, sid: str | None, text: str
+    ) -> str:
+        """Phase 2 (docs/LIBRARY.md): if model-fetch is on and the model asked to open page(s) with
+        ``<FETCH id=N>``, load them and answer once more with the detail in hand. One bounded extra
+        pass; the marker is stripped from the reply. Off by default (a deliberate 2nd call)."""
+        if not self.config.library_model_fetch:
+            return reply
+        cap = max(1, self.config.library_max_fetches)
+        ids = [int(m) for m in self._FETCH_RE.findall(reply)][:cap]
+        if not ids:
+            return reply
+        detail = self._loaded_library_detail(ids)
+        if not detail:
+            return self._FETCH_RE.sub("", reply).strip()  # bad ids → just drop the marker
+        log.info("library: model fetched page(s) %s", ids)
+        reply2 = strip_epistemic_tags(self._model.chat(
+            "chat",
+            [
+                {"role": "system", "content": f"{bundle.prompt}\n\n{detail}"},
+                *self._history_messages(user, sid),
+                {"role": "user", "content": text},
+            ],
+        ))
+        return self._FETCH_RE.sub("", reply2).strip()
 
     def library_overview(self) -> dict[str, Any]:
         """The Library for the UI: source documents (with claim counts) + composite pages."""

@@ -179,6 +179,23 @@ writes a short summary per doc — the local "wiki"):
 - `POST /api/documents/scan` — ingest any new/changed files dropped into the folder + fill summaries.
 - `GET /api/documents` — `{folder, documents:[{name, chunks, summary, ingested_at, source}]}`.
 
+## Library (docs/LIBRARY.md)
+
+The system's own long-form knowledge as three tiers — source documents (ground truth) → short **cited
+claims** (always-on in chat, with their source title + locator) → Markdown **composites** (the
+synthesized understanding, fetched on demand). Built in idle from the `[documents]` folder.
+
+- `GET /api/library` — `{documents:[{id,filename,title,size_bytes,claims,…}], pages:[{id,title,summary,…}]}`.
+- `GET /api/library/page?id=N` — a composite's full Markdown + its **citations** (each claim → title +
+  locator). The Load button / fetch path.
+- `GET /api/library/source?id=N` — a source document's **verbatim** text (for quoting/checking).
+- `POST /api/library/scan` — (re)distil sources into cited claims + composites now.
+- **Load into a turn:** `POST /api/turn` accepts `"library_pages": [id, …]` — the full Markdown of
+  those composites is added to that turn's context (what the UI's pin-to-chat / Load chips send). The
+  turn response includes `"library_sources": [{page_id,title}]` — the pages the answer drew on.
+- **Model-driven fetch** (opt-in `[library] model_fetch`): the model may reply `<FETCH id=N>` to open
+  a page itself; the turn loads it and re-answers (capped, off by default; non-streaming path).
+
 ## Other routes
 
 The turn endpoints above are what most integrations need. The web UI is driven by a wider set —

@@ -159,3 +159,33 @@ def test_turn_surfaces_library_sources_for_load_chips(mock_config: Config, tmp_p
         assert all("page_id" in s and "title" in s for s in result.library_sources)
     finally:
         brain.close()
+
+
+def test_model_fetch_opens_a_page_and_reanswers(mock_config: Config, tmp_path) -> None:
+    cfg = dataclasses.replace(
+        mock_config, documents_folder=str(tmp_path / "documents"),
+        library_folder=str(tmp_path / "library"), library_model_fetch=True)
+    brain = Mimir(cfg)
+    try:
+        folder = Path(cfg.documents_folder)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "fence.md").write_text("# Fence\n\nThe north fence is cedar.")
+        brain.ingest_pending_library()
+        page_id = brain.library_overview()["pages"][0]["id"]
+
+        calls: list = []
+        real_chat = brain._model.chat
+
+        def scripted(role, messages, *a, **k):
+            if role == "chat":
+                calls.append(messages)
+                return f"<FETCH id={page_id}>" if len(calls) == 1 else "The fence is cedar."
+            return real_chat(role, messages, *a, **k)
+
+        brain._model.chat = scripted
+        result = brain.turn("what is the fence made of")
+        assert "FETCH" not in result.reply and "cedar" in result.reply.lower()
+        # the second (re-answer) pass had the loaded page detail in its system prompt
+        assert "Full pages you've loaded" in calls[1][0]["content"]
+    finally:
+        brain.close()

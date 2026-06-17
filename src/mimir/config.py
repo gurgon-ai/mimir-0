@@ -198,6 +198,11 @@ class Config:
     # `library_folder` (Phase 1c). Needs documents_folder set; empty library_folder = no composites.
     library_folder: str | None = "library"
     library_claims_top_k: int = 5      # how many cited claims to surface per turn
+    # Phase 2 (docs/LIBRARY.md): let the MODEL open a composite page itself mid-turn (an in-band
+    # <FETCH id=N> request → load the page → answer again). Off by default — a deliberate second
+    # pass (slower); the interactive UI uses the after-reply Load chips instead. Capped per turn.
+    library_model_fetch: bool = False
+    library_max_fetches: int = 2
     # Web server / integration API (DESIGN §8: a brain with endpoints, no built-in hands).
     # ``api_token`` (or the env var named by ``[server] api_token_env``, default MIMIR_API_TOKEN,
     # which wins) gates every ``/api/*`` route via a Bearer check; unset = open (localhost dev). Run
@@ -395,6 +400,8 @@ def load_config(path: str | Path) -> Config:
         documents_folder=(raw.get("documents", {}).get("folder", "documents") or None),
         library_folder=(raw.get("library", {}).get("folder", "library") or None),
         library_claims_top_k=int(raw.get("library", {}).get("claims_top_k", 5)),
+        library_model_fetch=bool(raw.get("library", {}).get("model_fetch", False)),
+        library_max_fetches=int(raw.get("library", {}).get("max_fetches", 2)),
         # Token resolution: the env var named by `api_token_env` (default MIMIR_API_TOKEN) wins over
         # the config value, so secrets needn't live in the file. Running two instances on one box?
         # Point each at its own var (e.g. api_token_env = "MIMIR0_TOKEN") so one's MIMIR_API_TOKEN

@@ -137,6 +137,9 @@ folder = "documents"
 # a composite can be pinned in the Library tab to load its full detail into the next message.
 folder = "library"           # where composite Markdown pages are written (empty = no composites)
 claims_top_k = 5             # how many cited claims to surface per turn
+# model_fetch = false        # let the model open a full page itself (<FETCH id=N>) — a deliberate
+                             # second pass; off by default. The UI uses after-reply Load chips instead.
+# max_fetches = 2            # cap on model-driven fetches per turn
 
 [diagnostics]
 # Self-observability (DESIGN §10): the system surfaces its own recent errors into the turn's context
