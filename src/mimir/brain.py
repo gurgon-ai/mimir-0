@@ -172,9 +172,11 @@ from .storage.repo import (
 
 log = logging.getLogger("mimir")
 
-# How many memories the knowledge section may draw on per turn (pre-budget). Hardening
-# (adaptive top-k, SQL-side prefiltering) is a later session; v0 keeps it a simple constant.
-DEFAULT_TOP_K = 6
+# How many memories the knowledge section may draw on per turn (pre-budget). The token budget caps
+# what's actually admitted, so this is just the candidate pool; document ingestion put hundreds of
+# chunks alongside personal memories, so 6 starved recall. Hardening (adaptive top-k, SQL-side
+# prefiltering) is a later session; v0 keeps it a simple constant.
+DEFAULT_TOP_K = 10
 
 # The idle latency heartbeat (DESIGN §5): a short generation forcing a real-length reply, so the
 # timed call reflects throughput, not just round-trip. Kept rare — real traffic is the main signal.
@@ -666,8 +668,9 @@ class Mimir:
             working_memory = current_working_memory(self._storage)
             graph_facts = self._connected_facts(text, user)
             procedures = self._matching_procedures(text, user)
-            lib_text, lib_refs = self._library_gist(text, query_vec)
+            lib_text, lib_refs, lib_count = self._library_gist(text, query_vec)
             library = self._merge_loaded_library(lib_text, loaded_pages)
+            lib_count += len(loaded_pages or [])  # user-loaded full pages are grounding too
             if self.config.library_model_fetch and lib_refs:
                 library = self._with_fetch_hint(library, lib_refs)  # let the model open a page
 
@@ -690,6 +693,7 @@ class Mimir:
                 background_notes="\n".join(notes) if notes else None,
                 wiki_context=self._wiki_context(text),
                 library=library,
+                library_count=lib_count,
                 system_health=self._error_context(),
                 now_ts=now,
             )
@@ -785,8 +789,9 @@ class Mimir:
             working_memory = current_working_memory(self._storage)
             graph_facts = self._connected_facts(text, user)
             procedures = self._matching_procedures(text, user)
-            lib_text, lib_refs = self._library_gist(text, query_vec)
+            lib_text, lib_refs, lib_count = self._library_gist(text, query_vec)
             library = self._merge_loaded_library(lib_text, loaded_pages)
+            lib_count += len(loaded_pages or [])  # user-loaded full pages are grounding too
             bundle = build_context(
                 query=text,
                 user=user,
@@ -805,6 +810,7 @@ class Mimir:
                 background_notes="\n".join(notes) if notes else None,
                 wiki_context=self._wiki_context(text),
                 library=library,
+                library_count=lib_count,
                 system_health=self._error_context(),
                 now_ts=now,
             )
@@ -1919,20 +1925,21 @@ class Mimir:
 
     def _library_gist(
         self, query: str, query_vec: list[float] | None
-    ) -> tuple[str | None, list[dict[str, Any]]]:
-        """The Library section + the composite pages behind it. Returns ``(text, refs)`` — the cited
-        claims most relevant to the turn (each shown with its source title + locator), and the
-        composite page(s) those claims belong to (``[{page_id, title}]``) for the after-reply chips.
-        ``(None, [])`` if the layer is off or nothing is on-topic."""
+    ) -> tuple[str | None, list[dict[str, Any]], int]:
+        """The Library section + the composite pages behind it. Returns ``(text, refs, count)`` —
+        the cited claims most relevant to the turn (each shown with its source title + locator), the
+        composite page(s) those claims belong to (``[{page_id, title}]``) for the after-reply chips,
+        and how many claims surfaced (grounding signal for the uncertainty gate). ``(None, [], 0)``
+        if the layer is off or nothing is on-topic."""
         if self._library_source_folder() is None:
-            return None, []
+            return None, [], 0
         claims = list_library_claims(self._storage)
         if not claims:
-            return None, []
+            return None, [], 0
         top = retrieve_claims(query, query_vec, claims,
                               top_k=max(1, self.config.library_claims_top_k))
         if not top:
-            return None, []
+            return None, [], 0
         titles = {d.id: d.title for d in list_library_documents(self._storage)}
         text = render_claims(top, titles) or None
         # Which composite page(s) those surfaced claims belong to → after-reply Load chips.
@@ -1940,7 +1947,7 @@ class Mimir:
         page_ids = {pid for pids in claim_pages.values() for pid in pids}
         page_titles = {p.id: p.title for p in list_library_pages(self._storage)}
         refs = [{"page_id": pid, "title": page_titles.get(pid, "")} for pid in sorted(page_ids)]
-        return text, refs
+        return text, refs, len(top)
 
     def _loaded_library_detail(self, page_ids: list[int]) -> str:
         """The full Markdown of the given composite pages, as one block (empty if none load)."""

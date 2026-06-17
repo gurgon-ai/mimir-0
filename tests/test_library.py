@@ -128,7 +128,7 @@ def test_hand_edited_composite_is_not_clobbered(mock_config: Config, tmp_path) -
 def test_no_source_folder_is_a_quiet_noop(brain: Mimir) -> None:
     assert brain.ingest_pending_library() == {
         "folder": None, "documents": [], "claims": 0, "composed": 0, "dropped": 0}
-    assert brain._library_gist("anything", None) == (None, [])
+    assert brain._library_gist("anything", None) == (None, [], 0)
 
 
 def test_loaded_page_is_pinned_into_the_next_turn(mock_config: Config, tmp_path) -> None:
