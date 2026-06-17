@@ -22,9 +22,13 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   understanding) from each document's claims into a separate `[library]` folder, linked to its claims
   (non-destructive — a hand-edited page is left alone); a **Library tab** lists pages + sources, shows
   a page's full Markdown with its source citations, and lets you **pin a page to chat** (loaded into
-  the next turn). `GET /api/library{,/page,/source}`, `POST /api/library/scan`. A model-driven fetch
-  tool (Phase 2) is staged. Influenced by the Karpathy "LLM wiki" pattern, made provenance-preserving
-  + small-window + non-destructive.
+  the next turn). After a reply that drew on the library, **Load chips** show the source page(s) for
+  one-click pinning. `GET /api/library{,/page,/source}`, `POST /api/library/scan`. **Phase 2 —
+  model-driven fetch** (opt-in `[library] model_fetch`): the model may reply `<FETCH id=N>` to open a
+  page itself; the turn loads it and re-answers with the detail (capped, off by default, on the
+  non-streaming `turn()`/agent path; the UI uses the chips). The Library is feature-complete.
+  Influenced by the Karpathy "LLM wiki" pattern, made provenance-preserving + small-window +
+  non-destructive.
 - **A documents drop folder + 📎 upload → idle-built local "wiki" (DESIGN §8).** A `[documents]
   folder` the UI's paperclip saves into and you can drop files into directly; idle time (a new
   `documents` sleep phase, or the Docs tab's "Scan folder now") ingests new/changed files into

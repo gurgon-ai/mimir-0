@@ -95,9 +95,15 @@ phase:
   tray, and pinned pages are loaded into the next turn (`turn(loaded_pages=…)` →
   `_merge_loaded_library`). Endpoints: `GET /api/library{,/page,/source}`, `POST /api/library/scan`.
   *Follow-up:* after-reply chips (surface which sources the answer drew on for one-click load).
-- **Phase 2 — model-driven fetch.** A `read_library_page(page_id, section?)` native tool + an in-band
-  `<FETCH …>` fallback (works on any model, intercepted like `<RECALL>`), reusing the Phase-1c fetch
-  path — "let the model open the book / pull the source itself." Opt-in, capped, fail-soft.
+- **Phase 2 — model-driven fetch. ✅ built (in-band marker).** With `[library] model_fetch = true`,
+  the Library section lists the available page ids and the model may reply with `<FETCH id=N>`; the
+  turn loads that page, answers once more with the detail in hand, and strips the marker
+  (`_maybe_model_fetch`, capped by `max_fetches`, **off by default** — a deliberate second pass). It
+  runs on the non-streaming `turn()` (the API / agent-to-agent path); the streaming UI uses the
+  **after-reply Load chips** instead (the same fetch path, human-initiated). A native tool-call
+  surface for tool-capable models is the natural follow-up.
+
+**Phase 1 and Phase 2 (in-band) are built — the Library layer is feature-complete.**
 
 ## Config (planned)
 
