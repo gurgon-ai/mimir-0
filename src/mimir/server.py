@@ -1606,7 +1606,9 @@ function addMsg(who, body, meta) {
   div.className = "msg " + (who === "you" ? "user" : "mimir");
   div.innerHTML = '<div class="who"></div><div class="body"></div>';
   div.querySelector(".who").textContent = who === "you" ? "you" : ASSISTANT_NAME;
-  div.querySelector(".body").textContent = body;
+  // Assistant replies get light inline formatting (**bold**); the user's own text stays literal.
+  if (who === "you") div.querySelector(".body").textContent = body;
+  else div.querySelector(".body").innerHTML = fmtInline(body);
   if (meta) { const m = document.createElement("div"); m.className = "meta"; m.textContent = meta; div.appendChild(m); }
   $("log").appendChild(div);
   $("log").scrollTop = $("log").scrollHeight;
@@ -1626,7 +1628,7 @@ async function streamTurn(text) {
   if (resp.status === 401) { promptForToken(); body.classList.remove("thinking"); body.textContent = "API token required."; return; }
   if (!resp.ok) { body.classList.remove("thinking"); const e = await resp.json().catch(() => ({ error: "HTTP " + resp.status })); throw new Error(e.error); }
   const reader = resp.body.getReader(); const dec = new TextDecoder();
-  let buf = "", introspect = null;
+  let buf = "", introspect = null, raw = "";
   while (true) {
     const { value, done } = await reader.read(); if (done) break;
     buf += dec.decode(value, { stream: true });
@@ -1637,9 +1639,9 @@ async function streamTurn(text) {
       evt.split("\\n").forEach(l => { if (l.startsWith("event:")) ev = l.slice(6).trim(); else if (l.startsWith("data:")) data += l.slice(5).trim(); });
       if (!data) continue;
       let obj; try { obj = JSON.parse(data); } catch (_) { continue; }
-      if (ev === "token") { begin(); body.textContent += obj.text; $("log").scrollTop = $("log").scrollHeight; }
+      if (ev === "token") { begin(); raw += obj.text; body.innerHTML = fmtInline(raw); $("log").scrollTop = $("log").scrollHeight; }
       else if (ev === "done") { introspect = obj.introspect; }
-      else if (ev === "error") { begin(); body.textContent += (body.textContent ? "\\n" : "") + "[error] " + obj.error; }
+      else if (ev === "error") { begin(); raw += (raw ? "\\n" : "") + "[error] " + obj.error; body.innerHTML = fmtInline(raw); }
     }
   }
   if (!started) { body.classList.remove("thinking"); body.textContent = "(no response)"; }
@@ -1782,6 +1784,13 @@ const graph = { on: false, nodes: [], links: [], byId: {}, raf: 0, sel: null,
 
 function escapeHtml(s) {
   return (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+// Light inline formatting for assistant replies: escape, then turn a SHORT **bold** span (≤10 words,
+// no line break) into real bold and drop the asterisks — Gemma/Qwen lean on **..** heavily. A long
+// or unbalanced run is left literal, so we never bold a whole paragraph or mangle stray asterisks.
+function fmtInline(text) {
+  return escapeHtml(text).replace(/\\*\\*([^*\\n]{1,80}?)\\*\\*/g,
+    (m, inner) => inner.trim().split(/\\s+/).length <= 10 ? "<strong>" + inner + "</strong>" : m);
 }
 function graphSize() {
   const r = $("graphSvg").getBoundingClientRect();

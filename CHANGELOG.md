@@ -107,6 +107,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **Chat renders short `**bold**` spans.** Gemma/Qwen lean on Markdown bold heavily; the chat showed
+  the literal asterisks. The UI now turns a SHORT `**…**` span (≤10 words, no line break) into real
+  bold and drops the asterisks, in both streamed and replayed (history) assistant messages. A long or
+  unbalanced run is left literal (no bolding a whole paragraph or mangling stray `*`), the user's own
+  text stays verbatim, and everything is HTML-escaped first (XSS-safe). `fmtInline` in `server.py`.
+- **DOCX locators are now the full heading path** (e.g. `Biohazards > Infections > Hantavirus`) — a
+  heading stack plus short bold "pseudo-heading" lines (Word's common sub-labels) deepen the path, so
+  a claim cites a precise spot rather than just the nearest section. (Detail nested inside table cells
+  stays section-level — that structure isn't visible at the paragraph layer.)
 - **Citation guard — flag a reply that cites a source the system doesn't hold (DESIGN §10).** A
   deterministic, zero-model-cost post-check: any bracketed citation whose named source matches nothing
   in the system's documents/library (an invented `[National Fire Code 2020]`) gets a fail-loud note
