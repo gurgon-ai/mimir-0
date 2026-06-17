@@ -54,7 +54,13 @@ from .cognition.identity import (
     render_anchors,
 )
 from .cognition.ingest import IngestResult, ingest_document
-from .cognition.inner_life import compose_thought, gather_stimuli, pick_stimulus, should_think
+from .cognition.inner_life import (
+    Stimulus,
+    compose_thought,
+    gather_stimuli,
+    pick_stimulus,
+    should_think,
+)
 from .cognition.narratives import render_recent_history, run_narrative_cycle
 from .cognition.onboarding import (
     onboarding_profile,
@@ -259,6 +265,7 @@ class Mimir:
         self._last_turn_at = 0.0      # wall-clock end of last turn (the inner-life idle floor)
         self._last_thought_at = 0.0   # wall-clock of last inner-life thought (the cadence gate)
         self._last_thought_kind: str | None = None
+        self._last_escalation_at = 0.0  # wall-clock of last inner-life→council escalation
         self._stop_inner = threading.Event()
         self._inner_life: threading.Thread | None = None
         self._start_inner_life()
@@ -1313,12 +1320,14 @@ class Mimir:
             if not ok:
                 return {"ran": False, "reason": reason}
         try:
-            return self._do_inner_life(now)
+            # 'Think now' (force) stays a quick solo musing; the autonomous loop may escalate a
+            # fresh conflict to the full council (a daytime forum thread, see _should_escalate).
+            return self._do_inner_life(now, allow_escalation=not force)
         except BaseException as exc:  # idle musing must never destabilise the process (§10)
             log.error("inner life: tick failed: %s", exc, exc_info=True)
             return {"ran": False, "reason": f"error: {exc}"}
 
-    def _do_inner_life(self, now: float) -> dict[str, Any]:
+    def _do_inner_life(self, now: float, *, allow_escalation: bool = True) -> dict[str, Any]:
         errors = [str(r.get("message", "")) for r in self.recent_errors(limit=1)]
         wm = current_working_memory(self._storage) or ""
         stimuli = gather_stimuli(
@@ -1328,6 +1337,11 @@ class Mimir:
         stim = pick_stimulus(stimuli, avoid_kind=self._last_thought_kind)
         if stim is None:
             return {"ran": False, "reason": "no stimulus"}
+        # A genuine, fresh tension occasionally goes to the full council instead of a solo musing —
+        # so the inner life feeds the forum during the day, not just the nightly sleep pass (§5a).
+        if allow_escalation and stim.kind == "conflict" \
+                and self._should_escalate_to_council(stim, now):
+            return self._escalate_to_council(stim, now)
         thought = compose_thought(self._inner_life_chat, stim)
         if not thought:
             return {"ran": False, "reason": "empty thought"}
@@ -1354,6 +1368,42 @@ class Mimir:
         self._last_thought_kind = stim.kind
         log.info("inner life: mused on %s (mem %s)", stim.kind, mem.id)
         return {"ran": True, "kind": stim.kind, "thought": thought, "memory_id": mem.id}
+
+    _COUNCIL_ESCALATION_COOLDOWN_S = 3600.0  # at most ~one inner-life-driven council per hour
+
+    def _should_escalate_to_council(self, stim: Stimulus, now: float) -> bool:
+        """Whether this idle cycle should convene the council on ``stim`` instead of musing solo.
+        Gated so the (expensive) council is a daytime *trickle*: a genuine **conflict** stimulus,
+        the self-directed council enabled, a healthy fleet, an hourly cooldown, and the conflict not
+        already argued (shares the sleep seen-set, so neither re-litigates the other)."""
+        if stim.kind != "conflict" or not self._deliberation_enabled() or self._pool_degraded():
+            return False
+        if now - self._last_escalation_at < self._COUNCIL_ESCALATION_COOLDOWN_S:
+            return False
+        return stim.key not in self._load_deliberated()
+
+    def _escalate_to_council(self, stim: Stimulus, now: float) -> dict[str, Any]:
+        """Run a full council deliberation on a fresh conflict the idle loop surfaced — persisting a
+        forum thread + verdict — and record it in the shared seen-set so the nightly pass skips it.
+        """
+        try:
+            result = deliberate(
+                self._model, self._storage, self._embedder,
+                question=stim.prompt, provenance="inner life",
+            )
+        except Exception as exc:  # a bad council run never destabilises the idle loop (§10)
+            log.error("inner life: council escalation failed on %r: %s", stim.key, exc)
+            self._last_escalation_at = now  # back off before retrying
+            return {"ran": False, "reason": f"council error: {exc}"}
+        seen = self._load_deliberated()
+        seen[stim.key] = local_now(self._tz()).strftime("%Y-%m-%d")
+        self._prune_and_save_deliberated(seen)
+        self._last_escalation_at = now
+        self._last_thought_at = now
+        self._last_thought_kind = "conflict"
+        log.info("inner life: escalated a conflict to the council (thread %s)", result.thread_id)
+        return {"ran": True, "kind": "conflict", "escalated": True,
+                "thread_id": result.thread_id, "verdict": result.verdict}
 
     _MUSING_DUP_COSINE = 0.95
 
