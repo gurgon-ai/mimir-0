@@ -817,26 +817,9 @@ class Mimir:
                 system_health=self._error_context(),
                 now_ts=now,
             )
-            messages = [
-                {"role": "system", "content": bundle.prompt},
-                *self._history_messages(user, sid),
-                {"role": "user", "content": text},
-            ]
-
-            # Strip internal epistemic tags as we stream, so neither the live display nor the stored
-            # reply carries them (a tag may straddle two deltas, hence the stateful stripper).
-            stripper = StreamTagStripper()
-            chunks: list[str] = []
-            for delta in self._model.chat_stream("chat", messages):
-                clean = stripper.feed(delta)
-                if clean:
-                    chunks.append(clean)
-                    yield clean
-            tail = stripper.flush()
-            if tail:
-                chunks.append(tail)
-                yield tail
-            reply = "".join(chunks)
+            # Stream the reply (honoring an opt-in model fetch of a full library page); internal
+            # epistemic tags are stripped as we go (a tag may straddle deltas) inside the helper.
+            reply = yield from self._stream_chat_with_fetch(bundle, lib_refs, user, sid, text)
 
             record_access(self._storage, bundle.retrieved_ids)
             bake(
@@ -1986,12 +1969,76 @@ class Mimir:
 
     _FETCH_RE = re.compile(r"<FETCH\s+id=['\"]?(\d+)['\"]?\s*/?>", re.IGNORECASE)
 
-    def _with_fetch_hint(self, library: str | None, refs: list[dict[str, Any]]) -> str:
-        """Append the Phase-2 fetch instruction + available page ids so the model can open one."""
+    def _fetch_hint_text(self, refs: list[dict[str, Any]]) -> str:
+        """The Phase-2 fetch instruction + available page ids, so the model can open one."""
         listing = ", ".join(f"{r['page_id']}: {r['title']}" for r in refs if r.get("page_id"))
-        hint = ("If you need the full source of any of these to answer, reply with exactly "
+        return ("If you need the full source of any of these to answer, reply with exactly "
                 f"<FETCH id=N> (and nothing else) — available pages: {listing}.")
+
+    def _with_fetch_hint(self, library: str | None, refs: list[dict[str, Any]]) -> str:
+        """Append the Phase-2 fetch instruction so the model can open a page."""
+        hint = self._fetch_hint_text(refs)
         return f"{library}\n\n{hint}" if library else hint
+
+    def _stream_chat_with_fetch(
+        self, bundle: ContextBundle, refs: list[dict[str, Any]],
+        user: str | None, sid: str | None, text: str,
+    ) -> Generator[str, None, str]:
+        """Stream the chat reply, honoring an opt-in model fetch of a full library page (Phase 2,
+        streaming). If model-fetch is on and the model opens with ``<FETCH id=N>``, that marker is
+        intercepted (never shown to the user), the page is loaded, and the FINAL answer is streamed
+        with the page in context. Returns the full (tag-stripped) reply for storage/bake."""
+        history = self._history_messages(user, sid)
+        do_fetch = self.config.library_model_fetch and bool(refs)
+        system = f"{bundle.prompt}\n\n{self._fetch_hint_text(refs)}" if do_fetch else bundle.prompt
+        gen = self._model.chat_stream(
+            "chat", [{"role": "system", "content": system}, *history,
+                     {"role": "user", "content": text}])
+
+        # Peek the opening: a fetch reply is *exactly* the marker, so a few non-whitespace chars
+        # tell us whether to intercept it — we never stream the marker to the user.
+        first_raw: list[str] = []
+        is_fetch = False
+        if do_fetch:
+            for delta in gen:
+                first_raw.append(delta)
+                head = "".join(first_raw).lstrip()
+                if len(head) >= 6:
+                    is_fetch = head[:6].upper() == "<FETCH"
+                    break
+                if head and not "<FETCH".startswith(head.upper()):
+                    break  # diverged from the marker prefix — it's a normal answer
+            else:
+                is_fetch = "".join(first_raw).lstrip()[:6].upper() == "<FETCH"
+
+        stripper = StreamTagStripper()
+        chunks: list[str] = []
+        if is_fetch:
+            full = "".join(first_raw) + "".join(gen)  # drain the (short) marker reply
+            cap = max(1, self.config.library_max_fetches)
+            ids = [int(m) for m in self._FETCH_RE.findall(full)][:cap]
+            detail = self._loaded_library_detail(ids) if ids else ""
+            log.info("library: model fetched page(s) %s (stream)", ids)
+            system2 = f"{bundle.prompt}\n\n{detail}" if detail else bundle.prompt
+            gen = self._model.chat_stream(
+                "chat", [{"role": "system", "content": system2}, *history,
+                         {"role": "user", "content": text}])
+        else:
+            for delta in first_raw:  # replay what we buffered while peeking, then continue
+                clean = stripper.feed(delta)
+                if clean:
+                    chunks.append(clean)
+                    yield clean
+        for delta in gen:
+            clean = stripper.feed(delta)
+            if clean:
+                chunks.append(clean)
+                yield clean
+        tail = stripper.flush()
+        if tail:
+            chunks.append(tail)
+            yield tail
+        return "".join(chunks)
 
     def _maybe_model_fetch(
         self, reply: str, bundle: ContextBundle, user: str | None, sid: str | None, text: str

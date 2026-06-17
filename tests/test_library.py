@@ -207,3 +207,34 @@ def test_model_fetch_opens_a_page_and_reanswers(mock_config: Config, tmp_path) -
         assert "Full pages you've loaded" in calls[1][0]["content"]
     finally:
         brain.close()
+
+
+def test_model_fetch_intercepts_marker_when_streaming(mock_config: Config, tmp_path) -> None:
+    """Streaming Phase-2 fetch: the model opens with the marker, which is intercepted (never shown),
+    the page loads, and the FINAL answer streams with the page in context."""
+    cfg = dataclasses.replace(
+        mock_config, documents_folder=str(tmp_path / "documents"),
+        library_folder=str(tmp_path / "library"), library_model_fetch=True)
+    brain = Mimir(cfg)
+    try:
+        folder = Path(cfg.documents_folder)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "fence.md").write_text("# Fence\n\nThe north fence is cedar.")
+        brain.ingest_pending_library()
+        page_id = brain.library_overview()["pages"][0]["id"]
+
+        systems: list[str] = []
+
+        def scripted_stream(role, messages, *a, **k):
+            systems.append(messages[0]["content"])
+            if len(systems) == 1:
+                yield f"<FETCH id={page_id}>"          # first pass: just the marker
+            else:
+                yield from ["The ", "fence ", "is ", "cedar."]  # second pass: the real answer
+
+        brain._model.chat_stream = scripted_stream
+        out = "".join(brain.turn_stream("what is the fence made of"))
+        assert "FETCH" not in out and "cedar" in out.lower()   # marker never reached the user
+        assert "Full pages you've loaded" in systems[1]        # 2nd pass got the page detail
+    finally:
+        brain.close()
