@@ -7,7 +7,7 @@ import hashlib
 from mimir.brain import Mimir
 from mimir.config import Config
 from mimir.embed.base import EmbeddingMode, cosine
-from mimir.embed.endpoint import EndpointEmbedder, NullEmbedder
+from mimir.embed.endpoint import EndpointEmbedder, NullEmbedder, ResilientEmbedder
 from mimir.embed.locality import LocalityHashEmbedder
 
 
@@ -57,7 +57,10 @@ def test_endpoint_mode_uses_provider(mock_config: Config) -> None:
     mock_config.embed_mode = EmbeddingMode.ENDPOINT
     mock_config.roles["embed"] = RoleSpec(model="mock")
     with Mimir(mock_config) as m:
-        assert isinstance(m._embedder, EndpointEmbedder)
+        # Endpoint embedder is wrapped in ResilientEmbedder (degrades on a backend outage).
+        assert isinstance(m._embedder, ResilientEmbedder)
+        assert isinstance(m._embedder._inner, EndpointEmbedder)
+        assert m._embedder.mode is EmbeddingMode.ENDPOINT
         vec = m._embedder.embed("hello world")
         assert vec is not None and len(vec) == 64  # the mock's embedding dim
 
@@ -67,3 +70,22 @@ def test_degraded_mode_produces_no_vectors(mock_config: Config) -> None:
     with Mimir(mock_config) as m:
         assert isinstance(m._embedder, NullEmbedder)
         assert m._embedder.embed("anything") is None
+
+
+def test_resilient_embedder_degrades_loudly_instead_of_crashing() -> None:
+    from mimir.embed.endpoint import ResilientEmbedder
+
+    class _Boom:
+        mode = EmbeddingMode.ENDPOINT
+        def embed(self, text: str):
+            raise RuntimeError("embed backend down")
+
+    class _Ok:
+        mode = EmbeddingMode.ENDPOINT
+        def embed(self, text: str):
+            return [1.0, 2.0, 3.0]
+
+    down = ResilientEmbedder(_Boom())
+    assert down.embed("x") is None                   # outage → None (keyword path), not a crash
+    assert down.mode is EmbeddingMode.ENDPOINT       # mode delegates (transient, not reconfigured)
+    assert ResilientEmbedder(_Ok()).embed("x") == [1.0, 2.0, 3.0]  # healthy → passthrough

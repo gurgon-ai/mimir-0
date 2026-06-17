@@ -32,6 +32,20 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
 
 ### Fixed
+- **A downed embedding backend no longer crashes the brain — it degrades to keyword recall, loudly.**
+  Found a live run where the only embedding-capable node was offline, so every embed (query recall,
+  bake, procedures, inner life) raised `model "nomic-embed-text:v1.5" not found` and the loop spammed
+  tracebacks. Now the endpoint embedder is wrapped in a `ResilientEmbedder`: on a backend outage it
+  logs one throttled warning (captured into the error ring → shown in the Mind tab) and returns
+  `None`, which every caller already treats as the keyword-only path — so turns keep working in
+  degraded mode and resume semantic recall on their own when the model returns (DESIGN §10: fail
+  loud, keep working; not a silent backend swap — same store, announced). Inner life skips a cycle
+  cleanly when embeddings are down rather than storing an un-deduplicatable musing.
+- **A "model not found" 404 now fails fast.** Ollama returns 404 both transiently (while
+  loading/unloading) and permanently ("model not found, try pulling it first"); the latter was being
+  retried 3× per node, burning time and spamming the log. A 404 whose body says "not found" is now
+  classified non-transient. Plus a SETUP note: in endpoint mode the embed model must stay reachable
+  on the fleet, the `[roles.embed]` tag must match what's installed, and keep one model per store.
 - **Inner life stopped fixating on reference docs and its own output.** The idle loop picked the
   *most salient* memory to muse on, which was usually a high-salience DOCUMENT chunk (README, from the
   self-knowledge bake) or an INFERRED council verdict / prior musing — so it produced repetitive
