@@ -167,10 +167,36 @@ def _docx_table_lines(table: object, seen: set[int]) -> list[str]:
     return lines
 
 
+# Synthetic level for a bold "pseudo-heading" — a short, fully-bold standalone line. Word documents
+# routinely mark the finest sub-labels this way (not a real Heading style), so we treat them as the
+# deepest heading level: they nest under real headings and chain among themselves.
+_PSEUDO_HEADING_LEVEL = 99
+
+
+def _docx_heading_level(para: object) -> int | None:
+    """The heading level of a paragraph, or ``None`` if it's body text. ``Title`` = 0, ``Heading N``
+    = N, and a short fully-bold standalone line = a deepest pseudo-heading (common in Word)."""
+    style = (para.style.name if para.style else "") or ""  # type: ignore[attr-defined]
+    if style == "Title":
+        return 0
+    if style.startswith("Heading"):
+        try:
+            return int(style.split()[-1])
+        except (ValueError, IndexError):
+            return 1
+    text = (para.text or "").strip()  # type: ignore[attr-defined]
+    if text and len(text) <= 60 and len(text.split()) <= 8 and text[-1] not in ".!?:;":
+        runs = [r for r in para.runs if (r.text or "").strip()]  # type: ignore[attr-defined]
+        if runs and all(r.bold for r in runs):  # every text-bearing run is bold → a sub-label
+            return _PSEUDO_HEADING_LEVEL
+    return None
+
+
 def _extract_docx(path: Path) -> list[ExtractedUnit]:
-    """Split a .docx into sections by Word heading styles (Heading 1/2/…, Title); the heading text
-    becomes the locator, like markdown. Walks paragraphs **and tables** in document order, so
-    table-structured documents aren't lost. (python-docx reads .docx only, not legacy .doc.)"""
+    """Split a .docx into sections by Word heading styles (Title, Heading 1/2/…) **and** short
+    bold pseudo-headings, keeping the full **heading path** as each section's locator (e.g.
+    ``Biohazards > Infections > Hantavirus``) for precise citations. Walks paragraphs **and tables**
+    in document order, so table-structured documents aren't lost. (.docx only, not legacy .doc.)"""
     try:
         import docx  # noqa: F401  (presence check; the walker imports submodules lazily)
     except ImportError as exc:
@@ -184,23 +210,25 @@ def _extract_docx(path: Path) -> list[ExtractedUnit]:
 
     document = Document(str(path))
     units: list[ExtractedUnit] = []
-    current_heading = ""
+    stack: list[tuple[int, str]] = []  # (level, heading text) → the current heading path
     buffer: list[str] = []
 
     def flush() -> None:
         body = "\n".join(buffer).strip()
         if body:
-            units.append(ExtractedUnit(text=body, locator=current_heading))
+            units.append(ExtractedUnit(text=body, locator=" > ".join(t for _, t in stack)))
 
     for block in _docx_block_items(document):
         if isinstance(block, Paragraph):
             text = (block.text or "").strip()
             if not text:
                 continue
-            style = (block.style.name if block.style else "") or ""
-            if style.startswith("Heading") or style == "Title":
+            level = _docx_heading_level(block)
+            if level is not None:
                 flush()
-                current_heading = text
+                while stack and stack[-1][0] >= level:  # close deeper/sibling headings
+                    stack.pop()
+                stack.append((level, text))
                 buffer = [text]  # keep the heading line in the section body for context
             else:
                 buffer.append(text)
