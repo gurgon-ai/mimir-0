@@ -167,7 +167,7 @@ class ModelGateway:
                 last = exc
                 if not exc.transient:
                     raise  # bad request / parse error — the next model won't fare better
-        raise last or ModelGatewayError(f"no acceptable model for role {role!r}")
+        raise self._explain_failure(role, models, last)
 
     def chat_stream(
         self, role: str, messages: list[Message], *, priority: Priority | None = None
@@ -194,7 +194,37 @@ class ModelGateway:
                 last = exc
                 if started or not exc.transient:
                     raise  # mid-stream, or permanent — can't safely fall to another model
-        raise last or ModelGatewayError(f"no acceptable model for role {role!r}")
+        raise self._explain_failure(role, models, last)
+
+    def _explain_failure(
+        self, role: str, models: list[str], last: ProviderError | None
+    ) -> Exception:
+        """Turn an opaque 'all endpoints failed' into an actionable error when the real cause is
+        that the role's model(s) aren't routable — not pulled, or only on a disabled/down node (the
+        common 404). Only consulted *after* a real failure, so a just-pulled model still works."""
+        if not self._pool.inventory_known():
+            return last or ModelGatewayError(f"no acceptable model for role {role!r}")
+        active = self._pool.installed_models()
+        if any(m in active for m in models):
+            return last or ModelGatewayError(f"no acceptable model for role {role!r}")
+        for model in models:  # none of the chain is on an active node — say precisely why
+            loc = self._pool.locate_model(model)
+            if loc["disabled"]:
+                return ModelGatewayError(
+                    f"role {role!r}: model {model!r} is installed only on disabled node(s) "
+                    f"{loc['disabled']} — re-enable one in the Fleet/Placement view, or pin a "
+                    f"model on an active node. Active models: {sorted(active) or 'none'}."
+                )
+            if loc["unreachable"]:
+                return ModelGatewayError(
+                    f"role {role!r}: model {model!r} is installed only on unreachable node(s) "
+                    f"{loc['unreachable']} — start Ollama there, or pin a model on an active node."
+                )
+        return ModelGatewayError(
+            f"role {role!r}: model(s) {models} are not installed on any reachable node. Pull one "
+            f"(e.g. `ollama pull {models[0]}`) or pin an installed model in the Fleet view. "
+            f"Active models: {sorted(active) or 'none'}."
+        )
 
     def embed(
         self, role: str, texts: list[str], *, priority: Priority | None = None

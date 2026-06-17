@@ -269,6 +269,40 @@ class ProviderPool:
             "all provider endpoint(s) failed for chat stream; deferring", transient=True
         ) from last_exc
 
+    def inventory_known(self) -> bool:
+        """True if at least one reachable, enabled endpoint has a known (non-empty) model inventory
+        — i.e. discovery has run and we can trust "is this model installed?" answers."""
+        with self._lock:
+            return any(e.models for e in self._endpoints
+                       if e.reachable and e.name not in self._disabled)
+
+    def installed_models(self) -> set[str]:
+        """Union of models the reachable, enabled endpoints report in their **cached** inventory (no
+        network call). Empty until discovery has populated it — pair with ``inventory_known()``."""
+        with self._lock:
+            out: set[str] = set()
+            for e in self._endpoints:
+                if e.reachable and e.name not in self._disabled:
+                    out |= e.models
+            return out
+
+    def locate_model(self, model: str) -> dict[str, list[str]]:
+        """Where ``model`` lives, bucketed by endpoint status — for actionable 'why did chat fail'
+        messages. ``active`` = reachable + enabled (routable now); ``disabled`` = present but the
+        node is toggled off; ``unreachable`` = present in inventory but the node is down."""
+        with self._lock:
+            out: dict[str, list[str]] = {"active": [], "disabled": [], "unreachable": []}
+            for e in self._endpoints:
+                if model not in e.models:
+                    continue
+                if e.name in self._disabled:
+                    out["disabled"].append(e.name)
+                elif not e.reachable:
+                    out["unreachable"].append(e.name)
+                else:
+                    out["active"].append(e.name)
+            return out
+
     def available_models(self) -> list[str]:
         """Distinct models installed across the endpoints (for council auto-discovery, DESIGN §4).
 
