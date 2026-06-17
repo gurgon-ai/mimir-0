@@ -1154,8 +1154,11 @@ _HTML = """<!doctype html>
   #graphInspect textarea { width:100%; min-height:90px; resize:vertical; }
   #sessionBar { flex:none; display:flex; gap:8px; align-items:center; padding:8px 12px; border-bottom:1px solid #232a35; }
   #sessionSelect { flex:1; min-width:0; background:#11161d; border:1px solid #2b333f; color:#d7dde5; border-radius:8px; padding:6px 9px; font:inherit; }
-  #composer { flex:none; display:flex; gap:8px; padding:12px; border-top:1px solid #232a35; }
+  #composer { flex:none; display:flex; gap:8px; padding:12px; border-top:1px solid #232a35; align-items:center; }
   #composer input[type=text] { flex:1; }
+  .clip { cursor:pointer; font-size:18px; line-height:1; padding:6px 8px; border:1px solid #232a35; border-radius:8px; color:#8a94a3; user-select:none; }
+  .clip:hover { color:#d7dde5; border-color:#334155; }
+  .clip.busy { opacity:.5; pointer-events:none; }
   input[type=text], textarea { background:#11161d; border:1px solid #2b333f; color:#d7dde5; border-radius:8px; padding:9px 11px; font:inherit; }
   button { background:#238636; color:#fff; border:0; border-radius:8px; padding:9px 14px; font:inherit; cursor:pointer; }
   button.secondary { background:#30363d; }
@@ -1250,9 +1253,11 @@ _HTML = """<!doctype html>
       <div id="ivProgress"></div>
     </div>
     <form id="composer">
+      <label class="clip" id="clip" title="Upload a document (.txt .md .pdf) — it's saved to your documents folder and ingested">📎<input type="file" id="docFile" accept=".txt,.text,.md,.markdown,.pdf" hidden/></label>
       <input type="text" id="text" placeholder="Say something to Mimir…" autocomplete="off"/>
       <button type="submit" id="send">Send</button>
     </form>
+    <div id="uploadMsg" class="hint" style="flex:none; padding:0 12px 8px;"></div>
   </div>
   <aside>
     <div class="tabs">
@@ -1438,7 +1443,17 @@ _HTML = """<!doctype html>
     </div>
 
     <div class="tabpane hidden" id="tab-docs">
-      <h2>Ingest a document</h2>
+      <h2>Your documents <span class="hint" style="font-weight:normal;">— the local wiki</span></h2>
+      <div class="hint" style="margin-bottom:8px;">Upload with the 📎 by the chat box, or drop files
+        straight into the folder below. Idle time ingests them into recallable knowledge and writes a
+        short summary of each. <code>.txt</code>/<code>.md</code> work out of the box;
+        <code>.pdf</code> needs the optional extra (see docs/SETUP.md).</div>
+      <div id="docFolder" class="hint" style="margin-bottom:8px;">—</div>
+      <button class="secondary" id="docScan" type="button">Scan folder now</button>
+      <span id="docScanMsg" class="hint" style="margin-left:8px;"></span>
+      <div id="docList" style="margin-top:12px;"></div>
+
+      <h2 style="margin-top:22px;">Ingest a file by path</h2>
       <div class="field">
         <input type="text" id="docPath" placeholder="/path/to/notes.md (.txt .md .pdf)"/>
       </div>
@@ -2027,8 +2042,60 @@ async function loadWikiStatus() {
 }
 $("wikiRecheck").addEventListener("click", loadWikiStatus);
 
+async function loadDocuments() {
+  const list = $("docList");
+  try {
+    const r = await api("GET", "/api/documents");
+    $("docFolder").innerHTML = r.folder
+      ? `Drop folder: <code>${escapeHtml(r.folder)}</code>`
+      : "No documents folder configured (set <code>[documents] folder</code> in mimir.toml).";
+    const docs = r.documents || [];
+    if (!docs.length) { list.innerHTML = '<div class="hint">No documents yet — upload one with 📎 or drop a file in the folder.</div>'; return; }
+    list.innerHTML = docs.map(d => {
+      const meta = `${d.chunks || 0} chunk(s)` + (d.ingested_at ? " · " + forumWhen(d.ingested_at) : "");
+      const sum = d.summary ? escapeHtml(d.summary) : '<span class="hint">summary pending (generated on the next idle pass)</span>';
+      return `<div class="mem"><div class="text"><b>${escapeHtml(d.name || d.source)}</b></div>` +
+        `<div class="text" style="color:#9fb3c8;">${sum}</div>` +
+        `<div class="meta">${meta}</div></div>`;
+    }).join("");
+  } catch (e) { list.innerHTML = '<div class="hint">Error: ' + escapeHtml(e.message) + '</div>'; }
+}
+async function loadDocsTab() { await loadDocuments(); loadWikiStatus(); }
+
+$("docScan").addEventListener("click", async () => {
+  $("docScanMsg").textContent = "Scanning…";
+  try {
+    const r = await api("POST", "/api/documents/scan");
+    $("docScanMsg").textContent = `Ingested ${(r.ingested||[]).length}, summarized ${r.summarized||0}.`;
+    loadDocuments();
+  } catch (e) { $("docScanMsg").textContent = "Error: " + e.message; }
+});
+
+// 📎 upload: read the file as base64 and POST it; the server saves it to the drop folder + ingests.
+$("docFile").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const msg = $("uploadMsg"); const clip = $("clip");
+  msg.textContent = `Uploading ${file.name}…`; clip.classList.add("busy");
+  try {
+    const data = await new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(String(fr.result).split(",", 2)[1] || "");
+      fr.onerror = () => rej(new Error("could not read file"));
+      fr.readAsDataURL(file);
+    });
+    const r = await api("POST", "/api/documents/upload", { name: file.name, data });
+    msg.textContent = `Ingested ${escapeHtml(r.name)} (${r.chunks} chunk(s)). It's now recallable; a summary follows on the next idle pass.`;
+    if (!$("tab-docs").classList.contains("hidden")) loadDocuments();
+  } catch (err) {
+    msg.textContent = "Upload failed: " + err.message;
+  } finally {
+    clip.classList.remove("busy"); e.target.value = "";
+  }
+});
+
 // --- tabs ---
-const loaders = { mind: loadMind, sleep: loadSleepTab, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet, docs: loadWikiStatus };
+const loaders = { mind: loadMind, sleep: loadSleepTab, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet, docs: loadDocsTab };
 document.querySelectorAll(".tabs button").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));
