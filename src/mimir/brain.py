@@ -21,7 +21,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Generator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -146,6 +146,7 @@ from .storage.repo import (
     list_library_pages,
     list_memories,
     list_sessions,
+    pages_for_claims,
     recent_conversation,
     record_access,
     record_conversation_turn,
@@ -190,11 +191,15 @@ def _latency_staleness(info: dict[str, object] | None) -> float:
 
 @dataclass(slots=True)
 class TurnResult:
-    """What a turn produced: the reply, the assembled context (introspectable), and bakes."""
+    """What a turn produced: the reply, the assembled context (introspectable), and bakes.
+
+    ``library_sources`` lists the composite pages behind the cited claims this turn surfaced
+    (``[{page_id, title}]``) — so the UI can offer 'load the source this drew on' after a reply."""
 
     reply: str
     context: ContextBundle
     baked: list[Memory]
+    library_sources: list[dict[str, Any]] = field(default_factory=list)
 
 
 def build_provider(spec: ProviderSpec) -> Provider:
@@ -655,7 +660,8 @@ class Mimir:
             working_memory = current_working_memory(self._storage)
             graph_facts = self._connected_facts(text, user)
             procedures = self._matching_procedures(text, user)
-            library = self._merge_loaded_library(self._library_gist(text, query_vec), loaded_pages)
+            lib_text, lib_refs = self._library_gist(text, query_vec)
+            library = self._merge_loaded_library(lib_text, loaded_pages)
 
             # 2. Assemble the epistemic prompt.
             bundle = build_context(
@@ -718,7 +724,7 @@ class Mimir:
         self._burst.signal(ResponseContext(
             user_text=text, reply=reply, user=user, turn_index=self._turn_count
         ))
-        return TurnResult(reply=reply, context=bundle, baked=baked)
+        return TurnResult(reply=reply, context=bundle, baked=baked, library_sources=lib_refs)
 
     def turn_stream(
         self, text: str, user: str | None = None, *, speaker_kind: str = "human",
@@ -768,7 +774,8 @@ class Mimir:
             working_memory = current_working_memory(self._storage)
             graph_facts = self._connected_facts(text, user)
             procedures = self._matching_procedures(text, user)
-            library = self._merge_loaded_library(self._library_gist(text, query_vec), loaded_pages)
+            lib_text, lib_refs = self._library_gist(text, query_vec)
+            library = self._merge_loaded_library(lib_text, loaded_pages)
             bundle = build_context(
                 query=text,
                 user=user,
@@ -833,7 +840,9 @@ class Mimir:
         self._burst.signal(ResponseContext(
             user_text=text, reply=reply, user=user, turn_index=self._turn_count
         ))
-        return bundle.introspect()
+        intro = bundle.introspect()
+        intro["library_sources"] = lib_refs
+        return intro
 
     def _connected_facts(self, query: str, user: str | None) -> list[str]:
         """Connected facts from the entity graph for this turn (empty if disabled or no match)."""
@@ -1837,20 +1846,30 @@ class Mimir:
         set_page_claims(self._storage, page_id, [c.id for c in claims if c.id is not None])
         return True
 
-    def _library_gist(self, query: str, query_vec: list[float] | None) -> str | None:
-        """The Library context section: the most relevant cited claims (each shown with its source
-        title + locator). ``None`` if the layer is off or nothing is on-topic."""
+    def _library_gist(
+        self, query: str, query_vec: list[float] | None
+    ) -> tuple[str | None, list[dict[str, Any]]]:
+        """The Library section + the composite pages behind it. Returns ``(text, refs)`` — the cited
+        claims most relevant to the turn (each shown with its source title + locator), and the
+        composite page(s) those claims belong to (``[{page_id, title}]``) for the after-reply chips.
+        ``(None, [])`` if the layer is off or nothing is on-topic."""
         if self._library_source_folder() is None:
-            return None
+            return None, []
         claims = list_library_claims(self._storage)
         if not claims:
-            return None
+            return None, []
         top = retrieve_claims(query, query_vec, claims,
                               top_k=max(1, self.config.library_claims_top_k))
         if not top:
-            return None
+            return None, []
         titles = {d.id: d.title for d in list_library_documents(self._storage)}
-        return render_claims(top, titles) or None
+        text = render_claims(top, titles) or None
+        # Which composite page(s) those surfaced claims belong to → after-reply Load chips.
+        claim_pages = pages_for_claims(self._storage, [c.claim.id for c in top if c.claim.id])
+        page_ids = {pid for pids in claim_pages.values() for pid in pids}
+        page_titles = {p.id: p.title for p in list_library_pages(self._storage)}
+        refs = [{"page_id": pid, "title": page_titles.get(pid, "")} for pid in sorted(page_ids)]
+        return text, refs
 
     def _merge_loaded_library(self, gist: str | None, loaded_pages: list[int] | None) -> str | None:
         """Append the full Markdown of any composite pages the user explicitly **loaded** (the Load

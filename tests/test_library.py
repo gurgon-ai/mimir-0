@@ -128,7 +128,7 @@ def test_hand_edited_composite_is_not_clobbered(mock_config: Config, tmp_path) -
 def test_no_source_folder_is_a_quiet_noop(brain: Mimir) -> None:
     assert brain.ingest_pending_library() == {
         "folder": None, "documents": [], "claims": 0, "composed": 0, "dropped": 0}
-    assert brain._library_gist("anything", None) is None
+    assert brain._library_gist("anything", None) == (None, [])
 
 
 def test_loaded_page_is_pinned_into_the_next_turn(mock_config: Config, tmp_path) -> None:
@@ -143,5 +143,19 @@ def test_loaded_page_is_pinned_into_the_next_turn(mock_config: Config, tmp_path)
         result = brain.turn("what's the weather", loaded_pages=[page_id])
         prompt = result.context.prompt
         assert "Full pages you've loaded" in prompt and "Fences" in prompt
+    finally:
+        brain.close()
+
+
+def test_turn_surfaces_library_sources_for_load_chips(mock_config: Config, tmp_path) -> None:
+    brain = _libbrain(mock_config, tmp_path)
+    try:
+        folder = brain._library_source_folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "hives.md").write_text("# Hives\n\nEach hive has one queen. Bees make honey.")
+        brain.ingest_pending_library()
+        result = brain.turn("tell me about hives and queens")
+        assert result.library_sources                       # the answer drew on a library page
+        assert all("page_id" in s and "title" in s for s in result.library_sources)
     finally:
         brain.close()
