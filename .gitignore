@@ -33,9 +33,12 @@ ENV/
 *.sqlite
 *.sqlite3
 data/
-# The documents drop folder + the Library's composite pages — the user's own knowledge, never committed
-documents/
-library/
+# The documents drop folder + the Library's composite pages — ship the empty folders (so a fresh
+# install has somewhere to drop files), but never commit the user's own knowledge inside them.
+documents/*
+!documents/.gitkeep
+library/*
+!library/.gitkeep
 
 # Test / type-check / lint caches
 .pytest_cache/
