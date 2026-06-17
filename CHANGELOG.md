@@ -107,6 +107,12 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **The Docs tab now shows the drop folder's resolved absolute path + whether it exists.** It used to
+  print the bare configured value (e.g. `documents`), so a relative folder gave no hint of *where* it
+  actually resolved — and if the server ran from a different working directory it silently watched the
+  wrong place, reading as "not set." `/api/documents` now returns `folder_abs` + `folder_exists`, and
+  the UI flags a missing folder in amber with a note that relative paths resolve against the server's
+  working directory.
 - **A "model not found" 404 now fails fast.** Ollama returns 404 both transiently (while
   loading/unloading) and permanently ("model not found, try pulling it first"); the latter was being
   retried 3× per node, burning time and spamming the log. A 404 whose body says "not found" is now
