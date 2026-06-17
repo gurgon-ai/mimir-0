@@ -129,3 +129,19 @@ def test_no_source_folder_is_a_quiet_noop(brain: Mimir) -> None:
     assert brain.ingest_pending_library() == {
         "folder": None, "documents": [], "claims": 0, "composed": 0, "dropped": 0}
     assert brain._library_gist("anything", None) is None
+
+
+def test_loaded_page_is_pinned_into_the_next_turn(mock_config: Config, tmp_path) -> None:
+    brain = _libbrain(mock_config, tmp_path)
+    try:
+        folder = brain._library_source_folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "fences.md").write_text("# Fences\n\nThe north fence is cedar.")
+        brain.ingest_pending_library()
+        page_id = brain.library_overview()["pages"][0]["id"]
+        # A query that wouldn't surface the gist on its own; the pinned page is loaded regardless.
+        result = brain.turn("what's the weather", loaded_pages=[page_id])
+        prompt = result.context.prompt
+        assert "Full pages you've loaded" in prompt and "Fences" in prompt
+    finally:
+        brain.close()

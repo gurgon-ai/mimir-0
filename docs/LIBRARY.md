@@ -87,12 +87,14 @@ phase:
   hybrid claim retrieval (`_library_gist` → `retrieve_claims`/`render_claims`) into the "Library"
   `build_context` section — each fact shown with its citation `[title, locator]`. A `library` sleep
   phase. Source = the `[documents]` folder; `[library] claims_top_k`.
-- **Phase 1c — composites + UI.** *Composites built:* the idle pass now compiles a Markdown
-  composite from each document's claims (`_compile_composite`/`compose_page`), writes it to the
-  `[library]` folder, and links it to its claims (`set_page_claims`) — non-destructive (a hand-edited
-  page is left alone). `library_overview`/`library_page` (full MD + citations)/`library_source`
-  (verbatim) back the UI. *Still to wire:* the API endpoints + the **Load button** (chips after a
-  reply → load the composite or verbatim source into the next turn; an "active sources" tray).
+- **Phase 1c — composites + UI. ✅ built.** The idle pass compiles a Markdown composite from each
+  document's claims (`_compile_composite`/`compose_page`) into the `[library]` folder, linked to its
+  claims (`set_page_claims`), non-destructive (a hand-edited page is left alone). A **Library tab**
+  lists composite pages + source documents; clicking a page shows its full Markdown + its source
+  citations (claim → title + locator); a **pin-to-chat** toggle adds a page to an "active sources"
+  tray, and pinned pages are loaded into the next turn (`turn(loaded_pages=…)` →
+  `_merge_loaded_library`). Endpoints: `GET /api/library{,/page,/source}`, `POST /api/library/scan`.
+  *Follow-up:* after-reply chips (surface which sources the answer drew on for one-click load).
 - **Phase 2 — model-driven fetch.** A `read_library_page(page_id, section?)` native tool + an in-band
   `<FETCH …>` fallback (works on any model, intercepted like `<RECALL>`), reusing the Phase-1c fetch
   path — "let the model open the book / pull the source itself." Opt-in, capped, fail-soft.

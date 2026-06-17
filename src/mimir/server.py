@@ -260,6 +260,12 @@ class _Handler(BaseHTTPRequestHandler):
             elif route == "/api/documents":
                 self._send_json({"folder": self.server.brain.config.documents_folder,
                                  "documents": self.server.brain.documents()})  # lock-free (kv read)
+            elif route == "/api/library":
+                self._send_json(self.server.brain.library_overview())
+            elif route == "/api/library/page":
+                self._send_json(self._library_page(params))
+            elif route == "/api/library/source":
+                self._send_json(self._library_source(params))
             elif route == "/api/procedures":
                 self._send_json(self._procedures())
             elif route == "/api/fleet":
@@ -320,6 +326,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._upload_document(body))
             elif route == "/api/documents/scan":
                 self._send_json(self._scan_documents())
+            elif route == "/api/library/scan":
+                self._send_json(self._scan_library())
             elif route == "/api/sleep":
                 self._send_json(self._sleep())
             elif route == "/api/deliberate/run":
@@ -391,8 +399,10 @@ class _Handler(BaseHTTPRequestHandler):
             raise ValueError("'text' is required")
         user = body.get("user") or None
         speaker_kind = str(body.get("speaker_kind") or body.get("kind") or "human")
+        loaded = _int_list(body.get("library_pages"))
         with self.server.brain_lock:
-            result = self.server.brain.turn(text, user=user, speaker_kind=speaker_kind)
+            result = self.server.brain.turn(
+                text, user=user, speaker_kind=speaker_kind, loaded_pages=loaded)
         # Return as soon as the reply is generated. The post-turn burst (sentinel/self-model/working
         # memory) runs OFF the hot path and the next turn settles it (DESIGN §5a) — blocking the HTTP
         # response on it would add several model calls of latency (minutes on a small edge node).
@@ -513,6 +523,23 @@ class _Handler(BaseHTTPRequestHandler):
         with self.server.brain_lock:
             return self.server.brain.ingest_pending_documents(force=False)
 
+    def _library_page(self, params: dict[str, list[str]]) -> dict[str, Any]:
+        page = self.server.brain.library_page(int((params.get("id") or ["0"])[0]))
+        if page is None:
+            raise MimirError("no such library page")
+        return page
+
+    def _library_source(self, params: dict[str, list[str]]) -> dict[str, Any]:
+        doc = self.server.brain.library_source(int((params.get("id") or ["0"])[0]))
+        if doc is None:
+            raise MimirError("no such library source")
+        return doc
+
+    def _scan_library(self) -> dict[str, Any]:
+        # Manual "scan library now": (re)distil source docs into cited claims + composites.
+        with self.server.brain_lock:
+            return self.server.brain.ingest_pending_library(force=False)
+
     def _turn_stream(self) -> None:
         """Server-Sent-Events stream of a turn: token events, then a done event with introspect.
 
@@ -527,6 +554,7 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             user = body.get("user") or None
             speaker_kind = str(body.get("speaker_kind") or body.get("kind") or "human")
+            loaded = _int_list(body.get("library_pages"))
             normalize_speaker_kind(speaker_kind)  # reject a bad kind before the stream opens (400)
         except (json.JSONDecodeError, ValueError) as exc:
             self._send_json({"error": str(exc)}, status=400)
@@ -549,7 +577,8 @@ class _Handler(BaseHTTPRequestHandler):
 
         try:
             with self.server.brain_lock:
-                stream = self.server.brain.turn_stream(text, user=user, speaker_kind=speaker_kind)
+                stream = self.server.brain.turn_stream(
+                    text, user=user, speaker_kind=speaker_kind, loaded_pages=loaded)
                 while True:
                     try:
                         token = next(stream)
@@ -1019,6 +1048,17 @@ class _Handler(BaseHTTPRequestHandler):
         return {"triples": [_triple_to_dict(t) for t in triples]}
 
 
+def _int_list(value: Any) -> list[int]:
+    """Coerce a JSON value to a list of ints, dropping anything unparseable (e.g. library_pages)."""
+    out: list[int] = []
+    for item in value if isinstance(value, list) else []:
+        try:
+            out.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def _memory_to_dict(mem: Memory) -> dict[str, Any]:
     """Serialize a memory for the browser (provenance and epistemics on display)."""
     return {
@@ -1258,6 +1298,7 @@ _HTML = """<!doctype html>
       <button type="submit" id="send">Send</button>
     </form>
     <div id="uploadMsg" class="hint" style="flex:none; padding:0 12px 8px;"></div>
+    <div id="libTray" class="hint" style="flex:none; padding:0 12px 8px; display:none;"></div>
   </div>
   <aside>
     <div class="tabs">
@@ -1271,6 +1312,7 @@ _HTML = """<!doctype html>
       <button data-tab="council">Council</button>
       <button data-tab="fleet">Fleet</button>
       <button data-tab="docs">Docs</button>
+      <button data-tab="library">Library</button>
     </div>
 
     <div class="tabpane" id="tab-identity">
@@ -1466,6 +1508,21 @@ _HTML = """<!doctype html>
       <div id="wikiStatus" class="hint">checking…</div>
       <button class="secondary" id="wikiRecheck" type="button" style="margin-top:8px;">Recheck</button>
     </div>
+
+    <div class="tabpane hidden" id="tab-library">
+      <h2>Library <span class="hint" style="font-weight:normal;">— books I've read</span></h2>
+      <div class="hint" style="margin-bottom:8px;">Three tiers: your source documents (ground truth),
+        short <b>cited claims</b> distilled into the database (always-on, surfaced in chat with their
+        source), and <b>composite pages</b> — the synthesized understanding. Built in idle from the
+        documents folder; pin a page to pull its full detail into the next message.</div>
+      <button class="secondary" id="libScan" type="button">Scan library now</button>
+      <span id="libScanMsg" class="hint" style="margin-left:8px;"></span>
+      <h2 style="margin-top:16px;">Composite pages</h2>
+      <div id="libPages"></div>
+      <h2 style="margin-top:16px;">Source documents</h2>
+      <div id="libDocs"></div>
+      <div id="libDetail" style="margin-top:14px;"></div>
+    </div>
   </aside>
 </main>
 <script>
@@ -1527,7 +1584,7 @@ async function streamTurn(text) {
   body.classList.add("thinking"); body.textContent = "thinking…";
   let started = false;
   const begin = () => { if (!started) { started = true; body.classList.remove("thinking"); body.textContent = ""; } };
-  const resp = await fetch("/api/turn/stream", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ text, user: "operator" }) });
+  const resp = await fetch("/api/turn/stream", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ text, user: "operator", library_pages: [...activeSources] }) });
   if (resp.status === 401) { promptForToken(); body.classList.remove("thinking"); body.textContent = "API token required."; return; }
   if (!resp.ok) { body.classList.remove("thinking"); const e = await resp.json().catch(() => ({ error: "HTTP " + resp.status })); throw new Error(e.error); }
   const reader = resp.body.getReader(); const dec = new TextDecoder();
@@ -2062,6 +2119,66 @@ async function loadDocuments() {
 }
 async function loadDocsTab() { await loadDocuments(); loadWikiStatus(); }
 
+// --- Library (docs/LIBRARY.md): cited claims + composite pages, with a pin-to-chat Load ---
+const activeSources = new Set();   // composite page ids pinned into the next message
+function renderLibTray() {
+  const tray = $("libTray");
+  if (!activeSources.size) { tray.style.display = "none"; tray.innerHTML = ""; return; }
+  tray.style.display = "block";
+  tray.innerHTML = "📎 Loaded into chat: " + [...activeSources].map(p =>
+    `<a href="#" data-unpin="${p}" style="margin-right:8px;">${escapeHtml(libTitles[p] || ("#"+p))} ✕</a>`
+  ).join("");
+  tray.querySelectorAll("[data-unpin]").forEach(a => a.addEventListener("click", (e) => {
+    e.preventDefault(); activeSources.delete(parseInt(a.dataset.unpin)); renderLibTray();
+  }));
+}
+let libTitles = {};
+async function loadLibrary() {
+  const pagesEl = $("libPages"), docsEl = $("libDocs");
+  let data;
+  try { data = await api("GET", "/api/library"); }
+  catch (e) { pagesEl.innerHTML = '<div class="hint">Error: ' + escapeHtml(e.message) + '</div>'; return; }
+  const pages = data.pages || [], docs = data.documents || [];
+  libTitles = {}; pages.forEach(p => { libTitles[p.id] = p.title; });
+  pagesEl.innerHTML = pages.length ? pages.map(p =>
+    `<div class="mem"><div class="text"><b>${escapeHtml(p.title)}</b></div>` +
+    `<div class="text" style="color:#9fb3c8;">${escapeHtml(p.summary || "")}</div>` +
+    `<div class="meta"><a href="#" data-page="${p.id}">view</a> · ` +
+    `<a href="#" data-pin="${p.id}">${activeSources.has(p.id) ? "pinned ✓" : "pin to chat"}</a></div></div>`
+  ).join("") : '<div class="hint">No composite pages yet — drop documents and let it run (or Scan).</div>';
+  docsEl.innerHTML = docs.length ? docs.map(d =>
+    `<div class="mem"><div class="text">${escapeHtml(d.filename)} <span class="hint">· ${d.claims} claim(s) · ${(d.size_bytes/1024).toFixed(1)} KB</span></div></div>`
+  ).join("") : '<div class="hint">No source documents indexed yet.</div>';
+  pagesEl.querySelectorAll("[data-page]").forEach(a => a.addEventListener("click", (e) => {
+    e.preventDefault(); openLibraryPage(parseInt(a.dataset.page)); }));
+  pagesEl.querySelectorAll("[data-pin]").forEach(a => a.addEventListener("click", (e) => {
+    e.preventDefault(); const id = parseInt(a.dataset.pin);
+    activeSources.has(id) ? activeSources.delete(id) : activeSources.add(id);
+    renderLibTray(); loadLibrary();
+  }));
+}
+async function openLibraryPage(id) {
+  const el = $("libDetail");
+  try {
+    const p = await api("GET", "/api/library/page?id=" + id);
+    const cites = (p.citations || []).map(c =>
+      `<div class="meta">• ${escapeHtml(c.text)} <span style="color:#8a94a3;">[${escapeHtml(c.title)}${c.locator ? ", " + escapeHtml(c.locator) : ""}]</span></div>`
+    ).join("");
+    el.innerHTML = `<div class="mem"><div class="text"><b>${escapeHtml(p.title)}</b></div>` +
+      `<div class="text" style="white-space:pre-wrap;">${escapeHtml(p.markdown || "")}</div>` +
+      (cites ? `<div style="margin-top:8px;"><b class="hint">Sources (claims → origin):</b>${cites}</div>` : "") +
+      `</div>`;
+  } catch (e) { el.innerHTML = '<div class="hint">Error: ' + escapeHtml(e.message) + '</div>'; }
+}
+$("libScan").addEventListener("click", async () => {
+  $("libScanMsg").textContent = "Scanning…";
+  try {
+    const r = await api("POST", "/api/library/scan");
+    $("libScanMsg").textContent = `${(r.documents||[]).length} doc(s) → ${r.claims||0} claim(s), ${r.composed||0} composite(s).`;
+    loadLibrary();
+  } catch (e) { $("libScanMsg").textContent = "Error: " + e.message; }
+});
+
 $("docScan").addEventListener("click", async () => {
   $("docScanMsg").textContent = "Scanning…";
   try {
@@ -2095,7 +2212,7 @@ $("docFile").addEventListener("change", async (e) => {
 });
 
 // --- tabs ---
-const loaders = { mind: loadMind, sleep: loadSleepTab, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet, docs: loadDocsTab };
+const loaders = { mind: loadMind, sleep: loadSleepTab, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet, docs: loadDocsTab, library: loadLibrary };
 document.querySelectorAll(".tabs button").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));
