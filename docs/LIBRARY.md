@@ -68,6 +68,10 @@ library_page_claims(page_id, claim_id)                                          
   doc the surfaced claims came from — deterministic, no second pass), or the **Phase-2 model fetch**
   (the model opens a page itself; opt-in). Full pages count as grounding for the uncertainty gate.
 - **On demand (verbatim):** the exact source line/page via a claim's `locator` — for quoting/checking.
+- **Citation guard (DESIGN §10):** a deterministic post-check flags any citation in the reply whose
+  named source isn't a document/library item the system actually holds (an invented standard) — a
+  fail-loud note, never a silent edit. Checks every injected source, documents + library
+  (`cognition/citations.py`, `[library] citation_guard`, on by default).
 
 ## Pipeline — both extraction and composition run in **idle**
 

@@ -32,6 +32,7 @@ from .cognition.benchmark import FleetBenchmarkResult, ModelBenchmark
 from .cognition.benchmark import benchmark_fleet as _benchmark_fleet
 from .cognition.benchmark import complete_speed_matrix as _complete_speed_matrix
 from .cognition.burst import BurstResult, BurstWorker, ResponseContext
+from .cognition.citations import citation_warning, unverified_citations
 from .cognition.council import CouncilResult, deliberate
 from .cognition.deliberation import curate, surface_conflicts
 from .cognition.epistemics import EpistemicResult, run_epistemics
@@ -715,6 +716,8 @@ class Mimir:
             # 3b. Model-driven Library fetch (opt-in): if the model asked to open a page, load it
             #     and answer again with the detail in hand (docs/LIBRARY.md Phase 2).
             reply = self._maybe_model_fetch(reply, bundle, user, sid, text)
+            # 3c. Citation guard: flag any source the reply cited that we don't actually hold (§10).
+            reply += self._citation_note(reply)
 
             # 4. Side effects through the storage gateway: relevance bookkeeping + bake.
             record_access(self._storage, bundle.retrieved_ids)
@@ -820,6 +823,11 @@ class Mimir:
             # Stream the reply (honoring an opt-in model fetch of a full library page); internal
             # epistemic tags are stripped as we go (a tag may straddle deltas) inside the helper.
             reply = yield from self._stream_chat_with_fetch(bundle, lib_refs, user, sid, text)
+            # Citation guard: append a fail-loud note (and stream it) if a cited source is unknown.
+            note = self._citation_note(reply)
+            if note:
+                yield note
+                reply += note
 
             record_access(self._storage, bundle.retrieved_ids)
             bake(
@@ -1908,6 +1916,31 @@ class Mimir:
             content_hash=hashlib.sha256(markdown.encode("utf-8")).hexdigest()))
         set_page_claims(self._storage, page_id, [c.id for c in claims if c.id is not None])
         return True
+
+    def _known_source_labels(self) -> set[str]:
+        """Every document/source name the system actually holds — library documents (filename +
+        title) and the drop-folder wiki ledger — so the citation guard can tell a real citation from
+        an invented one (DESIGN §10)."""
+        labels: set[str] = set()
+        for d in list_library_documents(self._storage):
+            if d.filename:
+                labels.add(d.filename)
+            if d.title:
+                labels.add(d.title)
+        for entry in self._load_docs_ledger().values():
+            name = entry.get("name") if isinstance(entry, dict) else None
+            if name:
+                labels.add(name)
+        return labels
+
+    def _citation_note(self, reply: str) -> str:
+        """A fail-loud note if the reply cited a source the system doesn't hold ('' if none/off)."""
+        if not self.config.library_citation_guard:
+            return ""
+        bad = unverified_citations(reply, self._known_source_labels())
+        if bad:
+            log.warning("citation guard: reply cited unknown source(s): %s", bad)
+        return citation_warning(bad)
 
     def _library_gist(
         self, query: str, query_vec: list[float] | None

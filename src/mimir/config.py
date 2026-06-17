@@ -203,6 +203,9 @@ class Config:
     # pass (slower); the interactive UI uses the after-reply Load chips instead. Capped per turn.
     library_model_fetch: bool = False
     library_max_fetches: int = 2
+    # Citation guard (DESIGN §10): flag a reply that cites a source the system doesn't hold (an
+    # invented "[National Fire Code]") — appended as a fail-loud note, never silently deleted.
+    library_citation_guard: bool = True
     # Web server / integration API (DESIGN §8: a brain with endpoints, no built-in hands).
     # ``api_token`` (or the env var named by ``[server] api_token_env``, default MIMIR_API_TOKEN,
     # which wins) gates every ``/api/*`` route via a Bearer check; unset = open (localhost dev). Run
@@ -399,9 +402,10 @@ def load_config(path: str | Path) -> Config:
         self_knowledge_doc=(raw.get("self_knowledge", {}).get("doc", "README.md") or None),
         documents_folder=(raw.get("documents", {}).get("folder", "documents") or None),
         library_folder=(raw.get("library", {}).get("folder", "library") or None),
-        library_claims_top_k=int(raw.get("library", {}).get("claims_top_k", 5)),
+        library_claims_top_k=int(raw.get("library", {}).get("claims_top_k", 8)),
         library_model_fetch=bool(raw.get("library", {}).get("model_fetch", False)),
         library_max_fetches=int(raw.get("library", {}).get("max_fetches", 2)),
+        library_citation_guard=bool(raw.get("library", {}).get("citation_guard", True)),
         # Token resolution: the env var named by `api_token_env` (default MIMIR_API_TOKEN) wins over
         # the config value, so secrets needn't live in the file. Running two instances on one box?
         # Point each at its own var (e.g. api_token_env = "MIMIR0_TOKEN") so one's MIMIR_API_TOKEN
