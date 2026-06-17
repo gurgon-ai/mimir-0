@@ -877,6 +877,8 @@ class _Handler(BaseHTTPRequestHandler):
             # specific edge node — a model on several nodes is selectable per node, not collapsed.
             pool["placement"] = brain.placement_matrix()
             pool["role_nodes"] = brain.role_nodes()
+            # Disabled machines, so the role dropdown won't offer a model stranded on one (OFI).
+            pool["disabled_nodes"] = sorted(disabled_nodes(brain._storage))
         return pool
 
     def _set_role(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -3024,8 +3026,12 @@ function renderRoleAssign(data) {
   const autoRoles = new Set(data.auto_roles || []);
   const roleNodes = data.role_nodes || {};
   // model → [{node, t}], from the per-node placement matrix (the real per-(node,model) truth).
+  // A DISABLED node offers nothing routable, so it contributes no options — otherwise we'd let you
+  // pin a role to a model that can never run (e.g. a model that lives only on a disabled box).
+  const offNodes = new Set(data.disabled_nodes || []);
   const byModel = {};
   Object.entries((data.placement && data.placement.by_node) || {}).forEach(([node, models]) => {
+    if (offNodes.has(node)) return;
     (models || []).forEach(m => {
       (byModel[m.model] = byModel[m.model] || []).push({ node, t: m.return_time });
     });
@@ -3050,7 +3056,11 @@ function renderRoleAssign(data) {
     sel.appendChild(autoOpt);
     Object.keys(byModel).sort().forEach(m => {
       const nodes = byModel[m];
-      const grp = document.createElement("optgroup"); grp.label = m;
+      // No enabled node has this model → not routable. Hide it, unless it's the current pin (then
+      // show it flagged so you can see why the role is failing and switch away).
+      if (!nodes.length && m !== curModel) return;
+      const grp = document.createElement("optgroup");
+      grp.label = nodes.length ? m : `${m} (no enabled node — re-enable its machine)`;
       const any = document.createElement("option");
       any.value = enc(m, ""); any.textContent = `${m} · any node`;
       if (!isAuto && m === curModel && !curNode) any.selected = true;
