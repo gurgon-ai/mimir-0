@@ -514,8 +514,9 @@ needs.
   chunk → embed → a `document`-tier typed layer with file/section provenance, retrieved through
   `build_context()` like any other source (a document chunk is just a memory whose evidence tier
   is `document`, with a `source` column so re-ingest replaces rather than duplicates). Plain text
-  + markdown ship in core (zero deps); PDF extraction ships behind the optional `[documents]`
-  extra (`pypdf`), so the runtime contract holds. _Landed on top:_ a **`[documents]` drop folder** —
+  + markdown ship in core (zero deps); PDF + DOCX extraction ship behind the optional `[documents]`
+  extra (`pypdf` + `python-docx`), so the runtime contract holds — a missing extra fails loud with the
+  install instruction, never a silent skip. _Landed on top:_ a **`[documents]` drop folder** —
   the 📎 upload saves into it and the user can drop files in directly; an idle sleep phase ingests
   new/changed files (content-hashed) and writes a short per-document summary, a small browsable local
   "wiki" (`Mimir.upload_document`/`ingest_pending_documents`/`documents`; `/api/documents/*`). EPUB and
@@ -639,7 +640,7 @@ Pre-alpha. **The v0 spine is alive and the §6 acceptance loop passes green** (b
 with provenance & evidence tier → async sentinel note), verified under an automated self-test and
 against a live local model. Both gateways are hardened (priority queue, batching, coalescing,
 retry/backoff, provider pool with health/failover). **v0.1 has begun**: document
-ingestion (`ingest()` for text + markdown in core, PDF behind the `[documents]` extra) and an
+ingestion (`ingest()` for text + markdown in core, PDF + DOCX behind the `[documents]` extra) and an
 evolving, generic **self-model** (identity authored from the store's own operational history,
 refreshed off the hot path, injected always-on), working memory (rolling recency + compression),
 an entity graph (subject–relation–object triples with 1–2 hop traversal), sleep/consolidation

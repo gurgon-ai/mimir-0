@@ -249,7 +249,7 @@ print(brain.turn("What does the handbook say about onboarding?", user="alex").re
 brain.close()
 ```
 
-What happens: the file is **extracted** (markdown splits on headings; PDF splits by page),
+What happens: the file is **extracted** (markdown/DOCX split on headings; PDF splits by page),
 **chunked** with overlap (carrying each section/page as provenance), **embedded**, and stored as
 `document`-tier memories. On a later turn they are recalled like any other knowledge, attributed
 to the file and locator (e.g. `handbook.md:Onboarding`, `paper.pdf:p.4`). Re-ingesting the same
@@ -289,7 +289,23 @@ pip install 'mimir-0[documents]'     # pulls pypdf + python-docx
 PDFs split by page for provenance (e.g. `paper.pdf:p.4`); Word docs split by heading style (e.g.
 `report.docx:Methods`). Without the extra, a `.pdf`/`.docx` **fails loud** with that instruction — it
 never silently skips. Once installed, both work through the 📎, the drop folder, and
-`brain.ingest(...)`. (python-docx reads `.docx` only, not legacy `.doc`.)
+`brain.ingest(...)`. (python-docx reads `.docx` only, not legacy `.doc`; on Windows the extra also
+pulls a `lxml` binary wheel — no compiler needed.)
+
+> **If "Scan folder now" reports `Ingested 0`** and your files don't appear, the Docs tab now tells
+> you why: per-file failures show **in red** with the reason (most often the missing-extra message
+> above), and wrong-type drops show **in amber** as skipped. One bad file never aborts the rest of the
+> scan. The scan only ingests **new or changed** files (content-hashed), so an unchanged file already
+> ingested is correctly a no-op.
+>
+> **Text only — no OCR.** Extraction pulls the *typed text*; images, scanned pages, and diagrams are
+> ignored. An image-heavy PDF/DOCX (e.g. a scanned manual) can be megabytes yet yield little text.
+> Recall covers what was extracted, not what's locked in pictures.
+
+The drop folder is **non-recursive** — files must sit directly in the folder, not in subdirectories.
+Relative folder paths resolve against the **server's working directory**; the Docs tab shows the
+resolved absolute path so you can confirm where it's actually looking (use an absolute path in
+`mimir.toml` if you launch from elsewhere).
 
 ### Integration path (build your own)
 
@@ -586,3 +602,6 @@ model server.
 | `found a 'memories' table but no schema_version marker` | You pointed Mimir at a non-Mimir or corrupt DB. Use a fresh `[storage] path`. |
 | Mimir greets with the wrong name, or inverts who serves whom | A too-small `reasoning` model hallucinated its self-model. Use **≥12B** for `chat`/`reasoning` (§5.1) and let the self-model re-synthesize (it refreshes on the `[self_model] refresh_every` cadence). Your `[identity]` anchors are not the problem. |
 | Internal `[tier=…; source=…]` tags appear in replies | A small model echoing the prompt's tag style. They're stripped automatically — if you still see them, you're on **old code**; restart the server. A larger `chat` model stops producing them at the source. |
+| "Scan folder now" says `Ingested 0`, documents don't appear | A `.pdf`/`.docx` without the extra (`pip install 'mimir-0[documents]'`) — the Docs tab shows the failure in **red** with the install line. Also check the **resolved folder path** shown on the Docs tab (relative paths follow the server's working directory) and that files sit **directly** in it (the scan is non-recursive). Unchanged, already-ingested files are a correct no-op. |
+| Document has text but recall finds nothing | Image-heavy/scanned PDF/DOCX yields little or no extractable text (**no OCR**). Confirm the chunk count on the Docs tab — a multi-MB file with 0–1 chunks is mostly images. |
+| Recall got worse after changing `[roles.embed]` | Vectors from a different embed model are incomparable (even at the same dimension). Stop the server and run `python -m mimir.server --config mimir.toml --reembed`, then restart. Pin the exact embed tag to avoid accidental swaps. |

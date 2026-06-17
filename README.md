@@ -82,8 +82,9 @@ On top of that:
 - **Document ingestion + a local "wiki"** — `ingest()` a file by path, **upload with the 📎** by the
   chat box, or just **drop files into a `[documents] folder`**. Idle time ingests new/changed files
   into a document-tier layer (file/section provenance) and writes a short summary of each — a small
-  browsable wiki the model draws on. Text/markdown work in core; **PDF + DOCX via the `[documents]`
-  extra**.
+  browsable wiki the model draws on. Text/markdown work in core; **PDF + DOCX need the optional
+  extra** (`pip install 'mimir-0[documents]'` — pulls `pypdf` + `python-docx`; a missing extra fails
+  loud with that instruction, the scan never silently skips). Extraction is text-only (no OCR).
 - **Offline encyclopedia (optional)** — point a `[wiki]` block at a local **Kiwix server** over any
   **ZIM** (Wikipedia nopic, a medical wiki, top-50k, …) and the model gets a live, attributed
   reference layer — **zero Python dependency** (stdlib HTTP, like talking to Ollama), nothing to

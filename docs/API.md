@@ -175,9 +175,14 @@ writes a short summary per doc — the local "wiki"):
 - `POST /api/ingest` `{"path": "..."}` — ingest a file the **server** can read by path.
 - `POST /api/documents/upload` `{"name": "notes.pdf", "data": "<base64>"}` — upload bytes (what the
   📎 button uses); saved to the `[documents] folder` and ingested. `name` is sanitized to a basename;
-  the type must be supported (`.txt`/`.md`; `.pdf` needs the `[documents]` extra).
+  the type must be supported (`.txt`/`.md` in core; `.pdf`/`.docx` need the `[documents]` extra —
+  `pip install 'mimir-0[documents]'`).
 - `POST /api/documents/scan` — ingest any new/changed files dropped into the folder + fill summaries.
-- `GET /api/documents` — `{folder, documents:[{name, chunks, summary, ingested_at, source}]}`.
+  Returns `{folder, ingested:[name], summarized, failed:[{name,error}], unsupported:[name]}` —
+  per-file failures (e.g. a missing extra) and wrong-type drops are reported, never swallowed.
+- `GET /api/documents` — `{folder, folder_abs, folder_exists, documents:[{name, chunks, summary,
+  ingested_at, source}]}`. `folder_abs` is the resolved absolute path (relative folders follow the
+  server's working directory).
 
 ## Library (docs/LIBRARY.md)
 
