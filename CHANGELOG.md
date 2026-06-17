@@ -32,6 +32,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
 
 ### Fixed
+- **Inner life stopped fixating on reference docs and its own output.** The idle loop picked the
+  *most salient* memory to muse on, which was usually a high-salience DOCUMENT chunk (README, from the
+  self-knowledge bake) or an INFERRED council verdict / prior musing — so it produced repetitive
+  "technical components…"/"that timeout suggests…" loops. It now muses only on *stated beliefs*
+  (shares `deliberation.NON_BELIEF_TIERS`, excluding DOCUMENT/INFERRED + archived) — the same fix as
+  the council deliberation. (Verified against a live run that had been looping on exactly these.)
+- **The Mind tab now shows inner-life thoughts.** There was no window onto them — a musing is kept
+  out of the knowledge recall, so it was invisible. New "Inner life — thoughts while idle" panel
+  (`Mimir.recent_thoughts`, surfaced via `/api/mind`).
 - **Honest sleep-cycle log for forced runs.** A manual "Run sleep"/"Deliberate now" bypasses the
   window budget, which the phase-start log printed as a confusing `-1 min left` (it read like a
   negative budget). It now says `forced, no window limit`. The budgeting itself was correct — it

@@ -1358,6 +1358,20 @@ class Mimir:
             )
         return knowledge, None
 
+    def recent_thoughts(self, *, limit: int = 12) -> list[dict[str, Any]]:
+        """Recent inner-life musings (provenance ``"inner life"``), newest first — for the UI's
+        Mind tab. These don't sit in the knowledge recall; this is the window onto them."""
+        thoughts = [
+            m for m in list_memories(self._storage, user=None, kind=MemoryKind.MEMORY)
+            if (m.provenance or "") == "inner life"
+        ]
+        thoughts.sort(key=lambda m: m.created_at, reverse=True)
+        return [
+            {"text": m.text, "created_at": m.created_at,
+             "salience": round(m.salience, 3), "archived": bool(m.archived)}
+            for m in thoughts[: max(1, limit)]
+        ]
+
     def _start_inner_life(self) -> None:
         """Daemon: every check interval run one inner-life tick (which self-gates on
         enable/cadence/idle/health). Always started so the UI toggle takes effect live; the tick is

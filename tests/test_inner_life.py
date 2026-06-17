@@ -162,3 +162,30 @@ def test_irrelevant_musing_stays_out_of_the_turn(brain: Mimir) -> None:
     knowledge, note = brain._surface_inner_life(cands, q, brain._embedder.embed(q))
     assert note is None                                                   # off-topic → no nudge
     assert all((m.provenance or "") != "inner life" for m in knowledge)   # still kept out of recall
+
+
+def test_gather_stimuli_skips_reference_and_self_output(brain: Mimir) -> None:
+    # It must muse on a STATED belief, not a high-salience reference chunk (DOCUMENT) or its own
+    # output (INFERRED verdicts/musings) — those would just make it loop on itself.
+    from mimir.storage.models import EvidenceTier, Memory
+    from mimir.storage.repo import save_memory
+
+    save_memory(brain._storage, Memory(text="DOC: the runtime contract section", salience=1.0,
+        evidence_tier=EvidenceTier.DOCUMENT, user="g", embedding=brain._embedder.embed("doc")))
+    save_memory(brain._storage, Memory(text="a prior council verdict on something", salience=1.0,
+        evidence_tier=EvidenceTier.INFERRED, provenance="sleep deliberation", user="g",
+        embedding=brain._embedder.embed("verdict")))
+    save_memory(brain._storage, Memory(text="Greg keeps bees on the farm", salience=0.5,
+        evidence_tier=EvidenceTier.CONVERSATION, user="g", embedding=brain._embedder.embed("bees")))
+    mem_stim = [s for s in gather_stimuli(brain._storage, embedder=brain._embedder)
+                if s.kind == "memory"]
+    assert mem_stim and "bees" in mem_stim[0].prompt           # the stated belief wins
+    assert "runtime contract" not in mem_stim[0].prompt        # not the reference doc…
+    assert "verdict" not in mem_stim[0].prompt                 # …and not its own prior output
+
+
+def test_recent_thoughts_lists_musings_newest_first(brain: Mimir) -> None:
+    brain.turn("My favorite color is blue.")
+    brain.run_inner_life_tick(force=True)
+    thoughts = brain.recent_thoughts(limit=5)
+    assert thoughts and "text" in thoughts[0] and "created_at" in thoughts[0]
