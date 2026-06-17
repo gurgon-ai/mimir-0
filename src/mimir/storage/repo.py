@@ -16,6 +16,9 @@ from .gateway import Priority, StorageGateway
 from .models import (
     CatalogueEntry,
     EvidenceTier,
+    LibraryClaim,
+    LibraryDocument,
+    LibraryPage,
     Memory,
     MemoryKind,
     Procedure,
@@ -1120,5 +1123,185 @@ def browse_triples(
 def count_triples(gateway: StorageGateway) -> int:
     def _read(conn: sqlite3.Connection) -> int:
         return int(conn.execute("SELECT COUNT(*) FROM triples").fetchone()[0])
+
+    return gateway.read(_read)
+
+
+# -- the Library layer (docs/LIBRARY.md): documents -> claims -> composite pages ---------
+
+def upsert_library_document(gateway: StorageGateway, doc: LibraryDocument) -> int:
+    """Record/refresh a source document by ``path`` (the ground-truth pointer), returning its id.
+    Preserves id + ingested_at on update; refreshes filename/size/hash/title."""
+    now = time.time()
+
+    def _write(conn: sqlite3.Connection) -> int:
+        conn.execute(
+            "INSERT INTO library_documents "
+            "(path, filename, size_bytes, content_hash, title, ingested_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(path) DO UPDATE SET filename=excluded.filename, "
+            "size_bytes=excluded.size_bytes, content_hash=excluded.content_hash, "
+            "title=excluded.title",
+            (doc.path, doc.filename, doc.size_bytes, doc.content_hash, doc.title, now),
+        )
+        return int(conn.execute(
+            "SELECT id FROM library_documents WHERE path = ?", (doc.path,)
+        ).fetchone()[0])
+
+    doc.id = gateway.submit(_write)
+    return doc.id
+
+
+def list_library_documents(gateway: StorageGateway) -> list[LibraryDocument]:
+    def _read(conn: sqlite3.Connection) -> list[LibraryDocument]:
+        rows = conn.execute(
+            "SELECT * FROM library_documents ORDER BY ingested_at DESC"
+        ).fetchall()
+        return [
+            LibraryDocument(
+                id=r["id"], path=r["path"], filename=r["filename"], size_bytes=r["size_bytes"],
+                content_hash=r["content_hash"], title=r["title"], ingested_at=r["ingested_at"],
+            )
+            for r in rows
+        ]
+
+    return gateway.read(_read)
+
+
+def delete_library_document(gateway: StorageGateway, path: str) -> int:
+    """Drop a source document and all derived from it: its claims and their page links."""
+    def _write(conn: sqlite3.Connection) -> int:
+        row = conn.execute("SELECT id FROM library_documents WHERE path = ?", (path,)).fetchone()
+        if row is None:
+            return 0
+        doc_id = int(row[0])
+        claim_ids = [
+            r[0] for r in conn.execute(
+                "SELECT id FROM library_claims WHERE document_id = ?", (doc_id,)
+            ).fetchall()
+        ]
+        if claim_ids:
+            ph = ",".join("?" * len(claim_ids))
+            conn.execute(f"DELETE FROM library_page_claims WHERE claim_id IN ({ph})", claim_ids)
+        conn.execute("DELETE FROM library_claims WHERE document_id = ?", (doc_id,))
+        cur = conn.execute("DELETE FROM library_documents WHERE id = ?", (doc_id,))
+        return cur.rowcount
+
+    return gateway.submit(_write)
+
+
+def _row_to_claim(row: sqlite3.Row) -> LibraryClaim:
+    return LibraryClaim(
+        id=row["id"], document_id=row["document_id"], text=row["text"], locator=row["locator"],
+        embedding=blob_to_embedding(row["embedding"]), confidence=row["confidence"],
+        created_at=row["created_at"],
+    )
+
+
+def replace_document_claims(
+    gateway: StorageGateway, document_id: int, claims: list[LibraryClaim]
+) -> int:
+    """Replace all claims for a document (re-extraction is idempotent); returns the count written.
+    Also clears stale page links to the old claims."""
+    now = time.time()
+
+    def _write(conn: sqlite3.Connection) -> int:
+        old = [
+            r[0] for r in conn.execute(
+                "SELECT id FROM library_claims WHERE document_id = ?", (document_id,)
+            ).fetchall()
+        ]
+        if old:
+            ph = ",".join("?" * len(old))
+            conn.execute(f"DELETE FROM library_page_claims WHERE claim_id IN ({ph})", old)
+        conn.execute("DELETE FROM library_claims WHERE document_id = ?", (document_id,))
+        conn.executemany(
+            "INSERT INTO library_claims "
+            "(document_id, text, locator, embedding, confidence, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [(document_id, c.text, c.locator, embedding_to_blob(c.embedding), c.confidence, now)
+             for c in claims],
+        )
+        return len(claims)
+
+    return gateway.submit(_write)
+
+
+def list_library_claims(gateway: StorageGateway) -> list[LibraryClaim]:
+    """All claims (the retrievable spine) with embeddings."""
+    def _read(conn: sqlite3.Connection) -> list[LibraryClaim]:
+        return [_row_to_claim(r) for r in conn.execute("SELECT * FROM library_claims").fetchall()]
+
+    return gateway.read(_read)
+
+
+def claims_for_document(gateway: StorageGateway, document_id: int) -> list[LibraryClaim]:
+    def _read(conn: sqlite3.Connection) -> list[LibraryClaim]:
+        rows = conn.execute(
+            "SELECT * FROM library_claims WHERE document_id = ? ORDER BY id", (document_id,)
+        ).fetchall()
+        return [_row_to_claim(r) for r in rows]
+
+    return gateway.read(_read)
+
+
+def upsert_library_page(gateway: StorageGateway, page: LibraryPage) -> int:
+    """Record/refresh a composite page by ``path``, returning its id (preserves id/created_at)."""
+    now = time.time()
+
+    def _write(conn: sqlite3.Connection) -> int:
+        conn.execute(
+            "INSERT INTO library_pages "
+            "(path, title, summary, content_hash, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(path) DO UPDATE SET title=excluded.title, summary=excluded.summary, "
+            "content_hash=excluded.content_hash, updated_at=excluded.updated_at",
+            (page.path, page.title, page.summary, page.content_hash, now, now),
+        )
+        return int(conn.execute(
+            "SELECT id FROM library_pages WHERE path = ?", (page.path,)
+        ).fetchone()[0])
+
+    page.id = gateway.submit(_write)
+    return page.id
+
+
+def list_library_pages(gateway: StorageGateway) -> list[LibraryPage]:
+    def _read(conn: sqlite3.Connection) -> list[LibraryPage]:
+        rows = conn.execute("SELECT * FROM library_pages ORDER BY updated_at DESC").fetchall()
+        return [
+            LibraryPage(
+                id=r["id"], path=r["path"], title=r["title"], summary=r["summary"],
+                content_hash=r["content_hash"], created_at=r["created_at"],
+                updated_at=r["updated_at"],
+            )
+            for r in rows
+        ]
+
+    return gateway.read(_read)
+
+
+def set_page_claims(gateway: StorageGateway, page_id: int, claim_ids: list[int]) -> None:
+    """Set which claims composed a page (replaces prior links)."""
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute("DELETE FROM library_page_claims WHERE page_id = ?", (page_id,))
+        conn.executemany(
+            "INSERT INTO library_page_claims (page_id, claim_id) VALUES (?, ?)",
+            [(page_id, cid) for cid in claim_ids],
+        )
+
+    gateway.submit(_write)
+
+
+def claims_for_page(gateway: StorageGateway, page_id: int) -> list[LibraryClaim]:
+    """The claims that composed a page — provenance from the composite down to source citations."""
+    def _read(conn: sqlite3.Connection) -> list[LibraryClaim]:
+        rows = conn.execute(
+            "SELECT c.* FROM library_claims c "
+            "JOIN library_page_claims pc ON pc.claim_id = c.id "
+            "WHERE pc.page_id = ? ORDER BY c.id",
+            (page_id,),
+        ).fetchall()
+        return [_row_to_claim(r) for r in rows]
 
     return gateway.read(_read)

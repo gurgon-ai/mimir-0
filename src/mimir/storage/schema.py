@@ -320,6 +320,56 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "CREATE INDEX idx_forum_posts_thread ON forum_posts(thread_id)",
         ],
     ),
+    (
+        21,
+        [
+            # The Library layer (docs/LIBRARY.md): the system's own long-form knowledge as THREE
+            # tiers of truth. The DB is the provenance spine connecting them.
+            #
+            # 1) library_documents — the ground-truth source files (left where the user dropped
+            #    them), by exact filename + size + hash + title, so it can go back and re-read.
+            "CREATE TABLE library_documents ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  path TEXT NOT NULL UNIQUE,"
+            "  filename TEXT NOT NULL,"
+            "  size_bytes INTEGER NOT NULL DEFAULT 0,"
+            "  content_hash TEXT NOT NULL,"
+            "  title TEXT NOT NULL DEFAULT '',"
+            "  ingested_at REAL NOT NULL"
+            ")",
+            # 2) library_claims — the DB SPINE: short atomic facts, each citing its source document
+            #    + exact locator (page/line/section), embedded for retrieval. The citable layer.
+            "CREATE TABLE library_claims ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  document_id INTEGER NOT NULL,"
+            "  text TEXT NOT NULL,"
+            "  locator TEXT NOT NULL DEFAULT '',"
+            "  embedding BLOB,"
+            "  confidence REAL NOT NULL DEFAULT 0.8,"
+            "  created_at REAL NOT NULL"
+            ")",
+            "CREATE INDEX idx_library_claims_document ON library_claims(document_id)",
+            # 3) library_pages — the MD COMPOSITE index: the LLM's fuzzy synthesized understanding,
+            #    stored as a Markdown file at `path` (a separate folder/tree), fetched on demand.
+            "CREATE TABLE library_pages ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  path TEXT NOT NULL UNIQUE,"
+            "  title TEXT NOT NULL,"
+            "  summary TEXT NOT NULL DEFAULT '',"
+            "  content_hash TEXT NOT NULL DEFAULT '',"
+            "  created_at REAL NOT NULL,"
+            "  updated_at REAL NOT NULL"
+            ")",
+            # The link: which claims composed which page (provenance both ways — page → claims →
+            # source line; claim → the pages it fed). Lets the system cite, verify, and re-read.
+            "CREATE TABLE library_page_claims ("
+            "  page_id INTEGER NOT NULL,"
+            "  claim_id INTEGER NOT NULL"
+            ")",
+            "CREATE INDEX idx_library_page_claims_page ON library_page_claims(page_id)",
+            "CREATE INDEX idx_library_page_claims_claim ON library_page_claims(claim_id)",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -395,4 +445,12 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
     "kv": {"key", "value", "updated_at"},
     "forum_threads": {"id", "question", "status", "source", "verdict", "created_at"},
     "forum_posts": {"id", "thread_id", "author", "kind", "model", "node", "content", "created_at"},
+    "library_documents": {
+        "id", "path", "filename", "size_bytes", "content_hash", "title", "ingested_at",
+    },
+    "library_claims": {
+        "id", "document_id", "text", "locator", "embedding", "confidence", "created_at",
+    },
+    "library_pages": {"id", "path", "title", "summary", "content_hash", "created_at", "updated_at"},
+    "library_page_claims": {"page_id", "claim_id"},
 }

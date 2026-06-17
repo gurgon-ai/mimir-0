@@ -147,6 +147,51 @@ class Procedure:
 
 
 @dataclass(slots=True)
+class LibraryDocument:
+    """A source document of the Library layer (docs/LIBRARY.md) — ground truth, left where the user
+    dropped it. Recorded by exact ``filename`` + ``size_bytes`` + ``content_hash`` so the system can
+    detect changes and always go back to the file (``path``) to re-read a cited line/page."""
+
+    path: str
+    filename: str
+    size_bytes: int = 0
+    content_hash: str = ""
+    title: str = ""
+    ingested_at: float = 0.0
+    id: int | None = None
+
+
+@dataclass(slots=True)
+class LibraryClaim:
+    """One atomic, cited fact distilled from a source document — the DB spine of the Library.
+    Carries its ``locator`` (page/line/section) so it always cites where it came from, plus an
+    ``embedding`` for retrieval. Linked to the page(s) it fed via ``library_page_claims``."""
+
+    document_id: int
+    text: str
+    locator: str = ""
+    embedding: list[float] | None = None
+    confidence: float = 0.8
+    created_at: float = 0.0
+    id: int | None = None
+
+
+@dataclass(slots=True)
+class LibraryPage:
+    """A Library composite page (docs/LIBRARY.md) — the LLM's fuzzy synthesized understanding, a
+    Markdown file at ``path`` (a separate folder/tree), fetched on demand. Derived, not source of
+    truth; traceable to its claims (and thence to source lines) via ``library_page_claims``."""
+
+    path: str
+    title: str
+    summary: str = ""
+    content_hash: str = ""
+    created_at: float = 0.0
+    updated_at: float = 0.0
+    id: int | None = None
+
+
+@dataclass(slots=True)
 class CatalogueEntry:
     """One (node, model) row of the fleet catalogue (DESIGN §5).
 
