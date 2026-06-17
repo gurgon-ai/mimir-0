@@ -53,9 +53,27 @@ def test_extract_docx_splits_on_headings(tmp_path: Path) -> None:
     d.save(str(f))
     units = extract(f)
     locators = [u.locator for u in units]
-    assert "First" in locators and "Second" in locators
+    # The locator is the full heading PATH: an H2 nests under the preceding H1.
+    assert "First" in locators and "First > Second" in locators
     first = next(u for u in units if u.locator == "First")
     assert "alpha body" in first.text
+
+
+def test_extract_docx_builds_a_heading_path_with_pseudo_headings(tmp_path: Path) -> None:
+    """Real Heading styles AND short bold standalone lines (Word's common sub-labels) both deepen
+    the locator path, so a claim traces to its precise location, e.g. 'Biohazards > Infections'."""
+    docx = pytest.importorskip("docx")
+    f = tmp_path / "manual.docx"
+    d = docx.Document()
+    d.add_heading("Biohazards", level=1)
+    p = d.add_paragraph()
+    run = p.add_run("Infections")          # a short, fully-bold standalone line = a pseudo-heading
+    run.bold = True
+    d.add_paragraph("Hantaviruses are spread by rodents.")
+    d.save(str(f))
+    units = extract(f)
+    infections = next(u for u in units if "rodents" in u.text)
+    assert infections.locator == "Biohazards > Infections"   # nested path, not just the H1
 
 
 def test_extract_docx_reads_table_cells(tmp_path: Path) -> None:
