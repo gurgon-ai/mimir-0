@@ -82,8 +82,11 @@ phase:
 
 - **Phase 1a — data foundation. ✅ built.** Schema (migration 21), models, repo CRUD, the
   provenance links + cascade, round-trip tests.
-- **Phase 1b — claims spine.** Idle claim extraction (cited) + hybrid claim retrieval into the
-  Library section (each fact with its citation). This is the highest-value tier.
+- **Phase 1b — claims spine. ✅ built.** Idle claim extraction (`ingest_pending_library`: each source
+  doc → `library_documents` + cited `library_claims`, one per fact with its locator + embedding) and
+  hybrid claim retrieval (`_library_gist` → `retrieve_claims`/`render_claims`) into the "Library"
+  `build_context` section — each fact shown with its citation `[title, locator]`. A `library` sleep
+  phase. Source = the `[documents]` folder; `[library] claims_top_k`.
 - **Phase 1c — composites + UI.** Idle MD composition from claims; the Docs/Library tab listing;
   the **Load button** (after a reply, chips for the relevant page/source → load the composite or the
   verbatim source into the next turn; an "active sources" tray). Doubles as a sources affordance.

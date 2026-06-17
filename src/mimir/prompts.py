@@ -88,6 +88,15 @@ SELF_MODEL_SYSTEM = (
     "the notes only."
 )
 
+CLAIM_EXTRACTION_MARKER = "Extract the atomic facts"
+CLAIM_EXTRACTION_SYSTEM = (
+    f"{CLAIM_EXTRACTION_MARKER} from this passage for a knowledge index. Each fact: ONE clear, "
+    "standalone declarative sentence — self-contained (resolve pronouns; no bare 'it'/'this'), "
+    "grounded ONLY in the passage with no added inference. Return JSON only: "
+    '{"claims": ["...", "..."]} — 0 to 8 facts; [] if the passage states nothing durable.'
+)
+
+
 DOC_SUMMARY_MARKER = "Summarize this document"
 DOC_SUMMARY_SYSTEM = (
     f"{DOC_SUMMARY_MARKER} in 2–4 sentences for a knowledge index: what it is and the key points "

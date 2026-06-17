@@ -27,6 +27,7 @@ def mock_config(db_path: str) -> Config:
         embed_mode=EmbeddingMode.BOOTSTRAP,
         self_knowledge_doc=None,  # hermetic: don't bake the real README in unrelated tests
         documents_folder=None,    # hermetic: no drop-folder scan in unrelated tests
+        library_folder=None,      # hermetic: no library composites folder in unrelated tests
         output_rag_enabled=False,  # hermetic: don't surface output-RAG notes in unrelated turns
     )
 

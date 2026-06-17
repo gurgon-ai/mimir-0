@@ -8,6 +8,18 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **The Library layer — the system's own long-form knowledge as three tiers of truth (docs/LIBRARY.md).**
+  The DB is the *provenance spine*: source documents (ground truth, left in place; recorded by exact
+  filename + size + hash + title) → short **cited claims** (DB: atomic facts, each carrying its source
+  document + locator + an embedding) → Markdown composites (the fuzzy LLM understanding; Phase 1c).
+  Linked both ways so the system can cite, verify, and re-read the source line — for citations and
+  epistemic honesty. *Built so far:* the data foundation (migration 21: `library_documents` /
+  `library_claims` / `library_pages` / `library_page_claims`) and **Phase 1b — the claims spine**:
+  an idle pass (`ingest_pending_library`, a `library` sleep phase) distils each source document into
+  cited claims, and a hybrid retrieval surfaces the most relevant claims into a "Library" context
+  section adjacent to memory, **each fact shown with its `[title, locator]` citation**. Composites +
+  the Load button (Phase 1c) and a model-driven fetch tool (Phase 2) are staged. Influenced by the
+  Karpathy "LLM wiki" pattern, made provenance-preserving + small-window + non-destructive.
 - **A documents drop folder + 📎 upload → idle-built local "wiki" (DESIGN §8).** A `[documents]
   folder` the UI's paperclip saves into and you can drop files into directly; idle time (a new
   `documents` sleep phase, or the Docs tab's "Scan folder now") ingests new/changed files into

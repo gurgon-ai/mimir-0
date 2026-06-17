@@ -17,6 +17,7 @@ from collections.abc import Iterator
 from ...embed.locality import LocalityHashEmbedder
 from ...prompts import (
     BAKE_MARKER,
+    CLAIM_EXTRACTION_MARKER,
     COUNCIL_PERSONA_MARKER,
     COUNCIL_SYNTH_MARKER,
     DOC_SUMMARY_MARKER,
@@ -62,6 +63,8 @@ class MockProvider:
             return self._narrative(user)
         if DOC_SUMMARY_MARKER in system:
             return self._doc_summary(user)
+        if CLAIM_EXTRACTION_MARKER in system:
+            return self._claims(user)
         return self._reply(system, user)
 
     def chat_stream(
@@ -135,6 +138,12 @@ class MockProvider:
         """A deterministic 'wiki' summary referencing the document's opening words."""
         head = " ".join(text.split()[:8])
         return f"Document summary: covers '{head}…' and related points."
+
+    @staticmethod
+    def _claims(text: str) -> str:
+        """Deterministic atomic claims: the passage's first few sentences as standalone facts."""
+        parts = [p.strip() for p in text.replace("\n", " ").split(".") if p.strip()]
+        return json.dumps({"claims": parts[:3]})
 
     @staticmethod
     def _reflect(turn_text: str) -> str:

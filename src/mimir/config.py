@@ -192,6 +192,12 @@ class Config:
     # document-tier knowledge and generates a short summary per doc — a small local "wiki" the model
     # can draw on. .txt/.md in core; .pdf via the optional [documents] extra. Empty disables.
     documents_folder: str | None = "documents"
+    # The Library layer (docs/LIBRARY.md): three tiers — source docs (the [documents] folder), short
+    # cited claims (DB), and Markdown composites. Idle distils each source into atomic claims, each
+    # citing its document + locator, retrieved as a section adjacent to memory. Composites live in
+    # `library_folder` (Phase 1c). Needs documents_folder set; empty library_folder = no composites.
+    library_folder: str | None = "library"
+    library_claims_top_k: int = 5      # how many cited claims to surface per turn
     # Web server / integration API (DESIGN §8: a brain with endpoints, no built-in hands).
     # ``api_token`` (or the env var named by ``[server] api_token_env``, default MIMIR_API_TOKEN,
     # which wins) gates every ``/api/*`` route via a Bearer check; unset = open (localhost dev). Run
@@ -387,6 +393,8 @@ def load_config(path: str | Path) -> Config:
         error_context_max=int(raw.get("diagnostics", {}).get("error_context_max", 5)),
         self_knowledge_doc=(raw.get("self_knowledge", {}).get("doc", "README.md") or None),
         documents_folder=(raw.get("documents", {}).get("folder", "documents") or None),
+        library_folder=(raw.get("library", {}).get("folder", "library") or None),
+        library_claims_top_k=int(raw.get("library", {}).get("claims_top_k", 5)),
         # Token resolution: the env var named by `api_token_env` (default MIMIR_API_TOKEN) wins over
         # the config value, so secrets needn't live in the file. Running two instances on one box?
         # Point each at its own var (e.g. api_token_env = "MIMIR0_TOKEN") so one's MIMIR_API_TOKEN
