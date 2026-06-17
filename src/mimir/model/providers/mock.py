@@ -19,6 +19,7 @@ from ...prompts import (
     BAKE_MARKER,
     COUNCIL_PERSONA_MARKER,
     COUNCIL_SYNTH_MARKER,
+    DOC_SUMMARY_MARKER,
     NARRATIVE_MARKER,
     RECALL_CLOSE,
     RECALL_OPEN,
@@ -59,6 +60,8 @@ class MockProvider:
             return self._reflect(user)
         if NARRATIVE_MARKER in system:
             return self._narrative(user)
+        if DOC_SUMMARY_MARKER in system:
+            return self._doc_summary(user)
         return self._reply(system, user)
 
     def chat_stream(
@@ -126,6 +129,12 @@ class MockProvider:
         topics = material.count("- ") + material.count("you:")
         return (f"Journal: a period of steady activity, with {topics} thread(s) of context "
                 f"carried forward into a single coherent account.")
+
+    @staticmethod
+    def _doc_summary(text: str) -> str:
+        """A deterministic 'wiki' summary referencing the document's opening words."""
+        head = " ".join(text.split()[:8])
+        return f"Document summary: covers '{head}…' and related points."
 
     @staticmethod
     def _reflect(turn_text: str) -> str:

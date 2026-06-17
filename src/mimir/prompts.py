@@ -88,6 +88,14 @@ SELF_MODEL_SYSTEM = (
     "the notes only."
 )
 
+DOC_SUMMARY_MARKER = "Summarize this document"
+DOC_SUMMARY_SYSTEM = (
+    f"{DOC_SUMMARY_MARKER} in 2–4 sentences for a knowledge index: what it is and the key points "
+    "someone might look it up for. Plain and factual, no preamble or meta-commentary. Respond with "
+    "the summary only."
+)
+
+
 INNER_LIFE_MARKER = "a brief private reflection"
 INNER_LIFE_SYSTEM = (
     f"Think to yourself — {INNER_LIFE_MARKER}, two to four sentences in the first person, in an "

@@ -30,6 +30,21 @@ log = logging.getLogger("mimir.ingest")
 _DOCUMENT_CONFIDENCE = 0.8
 
 
+# Document types the drop-folder scan will pick up. Extensionless files are deliberately excluded
+# (a drop folder shouldn't sweep in stray non-documents); `.pdf` needs the [documents] extra.
+SUPPORTED_SUFFIXES = frozenset({".txt", ".text", ".md", ".markdown", ".mdown", ".pdf"})
+
+
+def list_documents(folder: str | Path) -> list[Path]:
+    """Supported document files directly in ``folder`` (non-recursive), sorted; ``[]`` if absent."""
+    p = Path(folder)
+    if not p.is_dir():
+        return []
+    return sorted(
+        f for f in p.iterdir() if f.is_file() and f.suffix.lower() in SUPPORTED_SUFFIXES
+    )
+
+
 @dataclass(slots=True)
 class IngestResult:
     """What an ingest produced."""

@@ -187,6 +187,11 @@ class Config:
     # nightly cycle (content-hashed, so it re-embeds only when the doc changes) so it can answer
     # about itself. Empty disables. Path is relative to the working directory (the repo root).
     self_knowledge_doc: str | None = "README.md"
+    # Documents drop folder (DESIGN §8): a directory the UI upload (📎) saves into AND the user can
+    # drop files into directly. Idle time (a sleep phase) ingests new/changed docs into recallable
+    # document-tier knowledge and generates a short summary per doc — a small local "wiki" the model
+    # can draw on. .txt/.md in core; .pdf via the optional [documents] extra. Empty disables.
+    documents_folder: str | None = "documents"
     # Web server / integration API (DESIGN §8: a brain with endpoints, no built-in hands).
     # ``api_token`` (or the env var named by ``[server] api_token_env``, default MIMIR_API_TOKEN,
     # which wins) gates every ``/api/*`` route via a Bearer check; unset = open (localhost dev). Run
@@ -381,6 +386,7 @@ def load_config(path: str | Path) -> Config:
         ),
         error_context_max=int(raw.get("diagnostics", {}).get("error_context_max", 5)),
         self_knowledge_doc=(raw.get("self_knowledge", {}).get("doc", "README.md") or None),
+        documents_folder=(raw.get("documents", {}).get("folder", "documents") or None),
         # Token resolution: the env var named by `api_token_env` (default MIMIR_API_TOKEN) wins over
         # the config value, so secrets needn't live in the file. Running two instances on one box?
         # Point each at its own var (e.g. api_token_env = "MIMIR0_TOKEN") so one's MIMIR_API_TOKEN
