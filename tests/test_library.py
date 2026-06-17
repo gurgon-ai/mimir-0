@@ -238,3 +238,28 @@ def test_model_fetch_intercepts_marker_when_streaming(mock_config: Config, tmp_p
         assert "Full pages you've loaded" in systems[1]        # 2nd pass got the page detail
     finally:
         brain.close()
+
+
+def test_citation_guard_flags_an_invented_source_in_a_turn(mock_config: Config, tmp_path) -> None:
+    """End-to-end: a reply that cites a document the system doesn't hold gets a fail-loud note; a
+    reply citing a real held document does not."""
+    brain = _libbrain(mock_config, tmp_path)
+    try:
+        folder = brain._library_source_folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "Servus OHS Manual.md").write_text("# Safety\n\nReport unsafe work to a boss.")
+        brain.ingest_pending_library()
+        real_chat = brain._model.chat
+
+        def scripted(role, messages, *a, **k):
+            if role == "chat":
+                return scripted.reply
+            return real_chat(role, messages, *a, **k)
+
+        brain._model.chat = scripted
+        scripted.reply = "Follow the standard [National Fire Code 2020] for this."
+        assert "⚠ Unverified citation" in brain.turn("how do I handle a fire?").reply
+        scripted.reply = "Report it to your supervisor [Servus OHS Manual, Safety]."
+        assert "⚠ Unverified citation" not in brain.turn("who do I tell?").reply
+    finally:
+        brain.close()

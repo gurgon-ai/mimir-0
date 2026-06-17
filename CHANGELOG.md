@@ -107,6 +107,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **Citation guard — flag a reply that cites a source the system doesn't hold (DESIGN §10).** A
+  deterministic, zero-model-cost post-check: any bracketed citation whose named source matches nothing
+  in the system's documents/library (an invented `[National Fire Code 2020]`) gets a fail-loud note
+  appended — never silently deleted. Verifies the *source exists* (not that the content is truly in
+  it); conservative matching so a real citation is never wrongly accused. On by default
+  (`[library] citation_guard`), works on both the streaming and non-streaming paths
+  (`cognition/citations.py`). It checks **all** injected sources — documents *and* library — which is
+  what my own too-narrow "library-claims only" check missed when it wrongly called a real Hantavirus
+  citation fabricated (the content was in the document chunks, just not distilled into a claim).
 - **Harden the library framing against fabricated citations.** Observed on a live run: asked about a
   topic adjacent to but absent from the documents (Hantavirus, when the library had bloodborne-pathogen
   claims but nothing on rodents), a small model answered from training-data general knowledge and
