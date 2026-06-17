@@ -107,6 +107,14 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **DOCX extraction now reads tables — not just paragraphs.** `_extract_docx` walked only
+  `document.paragraphs`, so a **table-structured** Word doc (a safety matrix, a form, a spec sheet)
+  came through nearly empty — one real file dropped from ~273k characters of table text to ~1k of
+  headings, ingesting "successfully" on almost nothing. The extractor now walks the document body in
+  order, pulling paragraphs **and** table cells (joined `cell | cell` per row), de-duping merged cells
+  and recursing into nested tables, so table content lands under its preceding heading. Both scan
+  endpoints gained a **`force`** option (Docs tab "force re-ingest" / Library "force re-distil"
+  checkboxes) to re-read unchanged files after an extractor change like this one.
 - **"Scan folder now" no longer hides ingestion failures — it reports them.** A drop folder full of
   `.docx`/`.pdf` files with the `[documents]` extra missing (or any per-file extract error) reported a
   bare "Ingested 0," reading as "there are no documents." The scan now returns `failed` (each with its
