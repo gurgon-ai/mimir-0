@@ -424,7 +424,12 @@ way in**, gated and framed, never force-injected. Two doctrines bound it: **chat
 routes *off* the chat model, yields the instant a turn starts (`should_think`), holds an idle floor
 after each turn, and runs on a long cadence — and **edge cost** — one model call per cycle, paused
 when the fleet is down, **off by default** until the operator opts in. The cadence and on/off live in
-the UI (and `[inner_life]` config); a manual "think now" forces one cycle. Still **[proposed]**: the
+the UI (and `[inner_life]` config); a manual "think now" forces one cycle. **The inner life also feeds
+the forum:** when the idle loop lands on a genuine, *fresh* conflict it occasionally convenes the full
+**council** on it (a forum thread + verdict) instead of musing solo — gated to a daytime trickle (the
+self-directed council enabled, a healthy fleet, an hourly cooldown) and sharing the sleep
+deliberation's seen-set so the two never re-argue each other. So the council runs nightly in batch
+*and* stirs during the day on whatever the system's own attention surfaces. Still **[proposed]**: the
 deep-idle two-voice dialogue (propose→critique with memory grounding).
 
 **The wall-clock sleep cycle — heavy maintenance needs a real window, not scraps. [landed]** The

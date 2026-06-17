@@ -8,6 +8,15 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **The inner life now feeds the forum (inner-life → council escalation).** When the idle loop lands
+  on a genuine, *fresh* conflict it occasionally convenes the full **council** on it — a forum thread
+  + verdict — instead of a solo musing, so the council stirs during the day on what the system's own
+  attention surfaces, not only in the nightly sleep pass. Gated to a daytime trickle: a conflict
+  stimulus, the self-directed council enabled, a healthy fleet, an hourly cooldown, and it shares the
+  sleep deliberation's seen-set so neither re-argues the other. "Think now" stays a quick solo musing.
+  `Mimir._should_escalate_to_council` / `_escalate_to_council`. (Answers "the forum went quiet": the
+  doc-chunk junk is filtered and the old conflicts were already argued, so the forum now fills from
+  fresh tensions — and the inner life actively drives it during idle.)
 - **`[roles.embed] = "auto"` — discover the embedding model instead of pinning a brittle tag.** You
   provide whatever chat LLM(s) you like and at least one embedding model; Mimir finds them. Chat roles
   already auto-resolved (benchmark-ranked); now `embed` does too — but specially, because embedding

@@ -197,3 +197,26 @@ def test_forced_tick_skips_when_embeddings_unavailable(brain: Mimir) -> None:
     brain._embedder = NullEmbedder()              # simulate the embed backend being down
     out = brain.run_inner_life_tick(force=True)
     assert out == {"ran": False, "reason": "embeddings unavailable"}
+
+
+def test_should_escalate_to_council_gates(brain: Mimir) -> None:
+    import json
+
+    from mimir.storage.repo import kv_set
+    fresh = Stimulus("conflict", "Records disagree: A vs B. Which holds?", "k-fresh")
+    assert brain._should_escalate_to_council(fresh, 10_000.0)              # fresh conflict → yes
+    assert not brain._should_escalate_to_council(Stimulus("memory", "m", "k"), 10_000.0)
+    brain._last_escalation_at = 10_000.0                                   # within the cooldown
+    assert not brain._should_escalate_to_council(fresh, 10_000.0 + 60)
+    brain._last_escalation_at = 0.0
+    kv_set(brain._storage, brain._DELIB_SEEN_KEY, json.dumps({"k-fresh": "2026-06-16"}))
+    assert not brain._should_escalate_to_council(fresh, 10_000.0)          # already argued → skip
+
+
+def test_escalate_to_council_creates_a_forum_thread_and_marks_seen(brain: Mimir) -> None:
+    stim = Stimulus("conflict", "Records disagree about X: A vs B. Which holds?", "graph:x|rel|u")
+    before = len(brain.forum_threads())
+    out = brain._escalate_to_council(stim, 10_000.0)
+    assert out["ran"] and out.get("escalated") and out["thread_id"]
+    assert len(brain.forum_threads()) == before + 1                  # a new forum thread appeared
+    assert "graph:x|rel|u" in brain._load_deliberated()  # recorded; sleep won't re-argue it
