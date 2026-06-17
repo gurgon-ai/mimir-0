@@ -107,6 +107,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **The uncertainty gate now counts library claims as grounding — document Q&A stopped deflecting.**
+  `source_count` (which decides whether to inject the "you have very little stored knowledge" honesty
+  flag) summed recalled memories + graph edges + wiki passages but **omitted cited library claims** —
+  a whole grounding layer. So a question answered from one's own reading (e.g. 462 ingested claims)
+  saw `source_count ≤ 1`, tripped the gate, and the model was explicitly told it was on thin ice —
+  producing "consult your supervisor / I don't have the manual" deflections on material it actually
+  held. Library claims (and user-loaded pages) now count. Also widened the candidate pools that
+  document ingestion had starved: knowledge recall `DEFAULT_TOP_K` 6 → 10, `[library] claims_top_k`
+  5 → 8 (the token budget still caps what's admitted).
 - **DOCX extraction now reads tables — not just paragraphs.** `_extract_docx` walked only
   `document.paragraphs`, so a **table-structured** Word doc (a safety matrix, a form, a spec sheet)
   came through nearly empty — one real file dropped from ~273k characters of table text to ~1k of

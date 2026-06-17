@@ -122,10 +122,12 @@ fact buried below the injection floor because it wasn't accessed lately, decayin
 was never injected — a death spiral. Don't let "haven't used it lately" masquerade as "probably false."
 
 ### 3d. Uncertainty gate (deterministic, zero model cost)
-After context assembly, count how many layers produced substantive content. If a real question drew
-from ≤1 source, inject an explicit honesty flag: *say what you don't know, name the gap, ask a
-clarifying question.* Pure pipeline introspection — no model call. The mechanical antidote to
-confident hallucination.
+After context assembly, count how many layers produced substantive content — recalled memory facts,
+connected graph edges, wiki passages, **and cited library claims** (every independent grounding
+layer must be counted; omitting one falsely starves the gate and makes the model deflect on material
+it actually has). If a real question drew from ≤1 source, inject an explicit honesty flag: *say what
+you don't know, name the gap, ask a clarifying question.* Pure pipeline introspection — no model
+call. The mechanical antidote to confident hallucination.
 
 ### 3e. The assembly contract — `build_context()`
 This is the heart. Given a turn + user, it produces an ordered, budgeted prompt: self-model →

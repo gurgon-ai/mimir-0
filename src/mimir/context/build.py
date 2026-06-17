@@ -171,6 +171,7 @@ def build_context(
     background_notes: str | None = None,
     wiki_context: str | None = None,
     library: str | None = None,
+    library_count: int = 0,
     system_health: str | None = None,
     now_ts: float | None = None,
     extra_sections: list[Section] | None = None,
@@ -352,8 +353,10 @@ def build_context(
         sections.append(extra)
 
     # source_count = how much substantive typed knowledge fed this turn (DESIGN §3d): admitted
-    # memory facts plus connected graph edges — two independent grounding layers.
-    source_count = len(retrieved_ids) + len(graph_facts or []) + wiki_count
+    # memory facts, connected graph edges, wiki passages, and cited library claims — independent
+    # grounding layers. The library is real, attributed evidence; omitting it falsely tripped the
+    # uncertainty gate on questions answered from one's own reading, making the model deflect.
+    source_count = len(retrieved_ids) + len(graph_facts or []) + wiki_count + max(0, library_count)
 
     # 3c. Recent history — the temporal-narrative arc (month → week → lately), longer-horizon
     #     context before working memory's recency (DESIGN §3a/§3e). Lossy summaries, not facts.

@@ -73,6 +73,25 @@ def test_uncertainty_gate_silent_with_corroboration() -> None:
     assert bundle.source_count == 2
 
 
+def test_library_claims_count_as_grounding() -> None:
+    """A question answered from cited library claims must NOT trip the uncertainty gate — the
+    library is real, attributed evidence. (Regression: omitting it made document Q&A deflect.)"""
+    bundle = build_context(
+        query="what is the procedure if something is unsafe?",
+        user=None,
+        identity="id",
+        retrieved=[],                      # no memory chunks matched...
+        sentinel_note=None,
+        embed_mode=EmbeddingMode.ENDPOINT,
+        budget_tokens=4096,
+        library="- Report unsafe conditions to your supervisor [Manual, p.3]",
+        library_count=4,                   # ...but four cited claims surfaced
+    )
+    assert bundle.source_count == 4
+    assert not bundle.uncertainty_triggered
+    assert "epistemic check" not in bundle.prompt
+
+
 def test_uncertainty_gate_ignores_non_questions() -> None:
     bundle = build_context(
         query="i like hiking",

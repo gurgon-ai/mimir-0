@@ -197,7 +197,7 @@ class Config:
     # citing its document + locator, retrieved as a section adjacent to memory. Composites live in
     # `library_folder` (Phase 1c). Needs documents_folder set; empty library_folder = no composites.
     library_folder: str | None = "library"
-    library_claims_top_k: int = 5      # how many cited claims to surface per turn
+    library_claims_top_k: int = 8      # how many cited claims to surface per turn
     # Phase 2 (docs/LIBRARY.md): let the MODEL open a composite page itself mid-turn (an in-band
     # <FETCH id=N> request → load the page → answer again). Off by default — a deliberate second
     # pass (slower); the interactive UI uses the after-reply Load chips instead. Capped per turn.
