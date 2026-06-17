@@ -170,6 +170,7 @@ def build_context(
     recent_history: str | None = None,
     background_notes: str | None = None,
     wiki_context: str | None = None,
+    library: str | None = None,
     system_health: str | None = None,
     now_ts: float | None = None,
     extra_sections: list[Section] | None = None,
@@ -249,6 +250,7 @@ def build_context(
     history_tokens = estimate_tokens(recent_history) + 8 if recent_history else 0
     notes_tokens = estimate_tokens(background_notes) + 8 if background_notes else 0
     wiki_tokens = estimate_tokens(wiki_context) + 8 if wiki_context else 0
+    library_tokens = estimate_tokens(library) + 8 if library else 0
     sentinel_tokens = (
         estimate_tokens(sentinel_note.text) + 8 if sentinel_note is not None else 0
     )
@@ -267,6 +269,7 @@ def build_context(
         - history_tokens
         - notes_tokens
         - wiki_tokens
+        - library_tokens
         - sentinel_tokens
         - extra_reserved
         - _UNCERTAINTY_RESERVE,
@@ -297,6 +300,22 @@ def build_context(
                 substantive=True,
                 requested_tokens=estimate_tokens(wiki_context),
                 admitted_tokens=estimate_tokens(wiki_context),
+            )
+        )
+
+    # 2c. Library — cited claims distilled from the system's own long-form reading ("books I've
+    #     read"), each tagged with its source title + locator. Adjacent to memory, not replacing it;
+    #     the full source/composite is fetched on demand. See docs/LIBRARY.md.
+    if library:
+        sections.append(
+            Section(
+                name="library",
+                title="From your library (your own reading — cited; a source can be loaded):",
+                body=library,
+                tier=SectionTier.MEDIUM,
+                substantive=True,
+                requested_tokens=estimate_tokens(library),
+                admitted_tokens=estimate_tokens(library),
             )
         )
 

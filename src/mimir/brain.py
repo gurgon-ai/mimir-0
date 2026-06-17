@@ -66,6 +66,7 @@ from .cognition.inner_life import (
     pick_stimulus,
     should_think,
 )
+from .cognition.library import extract_claims, render_claims, retrieve_claims
 from .cognition.narratives import render_recent_history, run_narrative_cycle
 from .cognition.onboarding import (
     onboarding_profile,
@@ -110,12 +111,20 @@ from .prompts import DOC_SUMMARY_SYSTEM
 from .retrieval.hybrid import retrieve
 from .sanitize import StreamTagStripper, strip_epistemic_tags
 from .storage.gateway import StorageGateway
-from .storage.models import EvidenceTier, Memory, MemoryKind, Procedure
+from .storage.models import (
+    EvidenceTier,
+    LibraryClaim,
+    LibraryDocument,
+    Memory,
+    MemoryKind,
+    Procedure,
+)
 from .storage.repo import (
     add_forum_post,
     bump_procedure_uses,
     delete_forum_post,
     delete_forum_thread,
+    delete_library_document,
     delete_memory,
     disabled_models,
     disabled_nodes,
@@ -128,12 +137,15 @@ from .storage.repo import (
     latest_sentinel_note,
     list_catalogue,
     list_forum_threads,
+    list_library_claims,
+    list_library_documents,
     list_memories,
     list_sessions,
     recent_conversation,
     record_access,
     record_conversation_turn,
     record_interaction,
+    replace_document_claims,
     retier_by_provenance,
     save_memory,
     set_forum_thread_status,
@@ -141,6 +153,7 @@ from .storage.repo import (
     set_node_enabled,
     update_catalogue_speed,
     update_memory,
+    upsert_library_document,
 )
 
 log = logging.getLogger("mimir")
@@ -635,6 +648,7 @@ class Mimir:
             working_memory = current_working_memory(self._storage)
             graph_facts = self._connected_facts(text, user)
             procedures = self._matching_procedures(text, user)
+            library = self._library_gist(text, query_vec)
 
             # 2. Assemble the epistemic prompt.
             bundle = build_context(
@@ -654,6 +668,7 @@ class Mimir:
                 recent_history=self._recent_history(),
                 background_notes="\n".join(notes) if notes else None,
                 wiki_context=self._wiki_context(text),
+                library=library,
                 system_health=self._error_context(),
                 now_ts=now,
             )
@@ -745,6 +760,7 @@ class Mimir:
             working_memory = current_working_memory(self._storage)
             graph_facts = self._connected_facts(text, user)
             procedures = self._matching_procedures(text, user)
+            library = self._library_gist(text, query_vec)
             bundle = build_context(
                 query=text,
                 user=user,
@@ -762,6 +778,7 @@ class Mimir:
                 recent_history=self._recent_history(),
                 background_notes="\n".join(notes) if notes else None,
                 wiki_context=self._wiki_context(text),
+                library=library,
                 system_health=self._error_context(),
                 now_ts=now,
             )
@@ -1189,6 +1206,7 @@ class Mimir:
             SleepPhase("consolidate", min_minutes=2.0, run=_consolidate),
             SleepPhase("self_knowledge", min_minutes=1.0, run=self.bake_self_knowledge),
             SleepPhase("documents", min_minutes=2.0, run=self.ingest_pending_documents),
+            SleepPhase("library", min_minutes=3.0, run=self.ingest_pending_library),
             SleepPhase("deliberate", min_minutes=15.0, run=self.deliberate_open_questions),
             SleepPhase("narratives", min_minutes=10.0, run=self.generate_narratives),
             SleepPhase("health", min_minutes=1.0, run=self.digest_errors),  # cheap, no model
@@ -1714,6 +1732,80 @@ class Mimir:
         items = [{"source": s, **e} for s, e in ledger.items()]
         items.sort(key=lambda d: d.get("ingested_at", 0.0), reverse=True)
         return items
+
+    # -- the Library layer (docs/LIBRARY.md): source docs → cited claims (Phase 1b) --------
+
+    def _library_source_folder(self) -> Path | None:
+        # Ground truth = the documents drop folder, where the user left the files (in place).
+        return Path(self.config.documents_folder) if self.config.documents_folder else None
+
+    def _claim_chat(self, messages: list[dict[str, str]]) -> str:
+        return self._model.chat("reasoning", messages)  # claim extraction, off the chat model
+
+    def ingest_pending_library(self, *, force: bool = False) -> dict[str, Any]:
+        """Idle pass: record each source document (ground truth, left in place) and distil it into
+        cited claims (each carrying its source locator). Drops a document whose file is gone (and
+        cascades its claims). A sleep phase; fail-soft per file (§10). Composites are Phase 1c."""
+        folder = self._library_source_folder()
+        if folder is None:
+            return {"folder": None, "documents": [], "claims": 0, "dropped": 0}
+        existing = {d.path: d for d in list_library_documents(self._storage)}
+        seen: set[str] = set()
+        processed: list[str] = []
+        total_claims = 0
+        for path in list_documents(folder):
+            try:
+                data = path.read_bytes()
+            except OSError:
+                continue
+            source = str(path.resolve())
+            seen.add(source)
+            digest = hashlib.sha256(data).hexdigest()
+            prior = existing.get(source)
+            doc_id = upsert_library_document(self._storage, LibraryDocument(
+                path=source, filename=path.name, size_bytes=len(data),
+                content_hash=digest, title=path.stem))
+            if prior is not None and prior.content_hash == digest and not force:
+                continue  # unchanged → keep its claims
+            try:
+                units = extract(path)
+            except IngestError as exc:
+                log.warning("library: cannot read %s: %s", path.name, exc)
+                continue
+            claims: list[LibraryClaim] = []
+            for unit in units:
+                for text in extract_claims(self._claim_chat, unit.text):
+                    claims.append(LibraryClaim(
+                        document_id=doc_id, text=text, locator=unit.locator,
+                        embedding=self._embedder.embed(text)))
+            replace_document_claims(self._storage, doc_id, claims)
+            total_claims += len(claims)
+            processed.append(path.name)
+        dropped = 0
+        for path_str in existing:  # a source file that vanished → drop the doc + cascade its claims
+            if path_str not in seen:
+                delete_library_document(self._storage, path_str)
+                dropped += 1
+        if processed or dropped:
+            log.info("library: %d doc(s) → %d claim(s), dropped %d",
+                     len(processed), total_claims, dropped)
+        return {"folder": str(folder), "documents": processed,
+                "claims": total_claims, "dropped": dropped}
+
+    def _library_gist(self, query: str, query_vec: list[float] | None) -> str | None:
+        """The Library context section: the most relevant cited claims (each shown with its source
+        title + locator). ``None`` if the layer is off or nothing is on-topic."""
+        if self._library_source_folder() is None:
+            return None
+        claims = list_library_claims(self._storage)
+        if not claims:
+            return None
+        top = retrieve_claims(query, query_vec, claims,
+                              top_k=max(1, self.config.library_claims_top_k))
+        if not top:
+            return None
+        titles = {d.id: d.title for d in list_library_documents(self._storage)}
+        return render_claims(top, titles) or None
 
     def health_digest(self) -> dict[str, Any] | None:
         """The last nightly health digest (kv), or None if the sleep cycle hasn't run one yet."""
