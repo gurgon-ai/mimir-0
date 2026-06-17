@@ -1775,9 +1775,10 @@ class Mimir:
         A sleep phase; also a manual 'scan folder' trigger. Fail-soft per file (§10)."""
         folder = self._docs_folder()
         if folder is None:
-            return {"folder": None, "ingested": [], "summarized": 0, "failed": []}
+            return {"folder": None, "ingested": [], "summarized": 0, "failed": [],
+                    "unsupported": []}
         ingested: list[str] = []
-        failed: list[str] = []
+        failed: list[dict[str, str]] = []  # {name, error} — surfaced in the UI, not swallowed (§10)
         summarized = 0
         for path in list_documents(folder):
             source = str(path.resolve())
@@ -1788,9 +1789,9 @@ class Mimir:
                 try:
                     self._record_document(path)
                     ingested.append(path.name)
-                except IngestError as exc:
+                except Exception as exc:  # per-file isolation: one bad doc never sinks scan (§10)
                     log.warning("documents: skipping %s: %s", path.name, exc)
-                    failed.append(path.name)
+                    failed.append({"name": path.name, "error": str(exc)})
                     continue
             ledger = self._load_docs_ledger()  # re-read: _record_document rewrote it
             entry = ledger.get(source, {})
@@ -1801,11 +1802,17 @@ class Mimir:
                     ledger[source] = entry
                     kv_set(self._storage, self._DOCS_LEDGER_KEY, json.dumps(ledger))
                     summarized += 1
+        # Files in the folder we won't touch (wrong type), so an odd drop isn't a silent skip.
+        unsupported = [f.name for f in folder.iterdir() if f.is_file()
+                       and not f.name.startswith(".")
+                       and f.suffix.lower() not in SUPPORTED_SUFFIXES] if folder.is_dir() else []
         if ingested or summarized:
             log.info("documents: ingested %d, summarized %d from %s",
                      len(ingested), summarized, folder)
+        if failed:
+            log.warning("documents: %d file(s) failed to ingest from %s", len(failed), folder)
         return {"folder": str(folder), "ingested": ingested, "summarized": summarized,
-                "failed": failed}
+                "failed": failed, "unsupported": unsupported}
 
     def documents(self) -> list[dict[str, Any]]:
         """The ingested-document 'wiki' for the UI: name, chunks, summary, when — newest first."""
