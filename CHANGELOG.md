@@ -111,8 +111,13 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   box (off by default) injects the *whole composite page(s)* of the document the surfaced claims came
   from, automatically — the deterministic, one-pass way to give a capable model the full text for a
   focused question, without hand-pinning each page via Load. Works on the streaming path; full pages
-  count toward grounding. (`turn(..., deep_read=True)` / `deep_read` in the turn API body.) Next: the
-  model-driven fetch (it opens a page itself when claims are thin) wired into streaming.
+  count toward grounding. (`turn(..., deep_read=True)` / `deep_read` in the turn API body.)
+- **Model-driven library fetch now works while streaming (the UI path).** Phase-2 fetch
+  (`[library] model_fetch`, opt-in) let a capable model open a full composite page itself with
+  `<FETCH id=N>` — but only on the non-streaming `turn()`, so it was inert in the streaming UI. The
+  streaming path now peeks the opening tokens, intercepts the marker (never shown to the user), loads
+  the page, and streams the final answer with it in context (`_stream_chat_with_fetch`). Completes
+  the "toggle now, fetch next" pair.
 - **The uncertainty gate now counts library claims as grounding — document Q&A stopped deflecting.**
   `source_count` (which decides whether to inject the "you have very little stored knowledge" honesty
   flag) summed recalled memories + graph edges + wiki passages but **omitted cited library claims** —

@@ -98,13 +98,17 @@ phase:
   tray, and pinned pages are loaded into the next turn (`turn(loaded_pages=…)` →
   `_merge_loaded_library`). Endpoints: `GET /api/library{,/page,/source}`, `POST /api/library/scan`.
   *Follow-up:* after-reply chips (surface which sources the answer drew on for one-click load).
-- **Phase 2 — model-driven fetch. ✅ built (in-band marker).** With `[library] model_fetch = true`,
-  the Library section lists the available page ids and the model may reply with `<FETCH id=N>`; the
-  turn loads that page, answers once more with the detail in hand, and strips the marker
-  (`_maybe_model_fetch`, capped by `max_fetches`, **off by default** — a deliberate second pass). It
-  runs on the non-streaming `turn()` (the API / agent-to-agent path); the streaming UI uses the
-  **after-reply Load chips** instead (the same fetch path, human-initiated). A native tool-call
-  surface for tool-capable models is the natural follow-up.
+- **Deep-read toggle. ✅ built.** A per-turn switch (off by default) that injects the *full composite
+  page(s)* of the document the surfaced claims came from — the deterministic, one-pass way to give a
+  capable model the whole text without hand-pinning (`turn(deep_read=True)` → `_pages_to_load`).
+- **Phase 2 — model-driven fetch. ✅ built (in-band marker), streaming + non-streaming.** With
+  `[library] model_fetch = true`, the Library section lists the available page ids and the model may
+  reply with `<FETCH id=N>`; the turn loads that page and answers once more with the detail in hand,
+  stripping the marker (capped by `max_fetches`, **off by default** — a deliberate second pass). The
+  non-streaming `turn()` does this in `_maybe_model_fetch`; the **streaming** path
+  (`_stream_chat_with_fetch`) peeks the opening tokens, intercepts the marker (never shown to the
+  user), and streams the final answer with the page in context. A native tool-call surface for
+  tool-capable models is the natural follow-up.
 
 **Phase 1 and Phase 2 (in-band) are built — the Library layer is feature-complete.**
 
