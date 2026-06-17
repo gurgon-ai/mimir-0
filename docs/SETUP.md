@@ -247,10 +247,54 @@ What happens: the file is **extracted** (markdown splits on headings; PDF splits
 to the file and locator (e.g. `handbook.md:Onboarding`, `paper.pdf:p.4`). Re-ingesting the same
 path **replaces** its previous chunks rather than duplicating them.
 
-- Install PDF support: `pip install 'mimir-0[documents]'` (pulls `pypdf`). Without it, ingesting a
-  `.pdf` fails loud with that instruction — it never silently skips.
 - Recall quality on documents depends on the embedding mode (§4). Bootstrap matches words; for
   semantic recall over documents, use **endpoint** mode.
+
+### The drop folder + the 📎 upload (the local "wiki")
+
+Instead of ingesting by path, point Mimir at a **folder** and just put files in it:
+
+```toml
+[documents]
+folder = "documents"     # a directory; the 📎 upload saves here AND you can drop files in directly.
+                         # Empty/omitted disables. Relative to the working directory.
+```
+
+Two ways in, same result:
+- **📎 by the chat box** — click the paperclip, pick a `.txt`/`.md`/`.pdf`; it's saved into the
+  folder and ingested immediately (recallable on the next turn).
+- **Drop files into the folder** yourself — they're picked up by an **idle pass** (a sleep-cycle
+  phase, or the **"Scan folder now"** button on the Docs tab).
+
+The idle pass ingests new/changed files (content-hashed, so unchanged files are skipped) and writes
+a **short summary of each** — a small browsable "wiki" on the Docs tab that the model also draws on.
+A changed file is re-ingested (its old chunks replaced) and re-summarized.
+
+### Enabling PDF (the one extra step)
+
+`.txt` and `.md` work with **zero dependencies**. PDF needs one optional package:
+
+```bash
+pip install 'mimir-0[documents]'     # pulls pypdf; PDFs split by page for provenance (e.g. paper.pdf:p.4)
+```
+
+Without it, a `.pdf` **fails loud** with exactly that instruction — it never silently skips. Nothing
+else changes: once installed, `.pdf` works through the 📎, the drop folder, and `brain.ingest(...)`.
+
+### Integration path (build your own)
+
+It's all on the library + API, so any front-end or pipeline can feed documents in:
+
+| Goal | Library | HTTP API |
+|------|---------|----------|
+| Ingest one file by path | `brain.ingest("path/to/file.pdf")` | `POST /api/ingest` `{"path": "..."}` |
+| Upload bytes (no server-side path) | `brain.upload_document("name.pdf", data_bytes)` | `POST /api/documents/upload` `{"name","data"(base64)}` |
+| Process whatever's in the folder | `brain.ingest_pending_documents()` | `POST /api/documents/scan` |
+| List the ingested "wiki" | `brain.documents()` | `GET /api/documents` |
+
+A typical integration: drop your exports/notes into the folder (or POST them to
+`/api/documents/upload`), let the idle pass build the wiki, and they surface automatically in recall
+— no other wiring. (Same trust note as §3b: documents are shared, `document`-tier knowledge.)
 
 ## 5c. Offline encyclopedia (Kiwix/ZIM) — optional, zero extra deps
 

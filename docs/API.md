@@ -167,9 +167,21 @@ claims are remembered-as-said-by-an-AI but kept below human input — safe again
 hallucinations (or an echo between two agents) being mistaken for fact. The caller picks the name and
 kind; the server picks the trust.
 
+## Documents
+
+Feed documents in three ways (all become `document`-tier, recallable knowledge; an idle pass also
+writes a short summary per doc — the local "wiki"):
+
+- `POST /api/ingest` `{"path": "..."}` — ingest a file the **server** can read by path.
+- `POST /api/documents/upload` `{"name": "notes.pdf", "data": "<base64>"}` — upload bytes (what the
+  📎 button uses); saved to the `[documents] folder` and ingested. `name` is sanitized to a basename;
+  the type must be supported (`.txt`/`.md`; `.pdf` needs the `[documents]` extra).
+- `POST /api/documents/scan` — ingest any new/changed files dropped into the folder + fill summaries.
+- `GET /api/documents` — `{folder, documents:[{name, chunks, summary, ingested_at, source}]}`.
+
 ## Other routes
 
 The turn endpoints above are what most integrations need. The web UI is driven by a wider set —
 identity, onboarding, mind, memories, graph, sessions, settings, sleep, deliberate, council, forum,
-fleet/*, wiki/status, ingest — all under `/api/` and so all behind the same token (except
-`/api/health`). The authoritative list is the `do_GET`/`do_POST` dispatch in `server.py`.
+fleet/*, wiki/status, ingest, documents/* — all under `/api/` and so all behind the same token
+(except `/api/health`). The authoritative list is the `do_GET`/`do_POST` dispatch in `server.py`.

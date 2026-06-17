@@ -33,6 +33,8 @@ ENV/
 *.sqlite
 *.sqlite3
 data/
+# The documents drop folder — the user's own files, never committed
+documents/
 
 # Test / type-check / lint caches
 .pytest_cache/

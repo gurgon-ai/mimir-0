@@ -515,9 +515,12 @@ needs.
   `build_context()` like any other source (a document chunk is just a memory whose evidence tier
   is `document`, with a `source` column so re-ingest replaces rather than duplicates). Plain text
   + markdown ship in core (zero deps); PDF extraction ships behind the optional `[documents]`
-  extra (`pypdf`), so the runtime contract holds. EPUB and *LLM compilation of documents into
-  integrated, contradiction-resolved knowledge* remain later, optional layers — not the ingestion
-  itself.
+  extra (`pypdf`), so the runtime contract holds. _Landed on top:_ a **`[documents]` drop folder** —
+  the 📎 upload saves into it and the user can drop files in directly; an idle sleep phase ingests
+  new/changed files (content-hashed) and writes a short per-document summary, a small browsable local
+  "wiki" (`Mimir.upload_document`/`ingest_pending_documents`/`documents`; `/api/documents/*`). EPUB and
+  fuller *LLM compilation of documents into integrated, contradiction-resolved knowledge* remain later
+  layers — the per-doc summary is the first step of that, not the whole of it.
 - **v0.1+ — cognition layers:** ~~working memory~~ _(landed: rolling cross-session salient
   context — a capped recency log of recent exchanges plus a periodically compressed summary,
   injected always-on just before the sentinel note)_, ~~self-model~~ _(landed: an evolving, generic

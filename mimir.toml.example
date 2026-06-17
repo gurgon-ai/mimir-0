@@ -122,6 +122,13 @@ check_interval_s = 20        # daemon wake cadence (it self-gates on cadence_s)
 # can answer about itself. Content-hashed (re-embeds only on change). Empty/unset disables it.
 doc = "README.md"
 
+[documents]
+# A drop folder for documents. The 📎 upload by the chat box saves here, AND you can drop files in
+# directly; idle time (a sleep phase, or the Docs tab's "Scan folder now") ingests new/changed files
+# into recallable document-tier knowledge and writes a short summary of each — a small local "wiki".
+# .txt/.md work in core; .pdf needs:  pip install 'mimir-0[documents]'.  Empty/unset disables.
+folder = "documents"
+
 [diagnostics]
 # Self-observability (DESIGN §10): the system surfaces its own recent errors into the turn's context
 # ("I've had an error") and digests them in the nightly cycle's health phase. Fail-loud + fail-aware.
