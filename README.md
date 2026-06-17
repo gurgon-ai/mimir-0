@@ -29,7 +29,7 @@ keeps the repo fully distributable and your install footprint minimal.
 |---|---|
 | The library + reference web UI — **pure Python, zero runtime dependencies** | **[Ollama](https://ollama.com)** (or any chat/embeddings endpoint) — for real model inference |
 | **SQLite** storage — bundled with Python; no install, no server, no daemon | **Open model(s)** — `ollama pull` whatever you like (each under its own license) |
-| A deterministic **mock provider + stdlib embedder** so the core runs with *nothing* installed | *(optional)* `pypdf` — only for PDF ingestion (the `[documents]` extra) |
+| A deterministic **mock provider + stdlib embedder** so the core runs with *nothing* installed | *(optional)* `pypdf` + `python-docx` — only for PDF/DOCX ingestion (the `[documents]` extra) |
 | The wiki integration — **pure stdlib HTTP**, no library | *(optional)* **[Kiwix](https://kiwix.org)** `kiwix-serve` + any **ZIM** — only if you want offline Wikipedia as a reference layer |
 | Temporal grounding falls back to the **host's local clock** | *(optional)* `tzdata` (the `[timezone]` extra) — only to set an explicit IANA timezone on a host without a tz database (e.g. Windows) |
 
@@ -82,7 +82,8 @@ On top of that:
 - **Document ingestion + a local "wiki"** — `ingest()` a file by path, **upload with the 📎** by the
   chat box, or just **drop files into a `[documents] folder`**. Idle time ingests new/changed files
   into a document-tier layer (file/section provenance) and writes a short summary of each — a small
-  browsable wiki the model draws on. Text/markdown work in core; **PDF via the `[documents]` extra**.
+  browsable wiki the model draws on. Text/markdown work in core; **PDF + DOCX via the `[documents]`
+  extra**.
 - **Offline encyclopedia (optional)** — point a `[wiki]` block at a local **Kiwix server** over any
   **ZIM** (Wikipedia nopic, a medical wiki, top-50k, …) and the model gets a live, attributed
   reference layer — **zero Python dependency** (stdlib HTTP, like talking to Ollama), nothing to

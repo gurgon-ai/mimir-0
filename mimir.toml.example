@@ -126,7 +126,7 @@ doc = "README.md"
 # A drop folder for documents. The 📎 upload by the chat box saves here, AND you can drop files in
 # directly; idle time (a sleep phase, or the Docs tab's "Scan folder now") ingests new/changed files
 # into recallable document-tier knowledge and writes a short summary of each — a small local "wiki".
-# .txt/.md work in core; .pdf needs:  pip install 'mimir-0[documents]'.  Empty/unset disables.
+# .txt/.md work in core; .pdf/.docx need:  pip install 'mimir-0[documents]'.  Empty/unset disables.
 folder = "documents"
 
 [library]

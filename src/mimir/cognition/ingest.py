@@ -32,7 +32,9 @@ _DOCUMENT_CONFIDENCE = 0.8
 
 # Document types the drop-folder scan will pick up. Extensionless files are deliberately excluded
 # (a drop folder shouldn't sweep in stray non-documents); `.pdf` needs the [documents] extra.
-SUPPORTED_SUFFIXES = frozenset({".txt", ".text", ".md", ".markdown", ".mdown", ".pdf"})
+SUPPORTED_SUFFIXES = frozenset(
+    {".txt", ".text", ".md", ".markdown", ".mdown", ".pdf", ".docx"}
+)
 
 
 def list_documents(folder: str | Path) -> list[Path]:

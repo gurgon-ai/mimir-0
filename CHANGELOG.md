@@ -8,6 +8,11 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **`.docx` ingestion (the `[documents]` extra now pulls `python-docx`).** Word documents are
+  extracted with heading-style sections as locators (e.g. `report.docx:Methods`), so they flow through
+  the 📎 upload, the drop folder, the Library, and `brain.ingest(...)` exactly like `.txt`/`.md`/`.pdf`.
+  Without the extra a `.docx` fails loud with the install instruction (`.doc` legacy format isn't
+  supported — `.docx` only).
 - **The Library layer — the system's own long-form knowledge as three tiers of truth (docs/LIBRARY.md).**
   The DB is the *provenance spine*: source documents (ground truth, left in place; recorded by exact
   filename + size + hash + title) → short **cited claims** (DB: atomic facts, each carrying its source

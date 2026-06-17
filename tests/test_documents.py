@@ -42,6 +42,22 @@ def test_extract_unsupported_type_fails_loud(tmp_path: Path) -> None:
         extract(f)
 
 
+def test_extract_docx_splits_on_headings(tmp_path: Path) -> None:
+    docx = pytest.importorskip("docx")  # the [documents] extra (python-docx); skip if absent
+    f = tmp_path / "doc.docx"
+    d = docx.Document()
+    d.add_heading("First", level=1)
+    d.add_paragraph("alpha body")
+    d.add_heading("Second", level=2)
+    d.add_paragraph("beta body")
+    d.save(str(f))
+    units = extract(f)
+    locators = [u.locator for u in units]
+    assert "First" in locators and "Second" in locators
+    first = next(u for u in units if u.locator == "First")
+    assert "alpha body" in first.text
+
+
 def test_chunk_preserves_locator_and_bounds_size() -> None:
     # ~120 paragraphs of a few tokens each → must split into several chunks.
     body = "\n\n".join(f"paragraph number {i} has a little content here" for i in range(120))

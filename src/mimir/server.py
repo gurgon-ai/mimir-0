@@ -1294,7 +1294,7 @@ _HTML = """<!doctype html>
       <div id="ivProgress"></div>
     </div>
     <form id="composer">
-      <label class="clip" id="clip" title="Upload a document (.txt .md .pdf) — it's saved to your documents folder and ingested">📎<input type="file" id="docFile" accept=".txt,.text,.md,.markdown,.pdf" hidden/></label>
+      <label class="clip" id="clip" title="Upload a document (.txt .md .pdf .docx) — it's saved to your documents folder and ingested">📎<input type="file" id="docFile" accept=".txt,.text,.md,.markdown,.pdf,.docx" hidden/></label>
       <input type="text" id="text" placeholder="Say something to Mimir…" autocomplete="off"/>
       <button type="submit" id="send">Send</button>
     </form>
