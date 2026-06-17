@@ -100,6 +100,37 @@ def test_disabled_node_is_skipped_with_a_fail_safe() -> None:
     assert pool.chat("m", [], {}, priority=Priority.CHAT_CRITICAL) in ("from-a", "from-b")
 
 
+def test_locate_model_buckets_by_node_status() -> None:
+    a = FakeProvider("A")
+    b = FakeProvider("B")
+    pool = ProviderPool([("A", a), ("B", b)], max_retries=0, sleep=_noop_sleep)
+    pool._endpoints[0].models = {"other:7b"}        # A: enabled, lacks the target
+    pool._endpoints[1].models = {"gemma4:26b"}      # B: has it, but...
+    pool.set_disabled_nodes({"B"})                  # ...disabled
+    assert pool.inventory_known() is True
+    assert pool.installed_models() == {"other:7b"}  # B excluded (disabled)
+    loc = pool.locate_model("gemma4:26b")
+    assert loc["disabled"] == ["B"] and loc["active"] == []
+
+
+def test_gateway_explains_model_stranded_on_disabled_node() -> None:
+    """Pinning chat to a model that lives only on a disabled node must fail with an actionable
+    message (re-enable the node), not the opaque 'all endpoints failed'."""
+    from mimir.config import RoleSpec
+    from mimir.errors import ModelGatewayError
+    from mimir.model.gateway import ModelGateway
+
+    a = FakeProvider("A", fail_times=10**9, transient=True)  # enabled but 404s for this model
+    b = FakeProvider("B")
+    pool = ProviderPool([("A", a), ("B", b)], max_retries=0, sleep=_noop_sleep)
+    pool._endpoints[0].models = {"other:7b"}
+    pool._endpoints[1].models = {"gemma4:26b"}
+    pool.set_disabled_nodes({"B"})
+    gw = ModelGateway(pool, {"chat": RoleSpec("gemma4:26b")})
+    with pytest.raises(ModelGatewayError, match="disabled"):
+        gw.chat("chat", [], priority=Priority.CHAT_CRITICAL)
+
+
 def test_all_transient_raises_transient() -> None:
     a = FakeProvider("A", fail_times=10, transient=True)
     pool = ProviderPool([("A", a)], max_retries=1, sleep=_noop_sleep)
