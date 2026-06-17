@@ -147,6 +147,24 @@ def test_loaded_page_is_pinned_into_the_next_turn(mock_config: Config, tmp_path)
         brain.close()
 
 
+def test_deep_read_pulls_full_page_for_the_matching_doc(mock_config: Config, tmp_path) -> None:
+    """Deep read injects the FULL composite of the doc the surfaced claims belong to — without the
+    user having to pin it by hand. Off by default, so the normal turn stays the cheap cited gist."""
+    brain = _libbrain(mock_config, tmp_path)
+    try:
+        folder = brain._library_source_folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "hives.md").write_text("# Hives\n\nEach hive has one queen. Bees make honey.")
+        brain.ingest_pending_library()
+        q = "tell me about hives and queens"
+        # Default: cited gist only, no full page injected.
+        assert "Full pages you've loaded" not in brain.turn(q).context.prompt
+        # Deep read on: the matching page's full Markdown is pulled in automatically.
+        assert "Full pages you've loaded" in brain.turn(q, deep_read=True).context.prompt
+    finally:
+        brain.close()
+
+
 def test_turn_surfaces_library_sources_for_load_chips(mock_config: Config, tmp_path) -> None:
     brain = _libbrain(mock_config, tmp_path)
     try:

@@ -107,6 +107,12 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **"Deep read" toggle — pull full library pages, not just the cited claims.** A switch by the chat
+  box (off by default) injects the *whole composite page(s)* of the document the surfaced claims came
+  from, automatically — the deterministic, one-pass way to give a capable model the full text for a
+  focused question, without hand-pinning each page via Load. Works on the streaming path; full pages
+  count toward grounding. (`turn(..., deep_read=True)` / `deep_read` in the turn API body.) Next: the
+  model-driven fetch (it opens a page itself when claims are thin) wired into streaming.
 - **The uncertainty gate now counts library claims as grounding — document Q&A stopped deflecting.**
   `source_count` (which decides whether to inject the "you have very little stored knowledge" honesty
   flag) summed recalled memories + graph edges + wiki passages but **omitted cited library claims** —
