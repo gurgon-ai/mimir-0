@@ -8,6 +8,16 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **A documents drop folder + 📎 upload → idle-built local "wiki" (DESIGN §8).** A `[documents]
+  folder` the UI's paperclip saves into and you can drop files into directly; idle time (a new
+  `documents` sleep phase, or the Docs tab's "Scan folder now") ingests new/changed files into
+  recallable `document`-tier knowledge — content-hashed so unchanged files are skipped — and writes a
+  short summary of each, a small browsable wiki on the Docs tab the model also draws on. Upload is
+  immediate (recallable now; summary follows on the next idle pass); a changed file is re-ingested and
+  re-summarized. `.txt`/`.md` in core, `.pdf` via the `[documents]` extra (`pip install
+  'mimir-0[documents]'`). New routes: `POST /api/documents/upload` (base64), `POST
+  /api/documents/scan`, `GET /api/documents`. `Mimir.upload_document` / `ingest_pending_documents` /
+  `documents`. SETUP §5b documents the drop folder, PDF setup, and the integration path.
 - **The inner life now feeds the forum (inner-life → council escalation).** When the idle loop lands
   on a genuine, *fresh* conflict it occasionally convenes the full **council** on it — a forum thread
   + verdict — instead of a solo musing, so the council stirs during the day on what the system's own

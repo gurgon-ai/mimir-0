@@ -79,8 +79,10 @@ learned procedures → **recent history (journal)** → working memory → **tem
 background notes → sentinel note → uncertainty gate — and routes it through two disciplined gateways.
 On top of that:
 
-- **Document ingestion** — `ingest()` for text/markdown (PDF via the `[documents]` extra) into a
-  document-tier layer with file/section provenance.
+- **Document ingestion + a local "wiki"** — `ingest()` a file by path, **upload with the 📎** by the
+  chat box, or just **drop files into a `[documents] folder`**. Idle time ingests new/changed files
+  into a document-tier layer (file/section provenance) and writes a short summary of each — a small
+  browsable wiki the model draws on. Text/markdown work in core; **PDF via the `[documents]` extra**.
 - **Offline encyclopedia (optional)** — point a `[wiki]` block at a local **Kiwix server** over any
   **ZIM** (Wikipedia nopic, a medical wiki, top-50k, …) and the model gets a live, attributed
   reference layer — **zero Python dependency** (stdlib HTTP, like talking to Ollama), nothing to
