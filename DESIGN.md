@@ -520,7 +520,10 @@ needs.
   new/changed files (content-hashed) and writes a short per-document summary, a small browsable local
   "wiki" (`Mimir.upload_document`/`ingest_pending_documents`/`documents`; `/api/documents/*`). EPUB and
   fuller *LLM compilation of documents into integrated, contradiction-resolved knowledge* remain later
-  layers — the per-doc summary is the first step of that, not the whole of it.
+  layers — the per-doc summary is the first step of that, not the whole of it. The **Library layer**
+  ("books I've read": gist in SQLite, detail in Markdown, progressive disclosure, with a Phase-2
+  model-driven fetch tool) is specced and staged in [`docs/LIBRARY.md`](docs/LIBRARY.md) — planned,
+  not built. (Distinct from the read-only Kiwix `[wiki]` reference source.)
 - **v0.1+ — cognition layers:** ~~working memory~~ _(landed: rolling cross-session salient
   context — a capped recency log of recent exchanges plus a periodically compressed summary,
   injected always-on just before the sentinel note)_, ~~self-model~~ _(landed: an evolving, generic
