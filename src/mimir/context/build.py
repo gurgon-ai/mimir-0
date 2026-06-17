@@ -311,7 +311,14 @@ def build_context(
         sections.append(
             Section(
                 name="library",
-                title="From your library (your own reading — cited; a source can be loaded):",
+                title=(
+                    "From your library (your own reading). Cite ONLY what actually appears below, "
+                    "using its [title, locator]. If the answer needs something not here, say so "
+                    "plainly and answer from general knowledge WITHOUT a citation — never attach a "
+                    "library/document source to a fact that isn't in these entries (a fabricated "
+                    "citation is worse than an honest 'the documents don't cover that'). A source "
+                    "can be loaded for more detail:"
+                ),
                 body=library,
                 tier=SectionTier.MEDIUM,
                 substantive=True,

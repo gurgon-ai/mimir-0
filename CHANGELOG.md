@@ -107,6 +107,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **Harden the library framing against fabricated citations.** Observed on a live run: asked about a
+  topic adjacent to but absent from the documents (Hantavirus, when the library had bloodborne-pathogen
+  claims but nothing on rodents), a small model answered from training-data general knowledge and
+  stamped it with a real-looking document citation — a hallucination wearing a source, the worst
+  failure for an evidence-tiered system. The Library section now explicitly instructs: cite ONLY what
+  appears in the provided entries; if the answer needs something not there, say so and answer from
+  general knowledge WITHOUT a citation — never attach a document source to a fact that isn't in the
+  entries. (A bigger `chat` model follows this far better; a deterministic citation guard — verifying
+  each citation against the sources actually injected this turn — is the architectural follow-up.)
 - **"Deep read" toggle — pull full library pages, not just the cited claims.** A switch by the chat
   box (off by default) injects the *whole composite page(s)* of the document the surfaced claims came
   from, automatically — the deterministic, one-pass way to give a capable model the full text for a
