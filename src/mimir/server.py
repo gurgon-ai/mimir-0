@@ -961,6 +961,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "by_tier": signals.tier_counts,
             },
             "recent_reflections": signals.recent_reflections,
+            "recent_thoughts": brain.recent_thoughts(limit=12),
             "recent_errors": brain.recent_errors(limit=8),
             "error_counts": brain._errors.counts(),
             "pool_health": brain.pool_health(),
@@ -1262,6 +1263,8 @@ _HTML = """<!doctype html>
       <div class="selfmodel" id="workingMemory">—</div>
       <h2>System health</h2>
       <div id="systemHealth" class="hint">—</div>
+      <h2>Inner life <span class="hint" style="font-weight:normal;">— thoughts while idle</span></h2>
+      <div id="thoughts"></div>
       <h2>Recent reflections</h2>
       <div id="reflections"></div>
     </div>
@@ -2011,6 +2014,16 @@ async function loadMind() {
       `<div class="stat"><b>${s.triples||0}</b> connections</div>` +
       `<div class="stat"><b>${s.procedures||0}</b> habits</div>` +
       `<div class="stat">tiers — ${tiers}</div>`;
+    const th = $("thoughts"); th.innerHTML = "";
+    (m.recent_thoughts || []).forEach(t => {
+      const d = document.createElement("div"); d.className = "mem";
+      const tx = document.createElement("div"); tx.className = "text"; tx.textContent = t.text;
+      const meta = document.createElement("div"); meta.className = "meta";
+      meta.textContent = forumWhen(t.created_at) + (t.archived ? " · archived" : "");
+      d.appendChild(tx); d.appendChild(meta); th.appendChild(d);
+    });
+    if (!(m.recent_thoughts||[]).length) th.innerHTML =
+      '<div class="hint">No inner-life thoughts yet — enable it in the Sleep tab, or hit “Think now”.</div>';
     const refl = $("reflections"); refl.innerHTML = "";
     (m.recent_reflections || []).forEach(t => {
       const d = document.createElement("div"); d.className = "mem";

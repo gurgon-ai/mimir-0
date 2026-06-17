@@ -29,7 +29,7 @@ from ..prompts import INNER_LIFE_SYSTEM
 from ..storage.gateway import StorageGateway
 from ..storage.models import MemoryKind
 from ..storage.repo import list_memories
-from .deliberation import surface_conflicts
+from .deliberation import NON_BELIEF_TIERS, surface_conflicts
 
 log = logging.getLogger("mimir.inner_life")
 
@@ -107,10 +107,13 @@ def gather_stimuli(
         c = conflicts[0]
         out.append(Stimulus(kind="conflict", prompt=c.question, key=c.key))
 
-    memories = list_memories(storage, user=None, kind=MemoryKind.MEMORY)
-    # Dwell on real knowledge, not the system's own prior musings (so it doesn't loop on itself).
-    real = sorted((m for m in memories if (m.provenance or "") != "inner life"),
-                  key=lambda m: m.salience, reverse=True)
+    # Dwell on *stated beliefs* only — not reference docs (DOCUMENT) and not the system's own output
+    # (prior musings and council verdicts are INFERRED), which would just make it loop on itself.
+    real = sorted(
+        (m for m in list_memories(storage, user=None, kind=MemoryKind.MEMORY)
+         if not m.archived and m.evidence_tier not in NON_BELIEF_TIERS),
+        key=lambda m: m.salience, reverse=True,
+    )
     if real:
         m = real[0]
         out.append(Stimulus(

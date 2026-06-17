@@ -42,7 +42,7 @@ _MAX_MEMORIES_SCANNED = 200  # cap the O(n^2) near-duplicate scan to the most sa
 # windows look like near-duplicates but aren't beliefs in tension; INFERRED is the system's OWN
 # output (inner-life musings, prior verdicts) — arguing it just loops on itself. Real tensions live
 # among what someone *stated* (primary/trusted/conversation/peer).
-_NON_BELIEF_TIERS = frozenset({EvidenceTier.DOCUMENT, EvidenceTier.INFERRED})
+NON_BELIEF_TIERS = frozenset({EvidenceTier.DOCUMENT, EvidenceTier.INFERRED})
 
 _CURATOR_SYSTEM = (
     "You triage a list of open questions/tensions found in an AI's own memory. Choose the few most "
@@ -96,7 +96,7 @@ def _memory_conflicts(storage: StorageGateway, embedder: Embedder | None) -> lis
         return []
     memories = [
         m for m in list_memories(storage, user=None, kind=MemoryKind.MEMORY)
-        if m.embedding and not m.archived and m.evidence_tier not in _NON_BELIEF_TIERS
+        if m.embedding and not m.archived and m.evidence_tier not in NON_BELIEF_TIERS
     ]
     memories.sort(key=lambda m: m.salience, reverse=True)
     memories = memories[:_MAX_MEMORIES_SCANNED]
