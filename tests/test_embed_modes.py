@@ -89,3 +89,22 @@ def test_resilient_embedder_degrades_loudly_instead_of_crashing() -> None:
     assert down.embed("x") is None                   # outage → None (keyword path), not a crash
     assert down.mode is EmbeddingMode.ENDPOINT       # mode delegates (transient, not reconfigured)
     assert ResilientEmbedder(_Ok()).embed("x") == [1.0, 2.0, 3.0]  # healthy → passthrough
+
+
+def test_embed_model_auto_discovered_and_remembered(brain, monkeypatch) -> None:
+    # `[roles.embed] = "auto"`: discover an installed embedding model, never a chat model, and
+    # remember the choice so the vector space stays stable across restarts / changing availability.
+    from mimir.storage.repo import kv_get
+
+    brain._auto_roles = {"embed"}
+    monkeypatch.setattr(brain._model, "available_models",
+                        lambda: ["gemma3:12b", "nomic-embed-text:v1.5", "all-minilm:latest"])
+    brain._resolve_embed_model()
+    chosen = kv_get(brain._storage, brain._EMBED_MODEL_KEY)
+    assert chosen == "all-minilm:latest"          # sorted-first EMBED model (not the chat model)
+
+    # Availability changes, but the remembered choice is kept — no silent vector-space switch.
+    monkeypatch.setattr(brain._model, "available_models",
+                        lambda: ["nomic-embed-text:v1.5", "bge-large", "all-minilm:latest"])
+    brain._resolve_embed_model()
+    assert kv_get(brain._storage, brain._EMBED_MODEL_KEY) == "all-minilm:latest"

@@ -8,6 +8,15 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **`[roles.embed] = "auto"` — discover the embedding model instead of pinning a brittle tag.** You
+  provide whatever chat LLM(s) you like and at least one embedding model; Mimir finds them. Chat roles
+  already auto-resolved (benchmark-ranked); now `embed` does too — but specially, because embedding
+  models define the *vector space*: it **discovers and remembers** one (persisted in `kv`), prefers
+  the remembered choice across restarts, and if that model goes unreachable it stays pinned and lets
+  the embedder degrade to keyword recall rather than silently switching to an incompatible model. The
+  gateway's `auto` stop-gap pick is now deterministic (sorted), and `resolve_auto_model` uses the
+  proper `is_embedding_model` check so a chat role never grabs an embedding model (`all-minilm`, `bge`,
+  …). `Mimir._resolve_embed_model`. SETUP/example default `embed` to `auto`.
 - **Inner life, Slice 2 — idle thoughts now earn their way into conversation (DESIGN §5a).** A
   reflection is a *framed* thought, not a knowledge fact, so inner-life memories are split out of the
   knowledge recall; at turn time the one most relevant to the current input — if it clears a relevance

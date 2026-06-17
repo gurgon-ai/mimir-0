@@ -129,7 +129,9 @@ class ModelGateway:
                     f"role {role!r} has no enabled, reachable model (disabled: "
                     f"{sorted(self._disabled_models)})"
                 )
-            return RoleSpec(model=picks[0], params=spec.params)
+            # Deterministic stop-gap pick (sorted), so an unresolved `auto` role — embeddings above
+            # all — lands on the SAME model every call/restart instead of flapping with dict order.
+            return RoleSpec(model=sorted(picks)[0], params=spec.params)
         return spec
 
     def set_disabled_models(self, names: set[str]) -> None:
