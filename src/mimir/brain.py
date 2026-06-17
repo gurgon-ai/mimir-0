@@ -53,7 +53,12 @@ from .cognition.identity import (
     pending_questions,
     render_anchors,
 )
-from .cognition.ingest import IngestResult, ingest_document
+from .cognition.ingest import (
+    SUPPORTED_SUFFIXES,
+    IngestResult,
+    ingest_document,
+    list_documents,
+)
 from .cognition.inner_life import (
     Stimulus,
     compose_thought,
@@ -90,6 +95,7 @@ from .cognition.working_memory import (
 from .config import AUTO_MODEL, BackendConfig, Config, ProviderSpec, RoleSpec, load_config
 from .context.build import ContextBundle, build_context
 from .diagnostics import install_error_capture, render_errors
+from .documents.extract import extract
 from .embed.base import Embedder, EmbeddingMode, cosine
 from .embed.endpoint import EndpointEmbedder, NullEmbedder, ResilientEmbedder
 from .embed.locality import LocalityHashEmbedder
@@ -100,6 +106,7 @@ from .model.pool import ProviderPool
 from .model.provider import Provider, is_embedding_model
 from .model.providers.mock import MockProvider
 from .model.providers.ollama import OllamaProvider
+from .prompts import DOC_SUMMARY_SYSTEM
 from .retrieval.hybrid import retrieve
 from .sanitize import StreamTagStripper, strip_epistemic_tags
 from .storage.gateway import StorageGateway
@@ -1181,6 +1188,7 @@ class Mimir:
         return [
             SleepPhase("consolidate", min_minutes=2.0, run=_consolidate),
             SleepPhase("self_knowledge", min_minutes=1.0, run=self.bake_self_knowledge),
+            SleepPhase("documents", min_minutes=2.0, run=self.ingest_pending_documents),
             SleepPhase("deliberate", min_minutes=15.0, run=self.deliberate_open_questions),
             SleepPhase("narratives", min_minutes=10.0, run=self.generate_narratives),
             SleepPhase("health", min_minutes=1.0, run=self.digest_errors),  # cheap, no model
@@ -1595,6 +1603,117 @@ class Mimir:
         log.info("self-knowledge: baked %s (%d chunk(s)) into memory", path.name,
                  result.chunks_written)
         return {"baked": True, "path": str(path), "chunks": result.chunks_written}
+
+    # -- documents drop-folder → recallable knowledge + a small local "wiki" (DESIGN §8) ----
+
+    _DOCS_LEDGER_KEY = "documents"
+
+    def _docs_folder(self) -> Path | None:
+        return Path(self.config.documents_folder) if self.config.documents_folder else None
+
+    def _load_docs_ledger(self) -> dict[str, Any]:
+        raw = kv_get(self._storage, self._DOCS_LEDGER_KEY)
+        if not raw:
+            return {}
+        try:
+            value = json.loads(raw)
+            return value if isinstance(value, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+
+    def _record_document(self, path: Path) -> IngestResult:
+        """Ingest one document into recallable knowledge and record it in the wiki ledger. A changed
+        file drops its stale summary (regenerated lazily in the idle pass)."""
+        result = ingest_document(self._storage, self._embedder, path=path)
+        ledger = self._load_docs_ledger()
+        entry = ledger.get(result.source, {})
+        entry.update(
+            name=path.name, hash=hashlib.sha256(path.read_bytes()).hexdigest(),
+            chunks=result.chunks_written, ingested_at=time.time(),
+        )
+        entry.pop("summary", None)  # content changed → old summary is stale
+        ledger[result.source] = entry
+        kv_set(self._storage, self._DOCS_LEDGER_KEY, json.dumps(ledger))
+        return result
+
+    def _summarize_document(self, path: Path) -> str | None:
+        """A short 'wiki' summary of a document (one reasoning call). Best-effort: None on any
+        failure (e.g. the model fleet is down) — the doc is still recallable from its chunks."""
+        try:
+            text = "\n".join(u.text for u in extract(path))[:6000]
+            if not text.strip():
+                return None
+            summary = self._model.chat(
+                "reasoning",
+                [{"role": "system", "content": DOC_SUMMARY_SYSTEM},
+                 {"role": "user", "content": text}],
+            ).strip()
+            return summary or None
+        except Exception as exc:  # summarization is enrichment — never sink ingestion (§10)
+            log.warning("documents: could not summarize %s: %s", path.name, exc)
+            return None
+
+    def upload_document(self, filename: str, data: bytes) -> dict[str, Any]:
+        """Save an uploaded file into the drop folder and ingest it now (recallable immediately; its
+        wiki summary is generated in the next idle pass). The 📎 button calls this."""
+        folder = self._docs_folder()
+        if folder is None:
+            raise ConfigError("no [documents] folder configured")
+        safe = Path(filename).name  # strip any path components from the client
+        if not safe or Path(safe).suffix.lower() not in SUPPORTED_SUFFIXES:
+            raise IngestError(
+                f"unsupported document {filename!r}; allowed: {sorted(SUPPORTED_SUFFIXES)}"
+            )
+        folder.mkdir(parents=True, exist_ok=True)
+        dest = folder / safe
+        dest.write_bytes(data)
+        result = self._record_document(dest)
+        log.info("documents: uploaded + ingested %s (%d chunk(s))", safe, result.chunks_written)
+        return {"name": safe, "chunks": result.chunks_written}
+
+    def ingest_pending_documents(self, *, force: bool = False) -> dict[str, Any]:
+        """Idle pass over the drop folder: ingest new/changed docs and fill missing wiki summaries.
+        A sleep phase; also a manual 'scan folder' trigger. Fail-soft per file (§10)."""
+        folder = self._docs_folder()
+        if folder is None:
+            return {"folder": None, "ingested": [], "summarized": 0, "failed": []}
+        ingested: list[str] = []
+        failed: list[str] = []
+        summarized = 0
+        for path in list_documents(folder):
+            source = str(path.resolve())
+            ledger = self._load_docs_ledger()
+            entry = ledger.get(source, {})
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if force or entry.get("hash") != digest:
+                try:
+                    self._record_document(path)
+                    ingested.append(path.name)
+                except IngestError as exc:
+                    log.warning("documents: skipping %s: %s", path.name, exc)
+                    failed.append(path.name)
+                    continue
+            ledger = self._load_docs_ledger()  # re-read: _record_document rewrote it
+            entry = ledger.get(source, {})
+            if not entry.get("summary"):
+                summary = self._summarize_document(path)
+                if summary:
+                    entry["summary"] = summary
+                    ledger[source] = entry
+                    kv_set(self._storage, self._DOCS_LEDGER_KEY, json.dumps(ledger))
+                    summarized += 1
+        if ingested or summarized:
+            log.info("documents: ingested %d, summarized %d from %s",
+                     len(ingested), summarized, folder)
+        return {"folder": str(folder), "ingested": ingested, "summarized": summarized,
+                "failed": failed}
+
+    def documents(self) -> list[dict[str, Any]]:
+        """The ingested-document 'wiki' for the UI: name, chunks, summary, when — newest first."""
+        ledger = self._load_docs_ledger()
+        items = [{"source": s, **e} for s, e in ledger.items()]
+        items.sort(key=lambda d: d.get("ingested_at", 0.0), reverse=True)
+        return items
 
     def health_digest(self) -> dict[str, Any] | None:
         """The last nightly health digest (kv), or None if the sleep cycle hasn't run one yet."""

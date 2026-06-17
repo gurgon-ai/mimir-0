@@ -23,6 +23,8 @@ to localhost and put a real reverse proxy in front if you expose it.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import hmac
 import json
 import logging
@@ -255,6 +257,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._forum_thread(params))
             elif route == "/api/timezones":
                 self._send_json({"zones": self.server.brain.available_timezones()})
+            elif route == "/api/documents":
+                self._send_json({"folder": self.server.brain.config.documents_folder,
+                                 "documents": self.server.brain.documents()})  # lock-free (kv read)
             elif route == "/api/procedures":
                 self._send_json(self._procedures())
             elif route == "/api/fleet":
@@ -311,6 +316,10 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._memory_action(body))
             elif route == "/api/ingest":
                 self._send_json(self._ingest(body))
+            elif route == "/api/documents/upload":
+                self._send_json(self._upload_document(body))
+            elif route == "/api/documents/scan":
+                self._send_json(self._scan_documents())
             elif route == "/api/sleep":
                 self._send_json(self._sleep())
             elif route == "/api/deliberate/run":
@@ -482,6 +491,27 @@ class _Handler(BaseHTTPRequestHandler):
             "chunks_written": result.chunks_written,
             "chunks_replaced": result.chunks_replaced,
         }
+
+    def _upload_document(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Save an uploaded document (📎) to the drop folder and ingest it. Body: name + base64 data."""
+        name = str(body.get("name", "")).strip()
+        b64 = str(body.get("data", ""))
+        if not name or not b64:
+            raise ValueError("'name' and 'data' (base64) are required")
+        try:
+            data = base64.b64decode(b64, validate=False)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError(f"could not decode upload: {exc}") from exc
+        try:
+            with self.server.brain_lock:
+                return self.server.brain.upload_document(name, data)
+        except (ConfigError, IngestError) as exc:
+            raise MimirError(str(exc)) from exc
+
+    def _scan_documents(self) -> dict[str, Any]:
+        # Manual "scan folder now": ingest any new/changed dropped files + fill missing summaries.
+        with self.server.brain_lock:
+            return self.server.brain.ingest_pending_documents(force=False)
 
     def _turn_stream(self) -> None:
         """Server-Sent-Events stream of a turn: token events, then a done event with introspect.
