@@ -224,8 +224,13 @@ temperature = 0.3
 [roles.embed]
 # REQUIRED when [embeddings] mode = "endpoint" — you must have at least one embedding model installed.
 # "auto" discovers an installed embedding model and REMEMBERS the choice (the vector space must stay
-# stable — switching embedding models makes old and new embeddings incomparable). Pull the SAME
-# embedding model on every node so recall survives any single node going down.
+# stable — switching embedding models makes old and new embeddings incomparable, even at the same
+# dimension). Pull the SAME embedding model on every node so recall survives any single node going down.
+# For a long-lived store, PINNING the exact tag is safer than "auto" (which stays locked to the first
+# model it picked, degrading to keyword-only if that tag later disappears):
+#   model = "nomic-embed-text:v1.5"
+# If you ever change this, rebuild the store: stop the server and run
+#   python -m mimir.server --config mimir.toml --reembed
 model = "auto"
 
 # [roles.council] is OPTIONAL. The inner council auto-discovers the models actually installed and

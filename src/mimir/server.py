@@ -1145,8 +1145,23 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="rotating log file path (default: mimir.log; pass '' to log to console only)",
     )
+    parser.add_argument(
+        "--reembed",
+        action="store_true",
+        help="re-embed the whole store with the current embed model, then exit (run with the live "
+        "server stopped). Use once after changing [roles.embed] — vectors from different models "
+        "are not comparable even at the same dimension.",
+    )
     args = parser.parse_args(argv)
     _setup_logging(args.log_file)
+    if args.reembed:
+        brain = Mimir.from_config(args.config)
+        try:
+            counts = brain.reembed()
+        finally:
+            brain.close()
+        print("re-embed complete:", ", ".join(f"{k}={v}" for k, v in counts.items()))
+        return 0
     serve(args.config, host=args.host, port=args.port)
     return 0
 

@@ -8,6 +8,12 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **`--reembed` — rebuild the whole vector store with the current embed model.** `Mimir.reembed()`
+  re-embeds every memory, library claim, and procedure trigger (CLI: stop the server, run
+  `python -m mimir.server --config mimir.toml --reembed`, restart). Use it after changing
+  `[roles.embed]`: vectors from different models are incomparable *even at the same dimension*, so a
+  model swap silently degrades recall until the store is rebuilt. Non-destructive — rows whose embed
+  call fails are left untouched, and it aborts cleanly if the embedder is degraded.
 - **`.docx` ingestion (the `[documents]` extra now pulls `python-docx`).** Word documents are
   extracted with heading-style sections as locators (e.g. `report.docx:Methods`), so they flow through
   the 📎 upload, the drop folder, the Library, and `brain.ingest(...)` exactly like `.txt`/`.md`/`.pdf`.
@@ -95,6 +101,12 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   degraded mode and resume semantic recall on their own when the model returns (DESIGN §10: fail
   loud, keep working; not a silent backend swap — same store, announced). Inner life skips a cycle
   cleanly when embeddings are down rather than storing an un-deduplicatable musing.
+- **Embed-model `"auto"` could strand a store on an unreachable model.** `"auto"` remembers the first
+  reachable embed model and stays pinned to preserve the vector space — but a live run showed the
+  remembered `embeddinggemma:300m` going away while only `nomic-embed-text:v1.5` stayed up, leaving
+  every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
+  spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
+  recovery path; `mimir.toml.example` and SETUP now spell both out.
 - **A "model not found" 404 now fails fast.** Ollama returns 404 both transiently (while
   loading/unloading) and permanently ("model not found, try pulling it first"); the latter was being
   retried 3× per node, burning time and spamming the log. A 404 whose body says "not found" is now
