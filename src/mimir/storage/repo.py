@@ -1266,6 +1266,22 @@ def upsert_library_page(gateway: StorageGateway, page: LibraryPage) -> int:
     return page.id
 
 
+def _row_to_page(row: sqlite3.Row) -> LibraryPage:
+    return LibraryPage(
+        id=row["id"], path=row["path"], title=row["title"], summary=row["summary"],
+        content_hash=row["content_hash"], created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def get_library_page(gateway: StorageGateway, page_id: int) -> LibraryPage | None:
+    def _read(conn: sqlite3.Connection) -> LibraryPage | None:
+        row = conn.execute("SELECT * FROM library_pages WHERE id = ?", (page_id,)).fetchone()
+        return _row_to_page(row) if row is not None else None
+
+    return gateway.read(_read)
+
+
 def list_library_pages(gateway: StorageGateway) -> list[LibraryPage]:
     def _read(conn: sqlite3.Connection) -> list[LibraryPage]:
         rows = conn.execute("SELECT * FROM library_pages ORDER BY updated_at DESC").fetchall()

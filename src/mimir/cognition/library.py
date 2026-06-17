@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from ..embed.base import cosine
-from ..prompts import CLAIM_EXTRACTION_SYSTEM
+from ..prompts import CLAIM_EXTRACTION_SYSTEM, LIBRARY_COMPOSE_SYSTEM
 from ..storage.models import LibraryClaim
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -75,6 +75,29 @@ def retrieve_claims(
             scored.append(ScoredClaim(claim=claim, score=score))
     scored.sort(key=lambda s: s.score, reverse=True)
     return scored[:top_k]
+
+
+def compose_page(
+    chat: Callable[[list[dict[str, str]]], str], title: str, claim_texts: list[str]
+) -> tuple[str, str]:
+    """Synthesize a composite page from a document's claims (the injected ``chat`` makes one call):
+    the LLM's fuzzy, readable understanding. Returns ``(summary, markdown)``; lenient JSON parse,
+    falling back to the raw reply as the markdown body."""
+    facts = "\n".join(f"- {t}" for t in claim_texts)
+    reply = chat([
+        {"role": "system", "content": LIBRARY_COMPOSE_SYSTEM},
+        {"role": "user", "content": f"Topic: {title}\n\nFacts:\n{facts}"},
+    ]) or ""
+    text = reply.strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            data = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, dict) and (data.get("markdown") or data.get("summary")):
+            return str(data.get("summary", "")).strip(), str(data.get("markdown", "")).strip()
+    return "", text  # fallback: the whole reply is the page body
 
 
 def render_claims(scored: list[ScoredClaim], titles: dict[int, str]) -> str:

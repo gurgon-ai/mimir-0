@@ -88,6 +88,15 @@ SELF_MODEL_SYSTEM = (
     "the notes only."
 )
 
+LIBRARY_COMPOSE_MARKER = "Write a knowledge-base page"
+LIBRARY_COMPOSE_SYSTEM = (
+    f"{LIBRARY_COMPOSE_MARKER} that synthesizes the facts below into a coherent, readable "
+    "understanding of the topic. Organize and connect them in your own words; stay faithful — add "
+    "no claims beyond the facts. Return JSON only: "
+    '{"summary": "1-2 sentence gist", "markdown": "## Heading\\n\\nprose…"}.'
+)
+
+
 CLAIM_EXTRACTION_MARKER = "Extract the atomic facts"
 CLAIM_EXTRACTION_SYSTEM = (
     f"{CLAIM_EXTRACTION_MARKER} from this passage for a knowledge index. Each fact: ONE clear, "
