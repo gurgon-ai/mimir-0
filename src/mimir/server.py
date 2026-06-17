@@ -405,9 +405,11 @@ class _Handler(BaseHTTPRequestHandler):
         user = body.get("user") or None
         speaker_kind = str(body.get("speaker_kind") or body.get("kind") or "human")
         loaded = _int_list(body.get("library_pages"))
+        deep_read = bool(body.get("deep_read"))
         with self.server.brain_lock:
             result = self.server.brain.turn(
-                text, user=user, speaker_kind=speaker_kind, loaded_pages=loaded)
+                text, user=user, speaker_kind=speaker_kind, loaded_pages=loaded,
+                deep_read=deep_read)
         # Return as soon as the reply is generated. The post-turn burst (sentinel/self-model/working
         # memory) runs OFF the hot path and the next turn settles it (DESIGN §5a) — blocking the HTTP
         # response on it would add several model calls of latency (minutes on a small edge node).
@@ -563,6 +565,7 @@ class _Handler(BaseHTTPRequestHandler):
             user = body.get("user") or None
             speaker_kind = str(body.get("speaker_kind") or body.get("kind") or "human")
             loaded = _int_list(body.get("library_pages"))
+            deep_read = bool(body.get("deep_read"))
             normalize_speaker_kind(speaker_kind)  # reject a bad kind before the stream opens (400)
         except (json.JSONDecodeError, ValueError) as exc:
             self._send_json({"error": str(exc)}, status=400)
@@ -586,7 +589,8 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             with self.server.brain_lock:
                 stream = self.server.brain.turn_stream(
-                    text, user=user, speaker_kind=speaker_kind, loaded_pages=loaded)
+                    text, user=user, speaker_kind=speaker_kind, loaded_pages=loaded,
+                    deep_read=deep_read)
                 while True:
                     try:
                         token = next(stream)
@@ -1322,6 +1326,10 @@ _HTML = """<!doctype html>
       <input type="text" id="text" placeholder="Say something to Mimir…" autocomplete="off"/>
       <button type="submit" id="send">Send</button>
     </form>
+    <label class="hint" id="deepReadWrap" style="flex:none; padding:0 12px 6px; display:flex; align-items:center; gap:6px;"
+           title="Inject the FULL composite page(s) of the most relevant document(s), not just the short cited claims — deeper but uses more of the context window.">
+      <input type="checkbox" id="deepRead"/> Deep read (pull full library pages, not just cited claims)
+    </label>
     <div id="uploadMsg" class="hint" style="flex:none; padding:0 12px 8px;"></div>
     <div id="libTray" class="hint" style="flex:none; padding:0 12px 8px; display:none;"></div>
   </div>
@@ -1613,7 +1621,8 @@ async function streamTurn(text) {
   body.classList.add("thinking"); body.textContent = "thinking…";
   let started = false;
   const begin = () => { if (!started) { started = true; body.classList.remove("thinking"); body.textContent = ""; } };
-  const resp = await fetch("/api/turn/stream", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ text, user: "operator", library_pages: [...activeSources] }) });
+  const deepRead = !!($("deepRead") && $("deepRead").checked);
+  const resp = await fetch("/api/turn/stream", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ text, user: "operator", library_pages: [...activeSources], deep_read: deepRead }) });
   if (resp.status === 401) { promptForToken(); body.classList.remove("thinking"); body.textContent = "API token required."; return; }
   if (!resp.ok) { body.classList.remove("thinking"); const e = await resp.json().catch(() => ({ error: "HTTP " + resp.status })); throw new Error(e.error); }
   const reader = resp.body.getReader(); const dec = new TextDecoder();

@@ -620,7 +620,8 @@ class Mimir:
     # -- the turn ---------------------------------------------------------------------
 
     def turn(self, text: str, user: str | None = None, *,
-             speaker_kind: str = "human", loaded_pages: list[int] | None = None) -> TurnResult:
+             speaker_kind: str = "human", loaded_pages: list[int] | None = None,
+             deep_read: bool = False) -> TurnResult:
         # ``speaker_kind`` ("human"/"ai_peer") is the caller's declaration of what kind of speaker
         # this is; validate it up front so a bad value fails the turn cleanly (DESIGN §3b).
         normalize_speaker_kind(speaker_kind)
@@ -669,8 +670,9 @@ class Mimir:
             graph_facts = self._connected_facts(text, user)
             procedures = self._matching_procedures(text, user)
             lib_text, lib_refs, lib_count = self._library_gist(text, query_vec)
-            library = self._merge_loaded_library(lib_text, loaded_pages)
-            lib_count += len(loaded_pages or [])  # user-loaded full pages are grounding too
+            pages = self._pages_to_load(loaded_pages, deep_read, lib_refs)
+            library = self._merge_loaded_library(lib_text, pages)
+            lib_count += len(pages)  # full pages (loaded or deep-read) are strong grounding too
             if self.config.library_model_fetch and lib_refs:
                 library = self._with_fetch_hint(library, lib_refs)  # let the model open a page
 
@@ -743,7 +745,7 @@ class Mimir:
 
     def turn_stream(
         self, text: str, user: str | None = None, *, speaker_kind: str = "human",
-        loaded_pages: list[int] | None = None,
+        loaded_pages: list[int] | None = None, deep_read: bool = False,
     ) -> Generator[str, None, dict[str, Any]]:
         """Like ``turn`` but yields the reply token-by-token; returns the introspection dict.
 
@@ -790,8 +792,9 @@ class Mimir:
             graph_facts = self._connected_facts(text, user)
             procedures = self._matching_procedures(text, user)
             lib_text, lib_refs, lib_count = self._library_gist(text, query_vec)
-            library = self._merge_loaded_library(lib_text, loaded_pages)
-            lib_count += len(loaded_pages or [])  # user-loaded full pages are grounding too
+            pages = self._pages_to_load(loaded_pages, deep_read, lib_refs)
+            library = self._merge_loaded_library(lib_text, pages)
+            lib_count += len(pages)  # full pages (loaded or deep-read) are strong grounding too
             bundle = build_context(
                 query=text,
                 user=user,
@@ -1966,6 +1969,20 @@ class Mimir:
         if not detail:
             return gist
         return f"{gist}\n\n{detail}" if gist else detail
+
+    def _pages_to_load(
+        self, loaded_pages: list[int] | None, deep_read: bool, refs: list[dict[str, Any]]
+    ) -> list[int]:
+        """Composite pages whose FULL Markdown should go into this turn: the ones the user loaded
+        (Load button), plus — when 'deep read' is on — the page(s) the surfaced claims came
+        from, so the model gets the whole composite, not just the cited gist (deterministic)."""
+        pages = list(dict.fromkeys(loaded_pages or []))  # de-duped, order preserved
+        if deep_read:
+            for r in refs:
+                pid = r.get("page_id")
+                if pid is not None and pid not in pages:
+                    pages.append(pid)
+        return pages
 
     _FETCH_RE = re.compile(r"<FETCH\s+id=['\"]?(\d+)['\"]?\s*/?>", re.IGNORECASE)
 

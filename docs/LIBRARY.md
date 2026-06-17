@@ -63,7 +63,10 @@ library_page_claims(page_id, claim_id)                                          
 
 - **Always-on:** hybrid over `library_claims` → short facts injected into a "Library" section, each
   **shown with its citation** (title, p.14). Exact + honest.
-- **On demand (composite):** the MD page (the fuzzy understanding) — the Load button / Phase-2 tool.
+- **On demand (composite):** the MD page (the fuzzy understanding) — three ways to pull it: the **Load
+  button** (pin a specific page), the **"Deep read" toggle** (auto-inject the full composite of the
+  doc the surfaced claims came from — deterministic, no second pass), or the **Phase-2 model fetch**
+  (the model opens a page itself; opt-in). Full pages count as grounding for the uncertainty gate.
 - **On demand (verbatim):** the exact source line/page via a claim's `locator` — for quoting/checking.
 
 ## Pipeline — both extraction and composition run in **idle**
