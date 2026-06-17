@@ -31,6 +31,7 @@ import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -258,7 +259,11 @@ class _Handler(BaseHTTPRequestHandler):
             elif route == "/api/timezones":
                 self._send_json({"zones": self.server.brain.available_timezones()})
             elif route == "/api/documents":
-                self._send_json({"folder": self.server.brain.config.documents_folder,
+                folder = self.server.brain.config.documents_folder
+                abs_path = str(Path(folder).resolve()) if folder else None
+                exists = bool(folder) and Path(folder).is_dir()
+                self._send_json({"folder": folder, "folder_abs": abs_path,
+                                 "folder_exists": exists,
                                  "documents": self.server.brain.documents()})  # lock-free (kv read)
             elif route == "/api/library":
                 self._send_json(self.server.brain.library_overview())
@@ -2137,9 +2142,16 @@ async function loadDocuments() {
   const list = $("docList");
   try {
     const r = await api("GET", "/api/documents");
-    $("docFolder").innerHTML = r.folder
-      ? `Drop folder: <code>${escapeHtml(r.folder)}</code>`
-      : "No documents folder configured (set <code>[documents] folder</code> in mimir.toml).";
+    if (!r.folder) {
+      $("docFolder").innerHTML =
+        "No documents folder configured (set <code>[documents] folder</code> in mimir.toml).";
+    } else if (r.folder_exists) {
+      $("docFolder").innerHTML = `Drop folder: <code>${escapeHtml(r.folder_abs || r.folder)}</code>`;
+    } else {
+      $("docFolder").innerHTML = `Drop folder: <code>${escapeHtml(r.folder_abs || r.folder)}</code>` +
+        ` <span style="color:#e0a04a;">— does not exist yet (create it, or it's made on first ` +
+        `upload). Relative paths resolve against the server's working directory.</span>`;
+    }
     const docs = r.documents || [];
     if (!docs.length) { list.innerHTML = '<div class="hint">No documents yet — upload one with 📎 or drop a file in the folder.</div>'; return; }
     list.innerHTML = docs.map(d => {
