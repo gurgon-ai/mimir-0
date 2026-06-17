@@ -23,6 +23,7 @@ log = logging.getLogger("mimir.documents")
 _TEXT_EXTS = {".txt", ".text", ""}
 _MARKDOWN_EXTS = {".md", ".markdown", ".mdown"}
 _PDF_EXTS = {".pdf"}
+_DOCX_EXTS = {".docx"}
 
 # ATX markdown heading, e.g. "## Section title".
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
@@ -45,9 +46,11 @@ def extract(path: Path) -> list[ExtractedUnit]:
         return _extract_markdown(path)
     if ext in _PDF_EXTS:
         return _extract_pdf(path)
+    if ext in _DOCX_EXTS:
+        return _extract_docx(path)
     raise IngestError(
         f"unsupported document type {ext!r} for {path.name}. Supported: .txt, .md in core; "
-        f".pdf via the optional extra (pip install 'mimir-0[documents]')."
+        f".pdf and .docx via the optional extra (pip install 'mimir-0[documents]')."
     )
 
 
@@ -107,4 +110,42 @@ def _extract_pdf(path: Path) -> list[ExtractedUnit]:
             units.append(ExtractedUnit(text=page_text, locator=f"p.{i + 1}"))
     if not units:
         log.warning("extract: %s yielded no extractable text (scanned/image PDF?)", path.name)
+    return units
+
+
+def _extract_docx(path: Path) -> list[ExtractedUnit]:
+    """Split a .docx into sections by Word heading styles (Heading 1/2/…, Title); the heading text
+    becomes the locator, like markdown. (python-docx reads .docx only, not legacy .doc.)"""
+    try:
+        import docx
+    except ImportError as exc:
+        raise IngestError(
+            "DOCX ingestion needs the optional extra. Install it with: "
+            "pip install 'mimir-0[documents]'"
+        ) from exc
+
+    document = docx.Document(str(path))
+    units: list[ExtractedUnit] = []
+    current_heading = ""
+    buffer: list[str] = []
+
+    def flush() -> None:
+        body = "\n".join(buffer).strip()
+        if body:
+            units.append(ExtractedUnit(text=body, locator=current_heading))
+
+    for para in document.paragraphs:
+        text = (para.text or "").strip()
+        if not text:
+            continue
+        style = (para.style.name if para.style else "") or ""
+        if style.startswith("Heading") or style == "Title":
+            flush()
+            current_heading = text
+            buffer = [text]  # keep the heading line in the section body for context
+        else:
+            buffer.append(text)
+    flush()
+    if not units:
+        log.warning("extract: %s yielded no extractable text", path.name)
     return units

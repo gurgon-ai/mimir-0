@@ -235,7 +235,7 @@ from mimir import Mimir
 
 brain = Mimir.from_config("mimir.toml")
 brain.ingest("notes/handbook.md")      # .txt and .md work in core
-brain.ingest("research/paper.pdf")     # .pdf needs: pip install 'mimir-0[documents]'
+brain.ingest("research/paper.pdf")     # .pdf / .docx need: pip install 'mimir-0[documents]'
 
 print(brain.turn("What does the handbook say about onboarding?", user="alex").reply)
 brain.close()
@@ -261,7 +261,7 @@ folder = "documents"     # a directory; the 📎 upload saves here AND you can d
 ```
 
 Two ways in, same result:
-- **📎 by the chat box** — click the paperclip, pick a `.txt`/`.md`/`.pdf`; it's saved into the
+- **📎 by the chat box** — click the paperclip, pick a `.txt`/`.md`/`.pdf`/`.docx`; it's saved into the
   folder and ingested immediately (recallable on the next turn).
 - **Drop files into the folder** yourself — they're picked up by an **idle pass** (a sleep-cycle
   phase, or the **"Scan folder now"** button on the Docs tab).
@@ -270,16 +270,18 @@ The idle pass ingests new/changed files (content-hashed, so unchanged files are 
 a **short summary of each** — a small browsable "wiki" on the Docs tab that the model also draws on.
 A changed file is re-ingested (its old chunks replaced) and re-summarized.
 
-### Enabling PDF (the one extra step)
+### Enabling PDF and DOCX (the one extra step)
 
-`.txt` and `.md` work with **zero dependencies**. PDF needs one optional package:
+`.txt` and `.md` work with **zero dependencies**. `.pdf` and `.docx` need one optional package set:
 
 ```bash
-pip install 'mimir-0[documents]'     # pulls pypdf; PDFs split by page for provenance (e.g. paper.pdf:p.4)
+pip install 'mimir-0[documents]'     # pulls pypdf + python-docx
 ```
 
-Without it, a `.pdf` **fails loud** with exactly that instruction — it never silently skips. Nothing
-else changes: once installed, `.pdf` works through the 📎, the drop folder, and `brain.ingest(...)`.
+PDFs split by page for provenance (e.g. `paper.pdf:p.4`); Word docs split by heading style (e.g.
+`report.docx:Methods`). Without the extra, a `.pdf`/`.docx` **fails loud** with that instruction — it
+never silently skips. Once installed, both work through the 📎, the drop folder, and
+`brain.ingest(...)`. (python-docx reads `.docx` only, not legacy `.doc`.)
 
 ### Integration path (build your own)
 

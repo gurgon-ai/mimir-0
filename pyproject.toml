@@ -32,7 +32,7 @@ Source = "https://github.com/gurgon-ai/mimir-0"
 [project.optional-dependencies]
 # Heavy / optional things live behind extras, never in core (DESIGN §2).
 ollama = []            # the reference Ollama adapter uses only stdlib urllib; extra reserved for future niceties
-documents = ["pypdf>=4.0"]   # PDF extraction (plain text + markdown stay dependency-free in core)
+documents = ["pypdf>=4.0", "python-docx>=1.1"]   # PDF + DOCX extraction (txt/md stay dependency-free in core)
 timezone = ["tzdata"]        # IANA tz database for hosts without one (e.g. Windows); core falls back to host-local + says so
 dev = [
     "pytest>=8.0",
