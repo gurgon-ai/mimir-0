@@ -189,3 +189,11 @@ def test_recent_thoughts_lists_musings_newest_first(brain: Mimir) -> None:
     brain.run_inner_life_tick(force=True)
     thoughts = brain.recent_thoughts(limit=5)
     assert thoughts and "text" in thoughts[0] and "created_at" in thoughts[0]
+
+
+def test_forced_tick_skips_when_embeddings_unavailable(brain: Mimir) -> None:
+    from mimir.embed.endpoint import NullEmbedder
+    brain.turn("My favorite color is blue.")     # something to muse on
+    brain._embedder = NullEmbedder()              # simulate the embed backend being down
+    out = brain.run_inner_life_tick(force=True)
+    assert out == {"ran": False, "reason": "embeddings unavailable"}

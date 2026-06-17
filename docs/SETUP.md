@@ -126,6 +126,16 @@ HTTP — no extra Python deps.
    `chat`/`bake`/`reasoning` roles; any embedding model works for `embed`. Bigger/smaller models
    trade quality for speed and VRAM. See `DESIGN.md` §4 on roles.
 
+   > ⚠️ **In endpoint mode the embedding model must stay reachable** — every turn embeds the query
+   > and what it stores, so recall depends on it. The `[roles.embed]` name (and tag) must match a
+   > model that's actually installed; `nomic-embed-text` and `nomic-embed-text:v1.5` are *different*
+   > tags to Ollama, so pin the one you pulled. **On a LAN fleet**, make sure the embed model lives
+   > on a node that's reliably up (ideally pull it on more than one) — if *no reachable node* has it,
+   > Mimir doesn't crash: it **degrades loudly to keyword-only recall** (logged, and shown in the
+   > Mind tab's system-health panel) and resumes semantic recall on its own when the model returns.
+   > **Keep one embedding model fixed for the life of a store** — switching models changes the vector
+   > space, so old and new embeddings stop being comparable until you re-embed.
+
    **Recommended models (a starting point, not a whitelist).** Mimir ships a curated, versioned
    registry (`src/mimir/cognition/recommended_models.toml`) of families it has tested — currently
    **gemma** (gemma4 e2b/e4b, gemma3:12b — *not* gemma3:4b), **qwen** (2.5/3/3.5), **llama** (3.x),

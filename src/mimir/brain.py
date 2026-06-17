@@ -85,7 +85,7 @@ from .config import AUTO_MODEL, BackendConfig, Config, ProviderSpec, RoleSpec, l
 from .context.build import ContextBundle, build_context
 from .diagnostics import install_error_capture, render_errors
 from .embed.base import Embedder, EmbeddingMode, cosine
-from .embed.endpoint import EndpointEmbedder, NullEmbedder
+from .embed.endpoint import EndpointEmbedder, NullEmbedder, ResilientEmbedder
 from .embed.locality import LocalityHashEmbedder
 from .errors import ConfigError, IngestError, StorageError
 from .model.discovery import discover_node_urls
@@ -191,7 +191,8 @@ def make_embedder(config: Config, model: ModelGateway) -> Embedder:
     if config.embed_mode is EmbeddingMode.BOOTSTRAP:
         return LocalityHashEmbedder(dim=config.embed_dim)
     if config.embed_mode is EmbeddingMode.ENDPOINT:
-        return EndpointEmbedder(model)
+        # Wrapped so a downed embed node degrades to keyword recall (loud), not a crashed turn.
+        return ResilientEmbedder(EndpointEmbedder(model))
     return NullEmbedder()
 
 
@@ -1297,6 +1298,10 @@ class Mimir:
         if not thought:
             return {"ran": False, "reason": "empty thought"}
         vec = self._embedder.embed(thought)
+        if vec is None:
+            # Embedding backend is down — skip rather than store an un-deduplicatable musing that
+            # would pile up during the outage (the embedder already logged the degradation).
+            return {"ran": False, "reason": "embeddings unavailable"}
         if self._is_duplicate_musing(thought, vec):
             # Don't pile up near-verbatim repeats — the over-retention distillation guards against.
             self._last_thought_at = now  # still spent the cadence; don't immediately retry

@@ -160,7 +160,10 @@ class OllamaProvider:
             # briefly while loading/unloading a model) are transient → worth a retry. Other
             # 4xx are request-level and permanent → fail fast.
             detail = exc.read().decode("utf-8", "replace")
-            transient = exc.code >= 500 or exc.code in (404, 422)
+            # …but a 404 "model not found, try pulling it first" is PERMANENT for this node — the
+            # model isn't installed, so retrying just burns time and spams the log. Fail fast.
+            model_missing = exc.code == 404 and "not found" in detail.lower()
+            transient = not model_missing and (exc.code >= 500 or exc.code in (404, 422))
             raise ProviderError(
                 f"Ollama returned HTTP {exc.code} for {path}: {detail}",
                 transient=transient,
