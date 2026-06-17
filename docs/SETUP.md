@@ -134,7 +134,15 @@ HTTP — no extra Python deps.
    > Mimir doesn't crash: it **degrades loudly to keyword-only recall** (logged, and shown in the
    > Mind tab's system-health panel) and resumes semantic recall on its own when the model returns.
    > **Keep one embedding model fixed for the life of a store** — switching models changes the vector
-   > space, so old and new embeddings stop being comparable until you re-embed.
+   > space, so old and new embeddings stop being comparable until you re-embed. Vectors of the *same
+   > dimension* from different models are still incomparable (the failure is silent — recall just gets
+   > worse, no error), so when you do change the embed model, **rebuild the whole store**: stop the
+   > server and run `python -m mimir.server --config mimir.toml --reembed`, then restart. It re-embeds
+   > every memory, library claim, and procedure trigger with the current model; rows whose embed call
+   > fails are left untouched (so a partial outage is non-destructive), and it aborts if the embedder
+   > is degraded. For a stable store, **pinning the exact tag** (e.g. `model = "nomic-embed-text:v1.5"`)
+   > is safer than `"auto"`, which remembers the alphabetically-first reachable embed model on first
+   > boot and stays pinned to it even if it later goes away.
 
    **Recommended models (a starting point, not a whitelist).** Mimir ships a curated, versioned
    registry (`src/mimir/cognition/recommended_models.toml`) of families it has tested — currently

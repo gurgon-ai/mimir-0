@@ -687,6 +687,52 @@ def apply_decay(gateway: StorageGateway, updates: list[tuple[float, float, int]]
     gateway.submit(_write)
 
 
+# Re-embed update batches: (vector | None, row id). None clears a vector (keyword fallback).
+_EmbeddingUpdates = list[tuple[list[float] | None, int]]
+
+
+def reembed_memories(gateway: StorageGateway, updates: _EmbeddingUpdates) -> None:
+    """Batch-replace memory embeddings — ``[(vector, id)]`` — for a re-embed pass (model change)."""
+    if not updates:
+        return
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.executemany(
+            "UPDATE memories SET embedding = ? WHERE id = ?",
+            [(embedding_to_blob(v), i) for v, i in updates],
+        )
+
+    gateway.submit(_write)
+
+
+def reembed_claims(gateway: StorageGateway, updates: _EmbeddingUpdates) -> None:
+    """Batch-replace library-claim embeddings — ``[(vector, id)]`` — for a re-embed pass."""
+    if not updates:
+        return
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.executemany(
+            "UPDATE library_claims SET embedding = ? WHERE id = ?",
+            [(embedding_to_blob(v), i) for v, i in updates],
+        )
+
+    gateway.submit(_write)
+
+
+def reembed_procedures(gateway: StorageGateway, updates: _EmbeddingUpdates) -> None:
+    """Batch-replace procedure trigger embeddings — ``[(vector, id)]`` — for a re-embed pass."""
+    if not updates:
+        return
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.executemany(
+            "UPDATE procedures SET trigger_embedding = ? WHERE id = ?",
+            [(embedding_to_blob(v), i) for v, i in updates],
+        )
+
+    gateway.submit(_write)
+
+
 def archive_memories(gateway: StorageGateway, ids: list[int]) -> int:
     """Mark memories archived (excluded from recall, kept in store). Returns rows affected."""
     if not ids:

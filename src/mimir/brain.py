@@ -123,6 +123,7 @@ from .storage.models import (
 )
 from .storage.repo import (
     add_forum_post,
+    browse_memories,
     bump_procedure_uses,
     claims_for_document,
     claims_for_page,
@@ -146,12 +147,16 @@ from .storage.repo import (
     list_library_documents,
     list_library_pages,
     list_memories,
+    list_procedures,
     list_sessions,
     pages_for_claims,
     recent_conversation,
     record_access,
     record_conversation_turn,
     record_interaction,
+    reembed_claims,
+    reembed_memories,
+    reembed_procedures,
     replace_document_claims,
     retier_by_provenance,
     save_memory,
@@ -1616,6 +1621,59 @@ class Mimir:
                  digest["total"],
                  ", ".join(f"{k}:{v}" for k, v in sorted(counts.items())) or "none")
         return digest
+
+    def reembed(self) -> dict[str, int]:
+        """Re-embed every stored vector (memories + library claims + procedure triggers) with the
+        CURRENT embed model, so the whole store shares one vector space.
+
+        Embeddings of the SAME dimension produced by DIFFERENT models are NOT comparable — switching
+        embed models silently corrupts recall until the store is rebuilt. Run this once after any
+        embed-model change. Best run with the live server stopped (exclusive DB writer); rows whose
+        embed call fails are left untouched (counted under 'failed') so a partial outage is non-
+        destructive. The embed model must be reachable, or every row 'fails' and nothing changes."""
+        if self._embedder.mode is EmbeddingMode.DEGRADED:
+            log.warning("reembed: embedder degraded (%s) — aborting; fix the embed backend first",
+                        self._embedder.mode.banner())
+            return {"memories": 0, "claims": 0, "procedures": 0, "failed": 0, "aborted": 1}
+        counts = {"memories": 0, "claims": 0, "procedures": 0, "failed": 0}
+        mem_updates: list[tuple[list[float] | None, int]] = []
+        for m in browse_memories(self._storage, kind=MemoryKind.MEMORY, limit=1_000_000):
+            if not (m.text and m.id):
+                continue
+            vec = self._embedder.embed(m.text)
+            if vec is None:
+                counts["failed"] += 1
+                continue
+            mem_updates.append((vec, m.id))
+            counts["memories"] += 1
+        reembed_memories(self._storage, mem_updates)
+
+        claim_updates: list[tuple[list[float] | None, int]] = []
+        for c in list_library_claims(self._storage):
+            if not (c.text and c.id):
+                continue
+            vec = self._embedder.embed(c.text)
+            if vec is None:
+                counts["failed"] += 1
+                continue
+            claim_updates.append((vec, c.id))
+            counts["claims"] += 1
+        reembed_claims(self._storage, claim_updates)
+
+        proc_updates: list[tuple[list[float] | None, int]] = []
+        for p in list_procedures(self._storage):
+            if not (p.trigger and p.id):
+                continue
+            vec = self._embedder.embed(p.trigger)
+            if vec is None:
+                counts["failed"] += 1
+                continue
+            proc_updates.append((vec, p.id))
+            counts["procedures"] += 1
+        reembed_procedures(self._storage, proc_updates)
+
+        log.info("reembed (model=%s): %s", self._embedder.mode.banner(), counts)
+        return counts
 
     _SELF_KNOWLEDGE_HASH_KEY = "self_knowledge_hash"
 
