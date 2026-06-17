@@ -129,6 +129,15 @@ doc = "README.md"
 # .txt/.md work in core; .pdf needs:  pip install 'mimir-0[documents]'.  Empty/unset disables.
 folder = "documents"
 
+[library]
+# The Library layer (docs/LIBRARY.md): the system's own long-form knowledge in three tiers of truth —
+# your source documents (the [documents] folder above, ground truth), short CITED CLAIMS distilled
+# into the DB (always-on, surfaced in chat with their source title + locator), and Markdown COMPOSITE
+# pages (the synthesized "understanding", written to `folder` below — a separate tree). Built in idle;
+# a composite can be pinned in the Library tab to load its full detail into the next message.
+folder = "library"           # where composite Markdown pages are written (empty = no composites)
+claims_top_k = 5             # how many cited claims to surface per turn
+
 [diagnostics]
 # Self-observability (DESIGN §10): the system surfaces its own recent errors into the turn's context
 # ("I've had an error") and digests them in the nightly cycle's health phase. Fail-loud + fail-aware.

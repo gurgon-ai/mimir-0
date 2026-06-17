@@ -607,7 +607,7 @@ class Mimir:
     # -- the turn ---------------------------------------------------------------------
 
     def turn(self, text: str, user: str | None = None, *,
-             speaker_kind: str = "human") -> TurnResult:
+             speaker_kind: str = "human", loaded_pages: list[int] | None = None) -> TurnResult:
         # ``speaker_kind`` ("human"/"ai_peer") is the caller's declaration of what kind of speaker
         # this is; validate it up front so a bad value fails the turn cleanly (DESIGN §3b).
         normalize_speaker_kind(speaker_kind)
@@ -655,7 +655,7 @@ class Mimir:
             working_memory = current_working_memory(self._storage)
             graph_facts = self._connected_facts(text, user)
             procedures = self._matching_procedures(text, user)
-            library = self._library_gist(text, query_vec)
+            library = self._merge_loaded_library(self._library_gist(text, query_vec), loaded_pages)
 
             # 2. Assemble the epistemic prompt.
             bundle = build_context(
@@ -721,7 +721,8 @@ class Mimir:
         return TurnResult(reply=reply, context=bundle, baked=baked)
 
     def turn_stream(
-        self, text: str, user: str | None = None, *, speaker_kind: str = "human"
+        self, text: str, user: str | None = None, *, speaker_kind: str = "human",
+        loaded_pages: list[int] | None = None,
     ) -> Generator[str, None, dict[str, Any]]:
         """Like ``turn`` but yields the reply token-by-token; returns the introspection dict.
 
@@ -767,7 +768,7 @@ class Mimir:
             working_memory = current_working_memory(self._storage)
             graph_facts = self._connected_facts(text, user)
             procedures = self._matching_procedures(text, user)
-            library = self._library_gist(text, query_vec)
+            library = self._merge_loaded_library(self._library_gist(text, query_vec), loaded_pages)
             bundle = build_context(
                 query=text,
                 user=user,
@@ -1850,6 +1851,22 @@ class Mimir:
             return None
         titles = {d.id: d.title for d in list_library_documents(self._storage)}
         return render_claims(top, titles) or None
+
+    def _merge_loaded_library(self, gist: str | None, loaded_pages: list[int] | None) -> str | None:
+        """Append the full Markdown of any composite pages the user explicitly **loaded** (the Load
+        button / 'active sources') to the Library section, so a pulled page is in this turn's
+        context. Detail the user chose to spend the window on — beyond the always-on gist."""
+        if not loaded_pages:
+            return gist
+        blocks: list[str] = []
+        for pid in loaded_pages:
+            page = self.library_page(int(pid))
+            if page and page.get("markdown"):
+                blocks.append(f"## {page['title']}\n{page['markdown']}")
+        if not blocks:
+            return gist
+        detail = "Full pages you've loaded:\n\n" + "\n\n".join(blocks)
+        return f"{gist}\n\n{detail}" if gist else detail
 
     def library_overview(self) -> dict[str, Any]:
         """The Library for the UI: source documents (with claim counts) + composite pages."""

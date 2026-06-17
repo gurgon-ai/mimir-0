@@ -17,9 +17,14 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   `library_claims` / `library_pages` / `library_page_claims`) and **Phase 1b — the claims spine**:
   an idle pass (`ingest_pending_library`, a `library` sleep phase) distils each source document into
   cited claims, and a hybrid retrieval surfaces the most relevant claims into a "Library" context
-  section adjacent to memory, **each fact shown with its `[title, locator]` citation**. Composites +
-  the Load button (Phase 1c) and a model-driven fetch tool (Phase 2) are staged. Influenced by the
-  Karpathy "LLM wiki" pattern, made provenance-preserving + small-window + non-destructive.
+  section adjacent to memory, **each fact shown with its `[title, locator]` citation**. **Phase 1c**
+  adds the **composites + Load UI**: the idle pass synthesizes a Markdown composite (the fuzzy
+  understanding) from each document's claims into a separate `[library]` folder, linked to its claims
+  (non-destructive — a hand-edited page is left alone); a **Library tab** lists pages + sources, shows
+  a page's full Markdown with its source citations, and lets you **pin a page to chat** (loaded into
+  the next turn). `GET /api/library{,/page,/source}`, `POST /api/library/scan`. A model-driven fetch
+  tool (Phase 2) is staged. Influenced by the Karpathy "LLM wiki" pattern, made provenance-preserving
+  + small-window + non-destructive.
 - **A documents drop folder + 📎 upload → idle-built local "wiki" (DESIGN §8).** A `[documents]
   folder` the UI's paperclip saves into and you can drop files into directly; idle time (a new
   `documents` sleep phase, or the Docs tab's "Scan folder now") ingests new/changed files into
