@@ -59,4 +59,16 @@ def test_idle_scan_ingests_dropped_files_and_summarizes(docbrain: Mimir) -> None
 
 def test_no_folder_configured_is_a_quiet_noop(brain: Mimir) -> None:
     assert brain.ingest_pending_documents() == {
-        "folder": None, "ingested": [], "summarized": 0, "failed": []}
+        "folder": None, "ingested": [], "summarized": 0, "failed": [], "unsupported": []}
+
+
+def test_unsupported_and_failed_files_are_reported_not_swallowed(docbrain: Mimir) -> None:
+    """A scan must never silently show 0 — failures and wrong-type drops surface (DESIGN §10)."""
+    folder = docbrain._docs_folder()
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "notes.txt").write_text("Real ingestable text about hives.")
+    (folder / "photo.rtf").write_text("not a supported type")   # wrong suffix → unsupported
+    report = docbrain.ingest_pending_documents()
+    assert "notes.txt" in report["ingested"]
+    assert "photo.rtf" in report["unsupported"]                 # reported, not invisibly skipped
+    assert report["failed"] == []

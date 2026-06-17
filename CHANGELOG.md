@@ -107,6 +107,12 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **"Scan folder now" no longer hides ingestion failures — it reports them.** A drop folder full of
+  `.docx`/`.pdf` files with the `[documents]` extra missing (or any per-file extract error) reported a
+  bare "Ingested 0," reading as "there are no documents." The scan now returns `failed` (each with its
+  error message) and `unsupported` (wrong-type files it skipped), and the Docs tab surfaces both —
+  failures in red (with the reason, e.g. the `pip install 'mimir-0[documents]'` instruction), skipped
+  types in amber. A single bad file no longer aborts the scan (per-file isolation, DESIGN §10).
 - **The Docs tab now shows the drop folder's resolved absolute path + whether it exists.** It used to
   print the bare configured value (e.g. `documents`), so a relative folder gave no hint of *where* it
   actually resolved — and if the server ran from a different working directory it silently watched the

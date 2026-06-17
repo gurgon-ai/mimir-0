@@ -2229,7 +2229,13 @@ $("docScan").addEventListener("click", async () => {
   $("docScanMsg").textContent = "Scanning…";
   try {
     const r = await api("POST", "/api/documents/scan");
-    $("docScanMsg").textContent = `Ingested ${(r.ingested||[]).length}, summarized ${r.summarized||0}.`;
+    const failed = r.failed || [], unsupported = r.unsupported || [];
+    let html = `Ingested ${(r.ingested||[]).length}, summarized ${r.summarized||0}.`;
+    if (failed.length) html += `<br><span style="color:#e0604a;">Failed (${failed.length}): ` +
+      failed.map(f => `<b>${escapeHtml(f.name)}</b> — ${escapeHtml(f.error)}`).join("; ") + `</span>`;
+    if (unsupported.length) html += `<br><span style="color:#e0a04a;">Skipped (unsupported type): ` +
+      unsupported.map(escapeHtml).join(", ") + `</span>`;
+    $("docScanMsg").innerHTML = html;
     loadDocuments();
   } catch (e) { $("docScanMsg").textContent = "Error: " + e.message; }
 });
