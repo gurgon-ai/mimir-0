@@ -91,7 +91,7 @@ from .errors import ConfigError, IngestError, StorageError
 from .model.discovery import discover_node_urls
 from .model.gateway import ModelGateway
 from .model.pool import ProviderPool
-from .model.provider import Provider
+from .model.provider import Provider, is_embedding_model
 from .model.providers.mock import MockProvider
 from .model.providers.ollama import OllamaProvider
 from .retrieval.hybrid import retrieve
@@ -311,6 +311,8 @@ class Mimir:
         vetoed_nodes = disabled_nodes(self._storage)
         resolved: dict[str, str] = {}
         for role in self._auto_roles:
+            if role == "embed":
+                continue  # embeddings need a STABLE, remembered choice — see _resolve_embed_model
             model = resolve_auto_model(
                 self._storage, role, available=available, disabled=disabled
             )
@@ -333,7 +335,39 @@ class Mimir:
                 self._model.set_role_fallbacks(role, chain)
         if resolved:
             log.info("fleet: auto-resolved role(s) %s", resolved)
+        self._resolve_embed_model()  # embed is auto-discovered + remembered separately
         return resolved
+
+    _EMBED_MODEL_KEY = "embed_model"
+
+    def _resolve_embed_model(self) -> None:
+        """Auto-discover + REMEMBER the embedding model when ``[roles.embed] = "auto"`` (DESIGN §4).
+
+        Embeddings are special: different models produce different vector spaces, so the choice must
+        be STABLE — silently flipping models would make old and new embeddings incomparable. So:
+        prefer the remembered model; the first time, pick one deterministically and persist it; if
+        the remembered model isn't currently reachable, stay pinned to it (the resilient embedder
+        degrades to keyword recall until it returns) rather than switch to an incompatible one. A
+        pinned (non-``auto``) embed role is respected untouched."""
+        if "embed" not in self._auto_roles:
+            return
+        embed_models = sorted(m for m in self._model.available_models() if is_embedding_model(m))
+        remembered = kv_get(self._storage, self._EMBED_MODEL_KEY)
+        if remembered:
+            self._model.set_role_model("embed", remembered)
+            if embed_models and remembered not in embed_models:
+                log.warning(
+                    "embed: remembered model %r not currently reachable (available: %s); staying "
+                    "pinned to preserve the vector space — pull it back, or clear the %r kv to "
+                    "re-pick (and re-embed).", remembered, embed_models, self._EMBED_MODEL_KEY,
+                )
+            return
+        if not embed_models:
+            return  # nothing discovered yet; the gateway's sorted stop-gap covers call-time
+        chosen = embed_models[0]
+        self._model.set_role_model("embed", chosen)
+        kv_set(self._storage, self._EMBED_MODEL_KEY, chosen)
+        log.info("embed: auto-discovered %r (remembered for vector-space stability)", chosen)
 
     # -- live node speed / health (speed-aware routing, DESIGN §5) ---------------------
 

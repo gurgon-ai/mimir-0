@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..model.gateway import ModelGateway
+from ..model.provider import is_embedding_model
 from ..storage.gateway import StorageGateway
 from ..storage.models import CatalogueEntry
 from ..storage.repo import list_catalogue, replace_catalogue
@@ -256,7 +257,9 @@ def resolve_auto_model(
     disabled = disabled or set()
 
     def usable(name: str) -> bool:
-        return name in available and name not in disabled and "embed" not in name.lower()
+        # Never route a chat-style role to an embedding model (and catch the ones without "embed" in
+        # the name — all-minilm, bge, … — that a bare substring check would miss).
+        return name in available and name not in disabled and not is_embedding_model(name)
 
     # 1. Measured-best (already gated + disabled-filtered by recommend_roles).
     rec = recommend_roles(storage, disabled=disabled).get(role)

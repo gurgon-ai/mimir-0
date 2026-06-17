@@ -185,9 +185,12 @@ host = "http://localhost:11434"
 #                                   # Must match your production num_ctx or the warm KV cache rebuilds.
 
 # --- roles: one model per cognitive job. `model` is required; other keys are tuned params. ---
+# You provide whatever chat LLM(s) you like AND at least one embedding model (for "endpoint" mode).
+# Set `model = "auto"` to have Mimir DISCOVER and route to installed models on its own — pull what
+# you want on your node(s) and it picks per role. Concrete names override auto.
 
 [roles.chat]
-model = "llama3.1:8b"
+model = "llama3.1:8b"  # or "auto" to let Mimir pick the best installed chat model (benchmark-ranked)
 temperature = 0.7
 num_ctx = 8192
 
@@ -200,8 +203,11 @@ model = "llama3.1:8b"
 temperature = 0.3
 
 [roles.embed]
-# Required only when [embeddings] mode = "endpoint".
-model = "nomic-embed-text"
+# REQUIRED when [embeddings] mode = "endpoint" — you must have at least one embedding model installed.
+# "auto" discovers an installed embedding model and REMEMBERS the choice (the vector space must stay
+# stable — switching embedding models makes old and new embeddings incomparable). Pull the SAME
+# embedding model on every node so recall survives any single node going down.
+model = "auto"
 
 # [roles.council] is OPTIONAL. The inner council auto-discovers the models actually installed and
 # spreads its personas across them; this entry only sets the fallback model + tuned params (e.g. a

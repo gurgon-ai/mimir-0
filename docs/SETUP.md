@@ -169,6 +169,12 @@ The template is fully commented. The essentials:
 - `[roles.chat|bake|reasoning|embed]` — one `model` per role, plus tuned params. **Keep `num_ctx`
   identical across roles that share a warm model**, or Ollama reloads the model (slow) — see
   `DESIGN.md` §4.
+  - **What you must provide:** whatever chat LLM(s) you like for `chat`/`bake`/`reasoning`, **and at
+    least one embedding model** for `embed` (when `[embeddings] mode = "endpoint"`). Set
+    `model = "auto"` and Mimir **discovers and routes to** what's installed — chat roles pick the
+    best-benchmarked model, and `embed` discovers an embedding model and **remembers the choice** so
+    the vector space stays stable. Pull the same embedding model on every node so recall survives any
+    one node going down.
 
 ### 5.3 Run it
 
@@ -489,8 +495,9 @@ temperature = 0.0               # faithful extraction; no creativity
 model = "llama3.1:8b"
 temperature = 0.3
 
-[roles.embed]                   # required only when embeddings.mode = "endpoint"
-model = "nomic-embed-text"
+[roles.embed]                   # REQUIRED when embeddings.mode = "endpoint" — install ≥1 embed model
+model = "auto"                   # discovers an installed embedding model + remembers it (stable
+                                 # vector space); or pin an exact name/tag. Same model on every node.
 ```
 
 Misconfiguration **fails loud** with an instruction — a missing required role, an `endpoint` embed

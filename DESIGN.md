@@ -223,6 +223,14 @@ and anything the pool can't currently reach:
    ideal size (approved models win the first round);
 4. **any reachable model** — last resort, so `auto` always yields something runnable.
 
+The **embed role is auto-discovered too, but specially**: embedding models define the *vector space*,
+so the choice must be stable — `auto` discovers an installed embedding model, **remembers** it
+(persisted), and prefers the remembered one across restarts; if it goes unreachable the system stays
+pinned to it and degrades to keyword recall (loud) rather than silently switching to an incompatible
+model and corrupting recall. (Chat-style resolution explicitly excludes embedding models, and vice
+versa, via a shared `is_embedding_model` check.) You provide whatever chat LLM(s) you like plus at
+least one embedding model; pull the same embedding model on every node so recall survives a node loss.
+
 A user who distrusts a model **disables** it (a bias veto) and resolution skips it everywhere. The
 default is **local-only** — the LAN fleet is opt-in (`[backend] lan_backend`), never polled unless
 asked. This serves the spread of users — one powerful machine, an edge node borrowing LAN GPUs, or
