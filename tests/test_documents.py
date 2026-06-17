@@ -58,6 +58,29 @@ def test_extract_docx_splits_on_headings(tmp_path: Path) -> None:
     assert "alpha body" in first.text
 
 
+def test_extract_docx_reads_table_cells(tmp_path: Path) -> None:
+    """A table-structured .docx (e.g. a safety matrix) must not be lost — cell text is extracted,
+    in document order, under the heading that precedes the table."""
+    docx = pytest.importorskip("docx")
+    f = tmp_path / "matrix.docx"
+    d = docx.Document()
+    d.add_heading("Hazards", level=1)
+    table = d.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Aerial lift"
+    table.cell(0, 1).text = "Wear a harness"
+    table.cell(1, 0).text = "Chemical handling"
+    table.cell(1, 1).text = "Use ventilation"
+    d.save(str(f))
+    units = extract(f)
+    text = "\n".join(u.text for u in units)
+    # Every cell's content survives (the old paragraphs-only extractor dropped all of it).
+    for cell in ("Aerial lift", "Wear a harness", "Chemical handling", "Use ventilation"):
+        assert cell in text
+    # The table lands under its preceding heading, not in a headingless limbo.
+    hazards = next(u for u in units if u.locator == "Hazards")
+    assert "Aerial lift" in hazards.text
+
+
 def test_chunk_preserves_locator_and_bounds_size() -> None:
     # ~120 paragraphs of a few tokens each → must split into several chunks.
     body = "\n\n".join(f"paragraph number {i} has a little content here" for i in range(120))

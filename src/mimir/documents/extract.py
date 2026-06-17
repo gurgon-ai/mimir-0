@@ -113,18 +113,76 @@ def _extract_pdf(path: Path) -> list[ExtractedUnit]:
     return units
 
 
+def _docx_block_items(parent: object) -> list[object]:
+    """Paragraphs and tables of a docx body (or table cell) in **document order**.
+
+    python-docx exposes ``.paragraphs`` and ``.tables`` as separate, unordered collections —
+    iterating only paragraphs silently drops every table (and a table-structured document, like a
+    safety matrix, can be almost entirely tables). Walking the underlying XML keeps the two
+    interleaved, so table content stays attached to the heading that precedes it."""
+    from docx.document import Document as _DocumentObject
+    from docx.oxml.table import CT_Tbl
+    from docx.oxml.text.paragraph import CT_P
+    from docx.table import Table, _Cell
+    from docx.text.paragraph import Paragraph
+
+    if isinstance(parent, _DocumentObject):
+        parent_elm = parent.element.body
+    elif isinstance(parent, _Cell):
+        parent_elm = parent._tc
+    else:
+        return []
+    items: list[object] = []
+    for child in parent_elm.iterchildren():
+        if isinstance(child, CT_P):
+            items.append(Paragraph(child, parent))
+        elif isinstance(child, CT_Tbl):
+            items.append(Table(child, parent))
+    return items
+
+
+def _docx_table_lines(table: object, seen: set[int]) -> list[str]:
+    """Render a table as readable rows — non-empty cells joined by ' | ', one line per row. Merged
+    cells (which python-docx repeats per grid position) are de-duped via ``seen``; nested tables in
+    a cell are recursed into."""
+    from docx.table import Table
+
+    lines: list[str] = []
+    for row in table.rows:  # type: ignore[attr-defined]
+        cells: list[str] = []
+        for cell in row.cells:
+            tc_id = id(cell._tc)
+            if tc_id in seen:  # a merged cell already emitted (horizontal or vertical span)
+                continue
+            seen.add(tc_id)
+            parts = [(cell.text or "").strip()]
+            for block in _docx_block_items(cell):
+                if isinstance(block, Table):
+                    parts.extend(_docx_table_lines(block, seen))
+            text = " ".join(p for p in parts if p).strip()
+            if text:
+                cells.append(text)
+        if cells:
+            lines.append(" | ".join(cells))
+    return lines
+
+
 def _extract_docx(path: Path) -> list[ExtractedUnit]:
     """Split a .docx into sections by Word heading styles (Heading 1/2/…, Title); the heading text
-    becomes the locator, like markdown. (python-docx reads .docx only, not legacy .doc.)"""
+    becomes the locator, like markdown. Walks paragraphs **and tables** in document order, so
+    table-structured documents aren't lost. (python-docx reads .docx only, not legacy .doc.)"""
     try:
-        import docx
+        import docx  # noqa: F401  (presence check; the walker imports submodules lazily)
     except ImportError as exc:
         raise IngestError(
             "DOCX ingestion needs the optional extra. Install it with: "
             "pip install 'mimir-0[documents]'"
         ) from exc
+    from docx import Document
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
 
-    document = docx.Document(str(path))
+    document = Document(str(path))
     units: list[ExtractedUnit] = []
     current_heading = ""
     buffer: list[str] = []
@@ -134,17 +192,22 @@ def _extract_docx(path: Path) -> list[ExtractedUnit]:
         if body:
             units.append(ExtractedUnit(text=body, locator=current_heading))
 
-    for para in document.paragraphs:
-        text = (para.text or "").strip()
-        if not text:
-            continue
-        style = (para.style.name if para.style else "") or ""
-        if style.startswith("Heading") or style == "Title":
-            flush()
-            current_heading = text
-            buffer = [text]  # keep the heading line in the section body for context
-        else:
-            buffer.append(text)
+    for block in _docx_block_items(document):
+        if isinstance(block, Paragraph):
+            text = (block.text or "").strip()
+            if not text:
+                continue
+            style = (block.style.name if block.style else "") or ""
+            if style.startswith("Heading") or style == "Title":
+                flush()
+                current_heading = text
+                buffer = [text]  # keep the heading line in the section body for context
+            else:
+                buffer.append(text)
+        elif isinstance(block, Table):
+            rows = _docx_table_lines(block, set())
+            if rows:
+                buffer.append("\n".join(rows))
     flush()
     if not units:
         log.warning("extract: %s yielded no extractable text", path.name)

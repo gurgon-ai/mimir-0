@@ -330,9 +330,9 @@ class _Handler(BaseHTTPRequestHandler):
             elif route == "/api/documents/upload":
                 self._send_json(self._upload_document(body))
             elif route == "/api/documents/scan":
-                self._send_json(self._scan_documents())
+                self._send_json(self._scan_documents(body))
             elif route == "/api/library/scan":
-                self._send_json(self._scan_library())
+                self._send_json(self._scan_library(body))
             elif route == "/api/sleep":
                 self._send_json(self._sleep())
             elif route == "/api/deliberate/run":
@@ -524,10 +524,11 @@ class _Handler(BaseHTTPRequestHandler):
         except (ConfigError, IngestError) as exc:
             raise MimirError(str(exc)) from exc
 
-    def _scan_documents(self) -> dict[str, Any]:
+    def _scan_documents(self, body: dict[str, Any]) -> dict[str, Any]:
         # Manual "scan folder now": ingest any new/changed dropped files + fill missing summaries.
+        # force=True re-ingests every file even if unchanged (e.g. after an extractor improvement).
         with self.server.brain_lock:
-            return self.server.brain.ingest_pending_documents(force=False)
+            return self.server.brain.ingest_pending_documents(force=bool(body.get("force")))
 
     def _library_page(self, params: dict[str, list[str]]) -> dict[str, Any]:
         page = self.server.brain.library_page(int((params.get("id") or ["0"])[0]))
@@ -541,10 +542,11 @@ class _Handler(BaseHTTPRequestHandler):
             raise MimirError("no such library source")
         return doc
 
-    def _scan_library(self) -> dict[str, Any]:
+    def _scan_library(self, body: dict[str, Any]) -> dict[str, Any]:
         # Manual "scan library now": (re)distil source docs into cited claims + composites.
+        # force=True re-distils every source doc even if unchanged (e.g. after an extractor change).
         with self.server.brain_lock:
-            return self.server.brain.ingest_pending_library(force=False)
+            return self.server.brain.ingest_pending_library(force=bool(body.get("force")))
 
     def _turn_stream(self) -> None:
         """Server-Sent-Events stream of a turn: token events, then a done event with introspect.
@@ -1513,6 +1515,8 @@ _HTML = """<!doctype html>
         <code>.pdf</code> needs the optional extra (see docs/SETUP.md).</div>
       <div id="docFolder" class="hint" style="margin-bottom:8px;">—</div>
       <button class="secondary" id="docScan" type="button">Scan folder now</button>
+      <label class="hint" style="margin-left:10px;"><input type="checkbox" id="docForce"/> force
+        re-ingest (re-read unchanged files)</label>
       <span id="docScanMsg" class="hint" style="margin-left:8px;"></span>
       <div id="docList" style="margin-top:12px;"></div>
 
@@ -1537,6 +1541,8 @@ _HTML = """<!doctype html>
         source), and <b>composite pages</b> — the synthesized understanding. Built in idle from the
         documents folder; pin a page to pull its full detail into the next message.</div>
       <button class="secondary" id="libScan" type="button">Scan library now</button>
+      <label class="hint" style="margin-left:10px;"><input type="checkbox" id="libForce"/> force
+        re-distil (re-read unchanged docs)</label>
       <span id="libScanMsg" class="hint" style="margin-left:8px;"></span>
       <h2 style="margin-top:16px;">Composite pages</h2>
       <div id="libPages"></div>
@@ -2219,7 +2225,7 @@ async function openLibraryPage(id) {
 $("libScan").addEventListener("click", async () => {
   $("libScanMsg").textContent = "Scanning…";
   try {
-    const r = await api("POST", "/api/library/scan");
+    const r = await api("POST", "/api/library/scan", { force: $("libForce").checked });
     $("libScanMsg").textContent = `${(r.documents||[]).length} doc(s) → ${r.claims||0} claim(s), ${r.composed||0} composite(s).`;
     loadLibrary();
   } catch (e) { $("libScanMsg").textContent = "Error: " + e.message; }
@@ -2228,7 +2234,7 @@ $("libScan").addEventListener("click", async () => {
 $("docScan").addEventListener("click", async () => {
   $("docScanMsg").textContent = "Scanning…";
   try {
-    const r = await api("POST", "/api/documents/scan");
+    const r = await api("POST", "/api/documents/scan", { force: $("docForce").checked });
     const failed = r.failed || [], unsupported = r.unsupported || [];
     let html = `Ingested ${(r.ingested||[]).length}, summarized ${r.summarized||0}.`;
     if (failed.length) html += `<br><span style="color:#e0604a;">Failed (${failed.length}): ` +
