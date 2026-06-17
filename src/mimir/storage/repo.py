@@ -1321,3 +1321,23 @@ def claims_for_page(gateway: StorageGateway, page_id: int) -> list[LibraryClaim]
         return [_row_to_claim(r) for r in rows]
 
     return gateway.read(_read)
+
+
+def pages_for_claims(gateway: StorageGateway, claim_ids: list[int]) -> dict[int, list[int]]:
+    """Map each claim id → the composite page id(s) it helped compose (claim → its composites).
+    The reverse of ``claims_for_page`` — used to offer 'load the page this fact came from'."""
+    if not claim_ids:
+        return {}
+
+    def _read(conn: sqlite3.Connection) -> dict[int, list[int]]:
+        ph = ",".join("?" * len(claim_ids))
+        rows = conn.execute(
+            f"SELECT claim_id, page_id FROM library_page_claims WHERE claim_id IN ({ph})",
+            claim_ids,
+        ).fetchall()
+        out: dict[int, list[int]] = {}
+        for cid, pid in rows:
+            out.setdefault(int(cid), []).append(int(pid))
+        return out
+
+    return gateway.read(_read)

@@ -406,7 +406,8 @@ class _Handler(BaseHTTPRequestHandler):
         # Return as soon as the reply is generated. The post-turn burst (sentinel/self-model/working
         # memory) runs OFF the hot path and the next turn settles it (DESIGN §5a) — blocking the HTTP
         # response on it would add several model calls of latency (minutes on a small edge node).
-        return {"reply": result.reply, "introspect": result.context.introspect()}
+        return {"reply": result.reply, "introspect": result.context.introspect(),
+                "library_sources": result.library_sources}
 
     def _establish(self, body: dict[str, Any]) -> dict[str, Any]:
         answers = body.get("answers") or {}
@@ -1609,7 +1610,25 @@ async function streamTurn(text) {
     const m = document.createElement("div"); m.className = "meta";
     m.textContent = `sources: ${introspect.source_count} · ${introspect.embed_mode}` + (introspect.uncertainty_triggered ? " · ⚠ thin evidence" : "");
     bubble.appendChild(m);
+    renderLibraryChips(bubble, introspect.library_sources);
   }
+}
+
+// After a reply that drew on the Library, show the source page(s) with a one-click Load (pin).
+function renderLibraryChips(bubble, sources) {
+  const refs = (sources || []).filter(s => s.page_id && !activeSources.has(s.page_id));
+  if (!refs.length) return;
+  const row = document.createElement("div"); row.className = "meta";
+  row.innerHTML = "📖 " + refs.map(s =>
+    `<a href="#" data-load="${s.page_id}" title="load the full source page into your next message">` +
+    `${escapeHtml(s.title || ("#"+s.page_id))} — Load</a>`).join(" · ");
+  row.querySelectorAll("[data-load]").forEach(a => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    const id = parseInt(a.dataset.load);
+    if (libTitles[id] === undefined) { libTitles[id] = a.textContent.replace(/ — Load$/, ""); }
+    activeSources.add(id); renderLibTray(); a.textContent = "pinned ✓";
+  }));
+  bubble.appendChild(row);
 }
 
 async function refreshState() {
