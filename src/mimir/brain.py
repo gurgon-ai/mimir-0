@@ -66,7 +66,7 @@ from .cognition.inner_life import (
     pick_stimulus,
     should_think,
 )
-from .cognition.library import extract_claims, render_claims, retrieve_claims
+from .cognition.library import compose_page, extract_claims, render_claims, retrieve_claims
 from .cognition.narratives import render_recent_history, run_narrative_cycle
 from .cognition.onboarding import (
     onboarding_profile,
@@ -115,6 +115,7 @@ from .storage.models import (
     EvidenceTier,
     LibraryClaim,
     LibraryDocument,
+    LibraryPage,
     Memory,
     MemoryKind,
     Procedure,
@@ -122,6 +123,8 @@ from .storage.models import (
 from .storage.repo import (
     add_forum_post,
     bump_procedure_uses,
+    claims_for_document,
+    claims_for_page,
     delete_forum_post,
     delete_forum_thread,
     delete_library_document,
@@ -129,6 +132,7 @@ from .storage.repo import (
     disabled_models,
     disabled_nodes,
     get_forum_thread,
+    get_library_page,
     interaction_history,
     kv_get,
     kv_set,
@@ -139,6 +143,7 @@ from .storage.repo import (
     list_forum_threads,
     list_library_claims,
     list_library_documents,
+    list_library_pages,
     list_memories,
     list_sessions,
     recent_conversation,
@@ -151,9 +156,11 @@ from .storage.repo import (
     set_forum_thread_status,
     set_model_enabled,
     set_node_enabled,
+    set_page_claims,
     update_catalogue_speed,
     update_memory,
     upsert_library_document,
+    upsert_library_page,
 )
 
 log = logging.getLogger("mimir")
@@ -1742,17 +1749,23 @@ class Mimir:
     def _claim_chat(self, messages: list[dict[str, str]]) -> str:
         return self._model.chat("reasoning", messages)  # claim extraction, off the chat model
 
+    def _library_compose_folder(self) -> Path | None:
+        # Where the Markdown composites (the fuzzy understanding) are written — a separate tree.
+        return Path(self.config.library_folder) if self.config.library_folder else None
+
     def ingest_pending_library(self, *, force: bool = False) -> dict[str, Any]:
-        """Idle pass: record each source document (ground truth, left in place) and distil it into
-        cited claims (each carrying its source locator). Drops a document whose file is gone (and
-        cascades its claims). A sleep phase; fail-soft per file (§10). Composites are Phase 1c."""
+        """Idle pass over the source documents (ground truth, left in place): record each, distil it
+        into cited claims, and compile a Markdown composite (the fuzzy understanding) from those
+        claims. Drops a document whose file is gone (cascading its claims). A sleep phase; fail-soft
+        per file (§10)."""
         folder = self._library_source_folder()
         if folder is None:
-            return {"folder": None, "documents": [], "claims": 0, "dropped": 0}
+            return {"folder": None, "documents": [], "claims": 0, "composed": 0, "dropped": 0}
         existing = {d.path: d for d in list_library_documents(self._storage)}
         seen: set[str] = set()
         processed: list[str] = []
         total_claims = 0
+        composed = 0
         for path in list_documents(folder):
             try:
                 data = path.read_bytes()
@@ -1766,7 +1779,7 @@ class Mimir:
                 path=source, filename=path.name, size_bytes=len(data),
                 content_hash=digest, title=path.stem))
             if prior is not None and prior.content_hash == digest and not force:
-                continue  # unchanged → keep its claims
+                continue  # unchanged → keep its claims + composite
             try:
                 units = extract(path)
             except IngestError as exc:
@@ -1781,16 +1794,47 @@ class Mimir:
             replace_document_claims(self._storage, doc_id, claims)
             total_claims += len(claims)
             processed.append(path.name)
+            if self._compile_composite(doc_id, path.stem):
+                composed += 1
         dropped = 0
         for path_str in existing:  # a source file that vanished → drop the doc + cascade its claims
             if path_str not in seen:
                 delete_library_document(self._storage, path_str)
                 dropped += 1
         if processed or dropped:
-            log.info("library: %d doc(s) → %d claim(s), dropped %d",
-                     len(processed), total_claims, dropped)
-        return {"folder": str(folder), "documents": processed,
-                "claims": total_claims, "dropped": dropped}
+            log.info("library: %d doc(s) → %d claim(s), %d composite(s), dropped %d",
+                     len(processed), total_claims, composed, dropped)
+        return {"folder": str(folder), "documents": processed, "claims": total_claims,
+                "composed": composed, "dropped": dropped}
+
+    def _compile_composite(self, document_id: int, title: str) -> bool:
+        """Synthesize a Markdown composite from a document's claims (the fuzzy understanding) and
+        link it to those claims. Non-destructive: a hand-edited page (file hash ≠ last written) is
+        left alone. Returns True if it wrote a page. Needs a library compose folder set."""
+        folder = self._library_compose_folder()
+        if folder is None:
+            return False
+        claims = claims_for_document(self._storage, document_id)
+        if not claims:
+            return False
+        safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in title).strip() or "page"
+        dest = folder / f"{safe}.md"
+        prior = next((p for p in list_library_pages(self._storage) if p.path == str(dest)), None)
+        if dest.is_file() and prior is not None:
+            on_disk = hashlib.sha256(dest.read_bytes()).hexdigest()
+            if on_disk != prior.content_hash:
+                log.info("library: %s was hand-edited; leaving the composite as-is", dest.name)
+                return False
+        summary, markdown = compose_page(self._claim_chat, title, [c.text for c in claims])
+        if not markdown:
+            return False
+        folder.mkdir(parents=True, exist_ok=True)
+        dest.write_text(markdown, encoding="utf-8")
+        page_id = upsert_library_page(self._storage, LibraryPage(
+            path=str(dest), title=title, summary=summary,
+            content_hash=hashlib.sha256(markdown.encode("utf-8")).hexdigest()))
+        set_page_claims(self._storage, page_id, [c.id for c in claims if c.id is not None])
+        return True
 
     def _library_gist(self, query: str, query_vec: list[float] | None) -> str | None:
         """The Library context section: the most relevant cited claims (each shown with its source
@@ -1806,6 +1850,58 @@ class Mimir:
             return None
         titles = {d.id: d.title for d in list_library_documents(self._storage)}
         return render_claims(top, titles) or None
+
+    def library_overview(self) -> dict[str, Any]:
+        """The Library for the UI: source documents (with claim counts) + composite pages."""
+        docs = list_library_documents(self._storage)
+        counts = {d.id: len(claims_for_document(self._storage, d.id)) for d in docs}
+        return {
+            "source_folder": self.config.documents_folder,
+            "compose_folder": self.config.library_folder,
+            "documents": [
+                {"id": d.id, "filename": d.filename, "title": d.title,
+                 "size_bytes": d.size_bytes, "claims": counts.get(d.id, 0),
+                 "ingested_at": d.ingested_at}
+                for d in docs
+            ],
+            "pages": [
+                {"id": p.id, "title": p.title, "summary": p.summary, "path": p.path,
+                 "updated_at": p.updated_at}
+                for p in list_library_pages(self._storage)
+            ],
+        }
+
+    def library_page(self, page_id: int) -> dict[str, Any] | None:
+        """A composite page with its full Markdown loaded on demand, plus its source citations (the
+        claims it was composed from → their document + locator). The Load button / fetch path."""
+        page = get_library_page(self._storage, page_id)
+        if page is None:
+            return None
+        try:
+            markdown = Path(page.path).read_text(encoding="utf-8")
+        except OSError as exc:  # missing/renamed file → a noted gap, never a crash (§10)
+            log.warning("library: cannot load composite %s: %s", page.path, exc)
+            markdown = page.summary
+        titles = {d.id: d.title for d in list_library_documents(self._storage)}
+        citations = [
+            {"text": c.text, "title": titles.get(c.document_id, ""), "locator": c.locator}
+            for c in claims_for_page(self._storage, page_id)
+        ]
+        return {"id": page.id, "title": page.title, "summary": page.summary,
+                "markdown": markdown, "citations": citations}
+
+    def library_source(self, document_id: int) -> dict[str, Any] | None:
+        """A source document's verbatim text loaded on demand from disk — ground truth, for quoting
+        or checking a cited line."""
+        doc = next((d for d in list_library_documents(self._storage) if d.id == document_id), None)
+        if doc is None:
+            return None
+        try:
+            text = "\n".join(u.text for u in extract(Path(doc.path)))
+        except (IngestError, OSError) as exc:
+            log.warning("library: cannot load source %s: %s", doc.path, exc)
+            text = ""
+        return {"id": doc.id, "filename": doc.filename, "title": doc.title, "text": text}
 
     def health_digest(self) -> dict[str, Any] | None:
         """The last nightly health digest (kv), or None if the sleep cycle hasn't run one yet."""

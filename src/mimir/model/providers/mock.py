@@ -21,6 +21,7 @@ from ...prompts import (
     COUNCIL_PERSONA_MARKER,
     COUNCIL_SYNTH_MARKER,
     DOC_SUMMARY_MARKER,
+    LIBRARY_COMPOSE_MARKER,
     NARRATIVE_MARKER,
     RECALL_CLOSE,
     RECALL_OPEN,
@@ -65,6 +66,8 @@ class MockProvider:
             return self._doc_summary(user)
         if CLAIM_EXTRACTION_MARKER in system:
             return self._claims(user)
+        if LIBRARY_COMPOSE_MARKER in system:
+            return self._compose(user)
         return self._reply(system, user)
 
     def chat_stream(
@@ -144,6 +147,15 @@ class MockProvider:
         """Deterministic atomic claims: the passage's first few sentences as standalone facts."""
         parts = [p.strip() for p in text.replace("\n", " ").split(".") if p.strip()]
         return json.dumps({"claims": parts[:3]})
+
+    @staticmethod
+    def _compose(text: str) -> str:
+        """A deterministic composite page (summary + markdown) from the supplied facts block."""
+        topic = text.split("\n", 1)[0].replace("Topic:", "").strip() or "Untitled"
+        return json.dumps({
+            "summary": f"A synthesized page on {topic}.",
+            "markdown": f"## {topic}\n\n{text}",
+        })
 
     @staticmethod
     def _reflect(turn_text: str) -> str:

@@ -4,6 +4,7 @@ cited Library section in a turn. (Data foundation is covered by test_library_sto
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 
 from mimir.brain import Mimir
 from mimir.cognition.library import (
@@ -36,8 +37,12 @@ def test_retrieve_and_render_claims_cite_sources() -> None:
 
 
 def _libbrain(mock_config: Config, tmp_path) -> Mimir:
-    # Source of truth = the documents folder (where the user drops files).
-    cfg = dataclasses.replace(mock_config, documents_folder=str(tmp_path / "documents"))
+    # Source of truth = the documents folder; composites written to a separate library folder.
+    cfg = dataclasses.replace(
+        mock_config,
+        documents_folder=str(tmp_path / "documents"),
+        library_folder=str(tmp_path / "library"),
+    )
     return Mimir(cfg)
 
 
@@ -81,7 +86,46 @@ def test_library_claims_surface_cited_in_a_turn(mock_config: Config, tmp_path) -
         brain.close()
 
 
+def test_idle_compiles_a_linked_composite_with_citations(mock_config: Config, tmp_path) -> None:
+    brain = _libbrain(mock_config, tmp_path)
+    try:
+        folder = brain._library_source_folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "garden.md").write_text(
+            "# Garlic\n\nGarlic is planted in October. Harvest garlic in July.")
+        report = brain.ingest_pending_library()
+        assert report["composed"] >= 1
+
+        overview = brain.library_overview()
+        page = overview["pages"][0]
+        assert Path(page["path"]).is_file()              # the composite MD is on disk
+        full = brain.library_page(page["id"])
+        assert full["markdown"]                          # full composite loaded on demand
+        assert full["citations"] and all(c["title"] for c in full["citations"])  # traces to source
+
+        # A verbatim source is fetchable for quoting/checking.
+        doc = overview["documents"][0]
+        assert "Garlic" in brain.library_source(doc["id"])["text"]
+    finally:
+        brain.close()
+
+
+def test_hand_edited_composite_is_not_clobbered(mock_config: Config, tmp_path) -> None:
+    brain = _libbrain(mock_config, tmp_path)
+    try:
+        folder = brain._library_source_folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "note.md").write_text("# Note\n\nA fact about the farm.")
+        brain.ingest_pending_library()
+        page_path = Path(brain.library_overview()["pages"][0]["path"])
+        page_path.write_text("# Note\n\nMY HAND-EDITED VERSION.")   # user edits the composite
+        brain.ingest_pending_library(force=True)                    # re-derive attempt
+        assert "HAND-EDITED" in page_path.read_text()               # respected, not clobbered
+    finally:
+        brain.close()
+
+
 def test_no_source_folder_is_a_quiet_noop(brain: Mimir) -> None:
     assert brain.ingest_pending_library() == {
-        "folder": None, "documents": [], "claims": 0, "dropped": 0}
+        "folder": None, "documents": [], "claims": 0, "composed": 0, "dropped": 0}
     assert brain._library_gist("anything", None) is None
