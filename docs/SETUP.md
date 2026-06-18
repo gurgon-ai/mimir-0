@@ -159,8 +159,10 @@ HTTP — no extra Python deps.
    > a 4B model hallucinated its own name and mimicked the prompt's internal tag style. Mimir guards
    > both deterministically (the synthesizer can't invent a name; internal tags are stripped from
    > output), but for faithful identity prefer **≥12B** for `chat`/`reasoning` (e.g. `gemma3:12b`,
-   > `qwen2.5:14b`). A 4B model is fine for `bake` (extraction). If you run a fleet, let
-   > `brain.benchmark_fleet()` + `apply_recommendations()` pick capable models per role.
+   > `qwen2.5:14b`). A 4B model is fine for `bake` (extraction). **On small / edge hardware,
+   > `gemma4:e2b` is the recommended pick** — it punches well above its size here (fast,
+   > vision-capable, the strongest small-model epistemics measured) and is a solid all-rounder.
+   > If you run a fleet, let `brain.benchmark_fleet()` + `apply_recommendations()` pick per role.
 
 ### 5.2 Write your `mimir.toml`
 

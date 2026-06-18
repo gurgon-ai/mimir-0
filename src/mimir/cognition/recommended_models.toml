@@ -19,7 +19,7 @@ roles        = ["chat", "reasoning", "judge", "bake"]
 expected     = { discipline = [0.7, 1.0], epistemics = [0.6, 1.0] }
 judge_ok     = true
 min_params_b = 5.0
-notes        = "Strongest small-model epistemics measured; gemma4:e4b (8B) ties gemma3:12b."
+notes        = "Strongest small-model epistemics measured. gemma4:e2b is the recommended small/edge pick (fast, vision-capable, punches above its size); gemma4:e4b (8B) ties gemma3:12b."
 
 [[model]]
 family       = "qwen"
