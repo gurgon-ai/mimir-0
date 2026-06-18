@@ -107,6 +107,12 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
 
 ### Fixed
+- **"Apply best" / the tournament finals now survive a restart.** Applying roles changed only the
+  in-memory config, so after a reboot the role silently reverted to its default while the
+  recommendation still showed it — looked like the apply did nothing. Apply now persists each role as
+  a pin (the same store `set_role` uses and `_restore_role_pins` reads on boot), so it sticks and
+  appears pinned in the picker. (The interactive per-role dropdown already persisted; only the Apply
+  buttons didn't.)
 - **The role picker colours each model PER ROLE, by that role's requirements — not one deceptive
   generic status.** A model strong for chat but weak at vision/code was painted red in *every* role's
   dropdown, implying it was a bad chat pick when it's a great one. Now green/yellow/red reflects only

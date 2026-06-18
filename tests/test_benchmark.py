@@ -472,6 +472,23 @@ def test_vision_role_admits_a_model_that_sees_but_cannot_ocr() -> None:
         "vision 0.00 < 0.40"   # sees nothing → barred
 
 
+def test_apply_recommendations_persists_pins_for_restart(brain: Mimir) -> None:
+    # "Apply best" / the finals must SURVIVE a reboot: they used to change only the in-memory config
+    # (gone on restart, so the role silently reverted while the recommendation still showed). Now
+    # each applied role is persisted as a pin (the kv store _restore_role_pins reads on boot).
+    import json
+
+    from mimir.storage.repo import kv_get
+
+    _craft_scores(brain)   # mock-a/b benchmarked
+    applied = brain.apply_recommendations()
+    assert applied                                   # something was applied
+    pins = json.loads(kv_get(brain._storage, "role_pins") or "{}")
+    for role, model in applied.items():
+        assert pins.get(role, {}).get("model") == model   # persisted → will restore after reboot
+        assert role not in brain._auto_roles              # an applied role is a deliberate pin
+
+
 def test_merge_catalogue_preserves_scores_and_reconciles(db_path: str) -> None:
     # "Qualify new models" adds the new without re-scoring the known: a merge-scan keeps existing
     # benchmark scores, refreshes discovery fields, adds new (unscored) models, and drops gone ones.
