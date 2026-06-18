@@ -181,6 +181,11 @@ writes a short summary per doc — the local "wiki"):
   Returns `{folder, ingested:[name], summarized, failed:[{name,error}], unsupported:[name],
   forgotten:[name]}` — per-file failures (e.g. a missing extra) and wrong-type drops are reported,
   never swallowed; `forgotten` lists docs whose source file vanished and were auto-cleaned.
+- `POST /api/library/enable` `{"source": "<path or filename>", "enabled": false}` — toggle a
+  document's "include in context." A disabled document's chunks + claims are excluded from recall (at
+  the SQL load layer — recall speed back for a big library); the data is kept, re-enable to restore.
+- The turn endpoints accept per-turn **layer toggles** (each defaults `true`): `include_memory`,
+  `include_library`, `include_wiki` — skip a whole context layer for the turn.
 - `POST /api/library/forget` `{"source": "<path or filename>", "delete_file": true}` — purge a
   document and everything derived from it: its memory chunks, library document + cited claims,
   composite page (row + Markdown file), and wiki ledger entry; `delete_file` also removes the source

@@ -295,6 +295,80 @@ def test_deleting_the_file_self_cleans_on_the_next_scan(mock_config: Config, tmp
         brain.close()
 
 
+def test_disabled_document_drops_out_of_recall(mock_config: Config, tmp_path) -> None:
+    """A document toggled 'not in context' stops contributing cited claims to a turn, but its data
+    is kept (re-enabling restores it). The '[bees' citation marker only comes from its claims."""
+    brain = _libbrain(mock_config, tmp_path)
+    try:
+        folder = brain._library_source_folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "bees.md").write_text("# Bees\n\nEach hive has a single queen. Bees make honey.")
+        brain.ingest_pending_documents()
+        brain.ingest_pending_library()
+        q = "tell me about hives and queens"
+        assert "[bees" in brain.turn(q).context.prompt              # cited while enabled
+
+        brain.set_document_enabled(str(folder / "bees.md"), False)  # toggle OFF
+        assert "[bees" not in brain.turn(q).context.prompt          # no library claims surface
+        assert list_library_claims(brain._storage)                  # data kept, not deleted
+
+        brain.set_document_enabled(str(folder / "bees.md"), True)   # back ON
+        assert "[bees" in brain.turn(q).context.prompt
+    finally:
+        brain.close()
+
+
+def test_disabled_document_chunks_excluded_at_load(mock_config: Config, tmp_path) -> None:
+    """The per-doc toggle excludes the document's memory chunks at the SQL load layer (the speed
+    lever for a big library) — not just the library claims."""
+    from mimir.storage.models import MemoryKind
+    from mimir.storage.repo import list_memories
+    brain = _libbrain(mock_config, tmp_path)
+    try:
+        folder = brain._library_source_folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "bees.md").write_text("# Bees\n\nEach hive has a single queen. Bees make honey.")
+        brain.ingest_pending_documents()
+        src = str((folder / "bees.md").resolve())
+        s = brain._storage
+        assert any(m.source == src for m in list_memories(s, kind=MemoryKind.MEMORY))
+        kept = list_memories(s, kind=MemoryKind.MEMORY, exclude_sources={src})
+        assert all(m.source != src for m in kept)                  # the doc's chunks aren't loaded
+    finally:
+        brain.close()
+
+
+def test_layer_toggles_skip_whole_sections(mock_config: Config, tmp_path) -> None:
+    """The per-turn chat toggles drop a whole layer: include_library=False removes the Library
+    section + document chunks; include_memory=False removes personal memories."""
+    brain = _libbrain(mock_config, tmp_path)
+    try:
+        folder = brain._library_source_folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "bees.md").write_text("# Bees\n\nEach hive has a single queen.")
+        brain.ingest_pending_documents()
+        brain.ingest_pending_library()
+        assert "[bees" in brain.turn("hives and queens").context.prompt
+        # Library layer off → no cited claims surface this turn.
+        assert "[bees" not in brain.turn("hives and queens", include_library=False).context.prompt
+    finally:
+        brain.close()
+
+
+def test_ingest_records_per_document_index_time(mock_config: Config, tmp_path) -> None:
+    brain = _libbrain(mock_config, tmp_path)
+    try:
+        folder = brain._library_source_folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "bees.md").write_text("# Bees\n\nEach hive has a single queen. Bees make honey.")
+        brain.ingest_pending_library()
+        doc = brain.library_overview()["documents"][0]
+        assert doc["index_seconds"] is not None and doc["index_seconds"] >= 0
+        assert doc["enabled"] is True
+    finally:
+        brain.close()
+
+
 def test_citation_guard_flags_an_invented_source_in_a_turn(mock_config: Config, tmp_path) -> None:
     """End-to-end: a reply that cites a document the system doesn't hold gets a fail-loud note; a
     reply citing a real held document does not."""

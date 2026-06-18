@@ -624,7 +624,8 @@ class Mimir:
 
     def turn(self, text: str, user: str | None = None, *,
              speaker_kind: str = "human", loaded_pages: list[int] | None = None,
-             deep_read: bool = False) -> TurnResult:
+             deep_read: bool = False, include_memory: bool = True,
+             include_library: bool = True, include_wiki: bool = True) -> TurnResult:
         # ``speaker_kind`` ("human"/"ai_peer") is the caller's declaration of what kind of speaker
         # this is; validate it up front so a bad value fails the turn cleanly (DESIGN §3b).
         normalize_speaker_kind(speaker_kind)
@@ -662,22 +663,29 @@ class Mimir:
             # 1. Recall: embed the query, pull candidates, rank them. Inner-life musings are split
             #    out of the knowledge recall and may surface as a framed, tentative note (§5a).
             query_vec = self._embedder.embed(text)
-            candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY)
+            disabled_docs = self._disabled_documents()  # per-doc "include in context" toggles
+            candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY,
+                                       exclude_sources=disabled_docs)
             candidates, il_note = self._surface_inner_life(candidates, text, query_vec)
-            if il_note:
+            if il_note and include_memory:
                 notes = notes + [il_note]
+            candidates = self._filter_layers(candidates, include_memory, include_library)
             retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
             note = latest_sentinel_note(self._storage, user)
             self_knowledge = self._compose_self_knowledge()
             working_memory = current_working_memory(self._storage)
             graph_facts = self._connected_facts(text, user)
             procedures = self._matching_procedures(text, user)
-            lib_text, lib_refs, lib_count = self._library_gist(text, query_vec)
-            pages = self._pages_to_load(loaded_pages, deep_read, lib_refs)
-            library = self._merge_loaded_library(lib_text, pages)
-            lib_count += len(pages)  # full pages (loaded or deep-read) are strong grounding too
-            if self.config.library_model_fetch and lib_refs:
-                library = self._with_fetch_hint(library, lib_refs)  # let the model open a page
+            if include_library:
+                lib_text, lib_refs, lib_count = self._library_gist(text, query_vec, disabled_docs)
+                pages = self._pages_to_load(loaded_pages, deep_read, lib_refs)
+                library = self._merge_loaded_library(lib_text, pages)
+                lib_count += len(pages)  # full pages (loaded or deep-read) are strong grounding too
+                if self.config.library_model_fetch and lib_refs:
+                    library = self._with_fetch_hint(library, lib_refs)  # let the model open a page
+            else:
+                lib_refs, lib_count, library = [], 0, None
+            wiki = self._wiki_context(text) if include_wiki else None
 
             # 2. Assemble the epistemic prompt.
             bundle = build_context(
@@ -696,7 +704,7 @@ class Mimir:
                 temporal_awareness=awareness,
                 recent_history=self._recent_history(),
                 background_notes="\n".join(notes) if notes else None,
-                wiki_context=self._wiki_context(text),
+                wiki_context=wiki,
                 library=library,
                 library_count=lib_count,
                 system_health=self._error_context(),
@@ -751,6 +759,7 @@ class Mimir:
     def turn_stream(
         self, text: str, user: str | None = None, *, speaker_kind: str = "human",
         loaded_pages: list[int] | None = None, deep_read: bool = False,
+        include_memory: bool = True, include_library: bool = True, include_wiki: bool = True,
     ) -> Generator[str, None, dict[str, Any]]:
         """Like ``turn`` but yields the reply token-by-token; returns the introspection dict.
 
@@ -786,20 +795,27 @@ class Mimir:
         try:
             notes = self._burst.drain_surfaces()
             query_vec = self._embedder.embed(text)
-            candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY)
+            disabled_docs = self._disabled_documents()  # per-doc "include in context" toggles
+            candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY,
+                                       exclude_sources=disabled_docs)
             candidates, il_note = self._surface_inner_life(candidates, text, query_vec)
-            if il_note:
+            if il_note and include_memory:
                 notes = notes + [il_note]
+            candidates = self._filter_layers(candidates, include_memory, include_library)
             retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
             note = latest_sentinel_note(self._storage, user)
             self_knowledge = self._compose_self_knowledge()
             working_memory = current_working_memory(self._storage)
             graph_facts = self._connected_facts(text, user)
             procedures = self._matching_procedures(text, user)
-            lib_text, lib_refs, lib_count = self._library_gist(text, query_vec)
-            pages = self._pages_to_load(loaded_pages, deep_read, lib_refs)
-            library = self._merge_loaded_library(lib_text, pages)
-            lib_count += len(pages)  # full pages (loaded or deep-read) are strong grounding too
+            if include_library:
+                lib_text, lib_refs, lib_count = self._library_gist(text, query_vec, disabled_docs)
+                pages = self._pages_to_load(loaded_pages, deep_read, lib_refs)
+                library = self._merge_loaded_library(lib_text, pages)
+                lib_count += len(pages)  # full pages (loaded or deep-read) are strong grounding too
+            else:
+                lib_refs, lib_count, library = [], 0, None
+            wiki = self._wiki_context(text) if include_wiki else None
             bundle = build_context(
                 query=text,
                 user=user,
@@ -816,7 +832,7 @@ class Mimir:
                 temporal_awareness=awareness,
                 recent_history=self._recent_history(),
                 background_notes="\n".join(notes) if notes else None,
-                wiki_context=self._wiki_context(text),
+                wiki_context=wiki,
                 library=library,
                 library_count=lib_count,
                 system_health=self._error_context(),
@@ -1725,12 +1741,14 @@ class Mimir:
     def _record_document(self, path: Path) -> IngestResult:
         """Ingest one document into recallable knowledge and record it in the wiki ledger. A changed
         file drops its stale summary (regenerated lazily in the idle pass)."""
+        start = time.time()
         result = ingest_document(self._storage, self._embedder, path=path)
         ledger = self._load_docs_ledger()
         entry = ledger.get(result.source, {})
         entry.update(
             name=path.name, hash=hashlib.sha256(path.read_bytes()).hexdigest(),
             chunks=result.chunks_written, ingested_at=time.time(),
+            ingest_seconds=round(time.time() - start, 1),  # chunk+embed cost, for the UI
         )
         entry.pop("summary", None)  # content changed → old summary is stale
         ledger[result.source] = entry
@@ -1845,6 +1863,19 @@ class Mimir:
         # Where the Markdown composites (the fuzzy understanding) are written — a separate tree.
         return Path(self.config.library_folder) if self.config.library_folder else None
 
+    _LIBRARY_TIMINGS_KEY = "library_seconds"
+
+    def _library_timings(self) -> dict[str, float]:
+        """Per-document index time (seconds) from the last library pass — 'how long per doc'."""
+        raw = kv_get(self._storage, self._LIBRARY_TIMINGS_KEY)
+        if not raw:
+            return {}
+        try:
+            value = json.loads(raw)
+            return {str(k): float(v) for k, v in value.items()} if isinstance(value, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+
     def ingest_pending_library(self, *, force: bool = False) -> dict[str, Any]:
         """Idle pass over the source documents (ground truth, left in place): record each, distil it
         into cited claims, and compile a Markdown composite (the fuzzy understanding) from those
@@ -1858,6 +1889,7 @@ class Mimir:
         processed: list[str] = []
         total_claims = 0
         composed = 0
+        timings = self._library_timings()  # path → seconds to index (claim-extract + compose)
         for path in list_documents(folder):
             try:
                 data = path.read_bytes()
@@ -1877,6 +1909,7 @@ class Mimir:
             except IngestError as exc:
                 log.warning("library: cannot read %s: %s", path.name, exc)
                 continue
+            start = time.time()
             claims: list[LibraryClaim] = []
             for unit in units:
                 for text in extract_claims(self._claim_chat, unit.text):
@@ -1888,6 +1921,9 @@ class Mimir:
             processed.append(path.name)
             if self._compile_composite(doc_id, path.stem):
                 composed += 1
+            timings[source] = round(time.time() - start, 1)  # index cost for this doc (the UI)
+        kv_set(self._storage, self._LIBRARY_TIMINGS_KEY,
+               json.dumps({k: v for k, v in timings.items() if k in seen}))
         dropped = 0
         for path_str in existing:  # a source file that vanished → fully forget it (DB + memories)
             if path_str not in seen:
@@ -2013,6 +2049,58 @@ class Mimir:
                 labels.add(name)
         return labels
 
+    # -- context-layer + per-document toggles (what the user wants in-context this turn) ------
+
+    _DISABLED_DOCS_KEY = "disabled_documents"
+
+    def _disabled_documents(self) -> set[str]:
+        """Source paths the user toggled OFF in the Library ('include in context' unchecked). Their
+        chunks + claims are excluded from recall — so an unselected book costs nothing to scan."""
+        raw = kv_get(self._storage, self._DISABLED_DOCS_KEY)
+        if not raw:
+            return set()
+        try:
+            value = json.loads(raw)
+            return set(value) if isinstance(value, list) else set()
+        except (ValueError, TypeError):
+            return set()
+
+    def set_document_enabled(self, source: str, enabled: bool) -> dict[str, Any]:
+        """Toggle a document's 'include in context'. Disabled docs are excluded from recall (their
+        memory chunks and library claims) until re-enabled — data is kept, just not consulted."""
+        src = self._resolve_source(source)
+        disabled = self._disabled_documents()
+        if enabled:
+            disabled.discard(src)
+        else:
+            disabled.add(src)
+        kv_set(self._storage, self._DISABLED_DOCS_KEY, json.dumps(sorted(disabled)))
+        return {"source": src, "enabled": enabled}
+
+    def _disabled_doc_ids(self, disabled_docs: set[str] | None) -> set[int] | None:
+        """Map disabled source paths → library document ids (for SQL-side claim exclusion)."""
+        if not disabled_docs:
+            return None
+        return {d.id for d in list_library_documents(self._storage)
+                if d.id is not None and d.path in disabled_docs}
+
+    def _filter_layers(
+        self, candidates: list[Memory], include_memory: bool, include_library: bool
+    ) -> list[Memory]:
+        """Apply the per-turn layer toggles to the knowledge candidates: document-tier chunks belong
+        to the 'document library' layer, everything else to the 'memory' layer."""
+        if include_memory and include_library:
+            return candidates
+        out: list[Memory] = []
+        for m in candidates:
+            is_doc = m.evidence_tier is EvidenceTier.DOCUMENT
+            if is_doc and not include_library:
+                continue
+            if not is_doc and not include_memory:
+                continue
+            out.append(m)
+        return out
+
     def _citation_note(self, reply: str) -> str:
         """A fail-loud note if the reply cited a source the system doesn't hold ('' if none/off)."""
         if not self.config.library_citation_guard:
@@ -2023,16 +2111,18 @@ class Mimir:
         return citation_warning(bad)
 
     def _library_gist(
-        self, query: str, query_vec: list[float] | None
+        self, query: str, query_vec: list[float] | None, disabled_docs: set[str] | None = None,
     ) -> tuple[str | None, list[dict[str, Any]], int]:
         """The Library section + the composite pages behind it. Returns ``(text, refs, count)`` —
         the cited claims most relevant to the turn (each shown with its source title + locator), the
         composite page(s) those claims belong to (``[{page_id, title}]``) for the after-reply chips,
-        and how many claims surfaced (grounding signal for the uncertainty gate). ``(None, [], 0)``
-        if the layer is off or nothing is on-topic."""
+        and how many claims surfaced (grounding signal for the uncertainty gate). ``disabled_docs``
+        (per-doc 'include in context' toggles) are excluded at the SQL layer. ``(None, [], 0)`` if
+        the layer is off or nothing is on-topic."""
         if self._library_source_folder() is None:
             return None, [], 0
-        claims = list_library_claims(self._storage)
+        claims = list_library_claims(
+            self._storage, exclude_doc_ids=self._disabled_doc_ids(disabled_docs))
         if not claims:
             return None, [], 0
         top = retrieve_claims(query, query_vec, claims,
@@ -2183,13 +2273,16 @@ class Mimir:
         """The Library for the UI: source documents (with claim counts) + composite pages."""
         docs = list_library_documents(self._storage)
         counts = {d.id: len(claims_for_document(self._storage, d.id)) for d in docs}
+        disabled = self._disabled_documents()
+        timings = self._library_timings()
         return {
             "source_folder": self.config.documents_folder,
             "compose_folder": self.config.library_folder,
             "documents": [
                 {"id": d.id, "filename": d.filename, "title": d.title, "path": d.path,
                  "size_bytes": d.size_bytes, "claims": counts.get(d.id, 0),
-                 "ingested_at": d.ingested_at}
+                 "ingested_at": d.ingested_at, "enabled": d.path not in disabled,
+                 "index_seconds": timings.get(d.path)}
                 for d in docs
             ],
             "pages": [

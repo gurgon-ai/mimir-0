@@ -465,25 +465,29 @@ def list_memories(
     *,
     user: str | None = None,
     kind: MemoryKind = MemoryKind.MEMORY,
+    exclude_sources: set[str] | None = None,
 ) -> list[Memory]:
     """All memories of a kind, optionally scoped to a user (plus user-agnostic rows).
 
     User scoping is inclusive of rows with no user (``user IS NULL``) so shared/global
-    facts surface alongside a specific user's.
+    facts surface alongside a specific user's. ``exclude_sources`` drops rows from those source
+    files at the SQL layer (so toggled-off documents aren't even loaded — recall speed back).
     """
+    excl = sorted(exclude_sources) if exclude_sources else []
 
     def _read(conn: sqlite3.Connection) -> list[Memory]:
-        if user is None:
-            rows = conn.execute(
-                f"SELECT {_COLUMNS} FROM memories WHERE kind = ? AND archived = 0",
-                (kind.value,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                f"SELECT {_COLUMNS} FROM memories WHERE kind = ? AND archived = 0 "
-                f"AND (user = ? OR user IS NULL)",
-                (kind.value, user),
-            ).fetchall()
+        clauses = ["kind = ?", "archived = 0"]
+        params: list[object] = [kind.value]
+        if user is not None:
+            clauses.append("(user = ? OR user IS NULL)")
+            params.append(user)
+        if excl:
+            ph = ",".join("?" * len(excl))
+            clauses.append(f"(source IS NULL OR source NOT IN ({ph}))")
+            params.extend(excl)
+        rows = conn.execute(
+            f"SELECT {_COLUMNS} FROM memories WHERE {' AND '.join(clauses)}", params
+        ).fetchall()
         return [_row_to_memory(r) for r in rows]
 
     return gateway.read(_read)
@@ -1283,10 +1287,22 @@ def replace_document_claims(
     return gateway.submit(_write)
 
 
-def list_library_claims(gateway: StorageGateway) -> list[LibraryClaim]:
-    """All claims (the retrievable spine) with embeddings."""
+def list_library_claims(
+    gateway: StorageGateway, *, exclude_doc_ids: set[int] | None = None
+) -> list[LibraryClaim]:
+    """All claims (the retrievable spine) with embeddings. ``exclude_doc_ids`` drops claims from
+    toggled-off documents at the SQL layer, so an unselected book costs nothing to recall over."""
+    excl = sorted(exclude_doc_ids) if exclude_doc_ids else []
+
     def _read(conn: sqlite3.Connection) -> list[LibraryClaim]:
-        return [_row_to_claim(r) for r in conn.execute("SELECT * FROM library_claims").fetchall()]
+        if excl:
+            ph = ",".join("?" * len(excl))
+            rows = conn.execute(
+                f"SELECT * FROM library_claims WHERE document_id NOT IN ({ph})", excl
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM library_claims").fetchall()
+        return [_row_to_claim(r) for r in rows]
 
     return gateway.read(_read)
 
