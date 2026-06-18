@@ -107,6 +107,13 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **Docs + Library tabs consolidated into one Library tab.** They managed the same source documents
+  through two pipelines (chunks+wiki-summary vs cited-claims+composites) with duplicate lists and two
+  scan buttons. Now a single tab: one unified document list (each row joins chunks + claims + summary
+  + ingest/index time + the include toggle + delete; click the name to expand), one **"Scan & index
+  now"** button that runs both passes, and the composite pages, ingest-by-path, and Kiwix/ZIM tucked
+  into collapsible `<details>` sections. The data layers are unchanged — only the UI merged. The
+  `/api/library` overview now returns the unified per-document rows + the resolved drop-folder path.
 - **Context-layer + per-document toggles — choose what's in context (and get recall speed back).**
   Chat now has a row above the bar to toggle whole **layers** per turn — *memory*, *documents*, *wiki*
   (and *deep read*) — for "what am I doing right now." The Library tab lists each document **compactly**
