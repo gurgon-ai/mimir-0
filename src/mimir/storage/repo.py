@@ -842,6 +842,39 @@ def replace_catalogue(gateway: StorageGateway, entries: list[CatalogueEntry]) ->
     gateway.submit(_write)
 
 
+def merge_catalogue(gateway: StorageGateway, entries: list[CatalogueEntry]) -> None:
+    """Reconcile the catalogue with a fresh inventory WITHOUT wiping benchmark scores: insert
+    newly-discovered ``(node, model)`` rows, refresh the discovery fields on existing ones (size /
+    quant / capabilities can change), and drop rows for pairs no longer installed. Unlike
+    ``replace_catalogue`` (clear-then-insert, which zeroes every score for a from-scratch run), this
+    lets "qualify new models" add models without re-scoring the whole fleet (DESIGN §4)."""
+
+    def _write(conn: sqlite3.Connection) -> None:
+        present = {(e.node, e.model) for e in entries}
+        existing = {
+            (str(r[0]), str(r[1]))
+            for r in conn.execute("SELECT node, model FROM model_catalogue").fetchall()
+        }
+        for node, mdl in existing - present:   # uninstalled since the last scan → drop
+            conn.execute("DELETE FROM model_catalogue WHERE node=? AND model=?", (node, mdl))
+        for e in entries:
+            row = (e.family, e.params_b, e.quantization, e.context_length,
+                   json.dumps(e.capabilities), e.scanned_at, e.node, e.model)
+            if (e.node, e.model) in existing:   # refresh discovery fields, keep the scores
+                conn.execute(
+                    "UPDATE model_catalogue SET family=?, params_b=?, quantization=?, "
+                    "context_length=?, capabilities=?, scanned_at=? WHERE node=? AND model=?", row
+                )
+            else:
+                conn.execute(
+                    f"INSERT INTO model_catalogue ({_C_INSERT}) VALUES (?,?,?,?,?,?,?,?)",
+                    (e.node, e.model, e.family, e.params_b, e.quantization, e.context_length,
+                     json.dumps(e.capabilities), e.scanned_at),
+                )
+
+    gateway.submit(_write)
+
+
 def update_catalogue_scores(
     gateway: StorageGateway,
     model: str,

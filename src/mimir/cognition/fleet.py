@@ -17,7 +17,7 @@ from ..model.gateway import ModelGateway
 from ..model.provider import is_embedding_model
 from ..storage.gateway import StorageGateway
 from ..storage.models import CatalogueEntry
-from ..storage.repo import list_catalogue, replace_catalogue
+from ..storage.repo import list_catalogue, merge_catalogue, replace_catalogue
 from .benchmark import is_approved
 from .registry import is_recommended
 
@@ -31,9 +31,14 @@ class FleetScanResult:
 
 
 def scan_fleet(
-    model: ModelGateway, storage: StorageGateway, *, now: float | None = None
+    model: ModelGateway, storage: StorageGateway, *, now: float | None = None,
+    merge: bool = False,
 ) -> FleetScanResult:
-    """Inventory every fleet node and rebuild the catalogue. Returns counts."""
+    """Inventory every fleet node and (re)build the catalogue. Returns counts.
+
+    ``merge=False`` rebuilds from scratch (clears every benchmark score — for a full run).
+    ``merge=True`` reconciles in place, PRESERVING existing scores (adds new models, drops gone
+    ones) — for "qualify new models" so adding a model doesn't wipe the fleet's qualification."""
     clock = time.time() if now is None else now
     entries: list[CatalogueEntry] = []
     for node, _label, infos in model.inventory_details():
@@ -50,9 +55,10 @@ def scan_fleet(
                     scanned_at=clock,
                 )
             )
-    replace_catalogue(storage, entries)
+    (merge_catalogue if merge else replace_catalogue)(storage, entries)
     nodes = len({e.node for e in entries})
-    log.info("fleet: catalogued %d model(s) across %d node(s)", len(entries), nodes)
+    log.info("fleet: catalogued %d model(s) across %d node(s)%s",
+             len(entries), nodes, " (merge)" if merge else "")
     return FleetScanResult(nodes=nodes, models=len(entries))
 
 

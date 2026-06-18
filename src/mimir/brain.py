@@ -2505,10 +2505,13 @@ class Mimir:
         pruned = {k: d for k, d in seen.items() if d >= cutoff_str}
         kv_set(self._storage, self._DELIB_SEEN_KEY, json.dumps(pruned))
 
-    def scan_fleet(self) -> FleetScanResult:
-        """Inventory the model fleet (nodes + models) and rebuild the catalogue (DESIGN §5)."""
+    def scan_fleet(self, *, merge: bool = False) -> FleetScanResult:
+        """Inventory the model fleet (nodes + models) and (re)build the catalogue (DESIGN §5).
+
+        ``merge=True`` preserves existing benchmark scores (adds new models, drops gone ones) — for
+        "qualify new models"; the default rebuilds from scratch (clears scores) for a full run."""
         self._model.refresh_inventory()
-        result = scan_fleet(self._model, self._storage)
+        result = scan_fleet(self._model, self._storage, merge=merge)
         self._resolve_auto_roles()  # a rescan may surface a better model for an auto role
         self._seed_latency_from_catalogue()  # pick up speed for any newly catalogued (node, model)
         return result
@@ -2714,6 +2717,7 @@ class Mimir:
         only_models: set[str] | None = None,
         framework: bool = True,
         persist: bool = True,
+        rescan: bool = True,
         progress: Callable[[int, int, str, float | None], None] | None = None,
         on_result: Callable[[ModelBenchmark, str], None] | None = None,
         on_done: Callable[[str], None] | None = None,
@@ -2737,7 +2741,8 @@ class Mimir:
             self.config.backend.max_latency_s if self.config.backend else 0.0
         )
         ctx = self.config.backend.benchmark_num_ctx if self.config.backend else 24576
-        self.scan_fleet()
+        if rescan:
+            self.scan_fleet()   # full run: rebuild from scratch (clears scores); qualify-new skips
         return _benchmark_fleet(
             self._model,
             self._storage,
@@ -2754,6 +2759,38 @@ class Mimir:
             progress=progress,
             on_result=on_result,
             on_done=on_done,
+        )
+
+    def qualify_new_models(
+        self,
+        *,
+        max_params_b: float | None = None,
+        min_params_b: float | None = None,
+        latency_budget_s: float | None = None,
+        progress: Callable[[int, int, str, float | None], None] | None = None,
+        on_result: Callable[[ModelBenchmark, str], None] | None = None,
+        on_done: Callable[[str], None] | None = None,
+    ) -> FleetBenchmarkResult:
+        """Benchmark ONLY models not yet ranked — so adding a model doesn't mean re-running the
+        whole fleet (an hour to re-learn what you already know). A **merge-scan** discovers
+        newly-installed models while preserving every existing score, then only the unscored ones
+        (``quality is None``) are benchmarked; the rest of the catalogue is untouched. Returns the
+        run's result (``benchmarked == 0`` when nothing new is installed)."""
+        self.scan_fleet(merge=True)   # add new (node, model) rows without wiping existing scores
+        unscored = {
+            e.model for e in list_catalogue(self._storage)
+            if e.quality is None and "embed" not in e.model.lower()
+        }
+        if not unscored:
+            log.info("qualify-new: no unranked models — nothing to do")
+            return FleetBenchmarkResult(benchmarked=0, results=[])
+        log.info("qualify-new: benchmarking %d unranked model(s): %s",
+                 len(unscored), ", ".join(sorted(unscored)))
+        return self.benchmark_fleet(
+            only_approved=False,   # the user installed it on purpose — don't gate on family
+            max_params_b=max_params_b, min_params_b=min_params_b, latency_budget_s=latency_budget_s,
+            only_models=unscored, rescan=False,   # merge-scan already ran; don't wipe scores
+            progress=progress, on_result=on_result, on_done=on_done,
         )
 
     def complete_speed_matrix(
