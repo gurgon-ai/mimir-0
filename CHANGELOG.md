@@ -8,6 +8,18 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **A points-based recommendation + a harder, de-saturating battery — so the picker stops crowning
+  the wrong model.** Two compounding flaws made it recommend a small old model over a clearly better
+  big one: (1) the battery was too easy — `talk`/`tools`/`code` were 1.00 for nearly everyone, so
+  ~16 models jammed between 0.92–1.00 and the ranking was noise; (2) ties then broke by speed, handing
+  it to the *smaller/faster* model. Fixes: the **reasoning** dimension's cases are now chosen
+  empirically (probed across a 3B→32B fleet spread; kept only the ones that discriminate — bat-and-
+  ball, the "all but" trap, Sally's-sisters, a painted-cube count, etc.; dropped the saturated ones),
+  so quality actually spreads (e.g. a think-off deepseek-r1 that can't reason scores ~2/10, not top).
+  And recommendation is now a transparent **points total** — quality for that role (dominant) + speed
+  (strong, *every* role: a 4-minute background worker is useless) + a faint size prior to break
+  near-ties toward capacity. Each pick carries its `score` + a `quality/speed/size` breakdown, shown
+  in the Finals picker.
 - **"＋ Qualify new" — benchmark only models you've added, not the whole fleet.** Installing one model
   no longer means an hour-long full re-run to re-learn what you already know. A **merge-scan**
   discovers newly-installed models while preserving every existing score (`merge_catalogue` /

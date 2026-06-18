@@ -2920,11 +2920,14 @@ function renderCouncil(data) {
 // recommendation; changing one pins the role immediately (like the Fleet-tab picker). Council is
 // multi-model — it shows the whole eligible pool (adversarial reasoning uses the spread, not one).
 function _finalsOpt(c, picked) {
+  // Headline = the composite role score (quality + speed + size), so the ranking is transparent.
+  const score = (c.score != null) ? ` · ${c.score}pts` : "";
   const q = (c.quality != null) ? ` · q${c.quality}` : "";
   const t = (c.return_time != null) ? ` · ${c.return_time}s` : "";
   const where = c.node ? ` · ${ipTag(c.node) || c.node}` : "";
   const sel = (c.model === picked) ? " selected" : "";
-  return `<option data-m="${c.model}" data-n="${c.node || ''}"${sel}>${c.model}${q}${t}${where}</option>`;
+  const p = c.points ? ` (quality ${c.points.quality} + speed ${c.points.speed} + size ${c.points.size})` : "";
+  return `<option data-m="${c.model}" data-n="${c.node || ''}"${sel} title="${c.model}${score}${p}">${c.model}${score}${q}${t}${where}</option>`;
 }
 function renderFinals(recs, candidates) {
   candidates = candidates || {};

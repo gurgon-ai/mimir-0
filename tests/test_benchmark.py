@@ -472,6 +472,26 @@ def test_vision_role_admits_a_model_that_sees_but_cannot_ocr() -> None:
         "vision 0.00 < 0.40"   # sees nothing → barred
 
 
+def test_points_quality_dominates_speed_universal_size_nudge() -> None:
+    # The points model (DESIGN §4): quality dominates, speed is a strong universal term, size a
+    # faint nudge. bake scores on the `talk` dim. (a) Equal quality → the faster model wins (speed
+    # matters for every role. (b) A real quality gap beats speed → a strong slow model outscores a
+    # weak fast one. (c) The pick exposes a transparent breakdown.
+    from mimir.cognition.fleet import _as_pick, _role_score
+
+    base = {"family": "x", "node": "n", "nodes": ["n"]}
+    fast = {**base, "params_b": 3.0, "quality": 1.0, "talk": 1.0, "return_time": 1.0}
+    slow_big = {**base, "params_b": 27.0, "quality": 1.0, "talk": 1.0, "return_time": 8.0}
+    assert _role_score(fast, "bake") > _role_score(slow_big, "bake")        # equal q → faster wins
+
+    strong_slow = {**base, "params_b": 27.0, "quality": 1.0, "talk": 1.0, "return_time": 8.0}
+    weak_fast = {**base, "params_b": 3.0, "quality": 0.5, "talk": 0.5, "return_time": 1.0}
+    assert _role_score(strong_slow, "bake") > _role_score(weak_fast, "bake")  # quality beats speed
+
+    pick = _as_pick("m", fast, "bake")
+    assert pick["score"] > 0 and set(pick["points"]) == {"quality", "speed", "size"}
+
+
 def test_apply_recommendations_persists_pins_for_restart(brain: Mimir) -> None:
     # "Apply best" / the finals must SURVIVE a reboot: they used to change only the in-memory config
     # (gone on restart, so the role silently reverted while the recommendation still showed). Now

@@ -280,25 +280,33 @@ CAPABILITY_TESTS: dict[str, list[tuple[str, Callable[[str], bool]]]] = {
     ],
     # Reasoning = can it actually SOLVE a problem with one verifiable answer, not just comply with a
     # format? The rest of the battery (PONG, a weather JSON, def add) is passed by any competent
-    # model, so quality saturates and can't separate a capable model from a merely fluent one. These
-    # are deterministic regex/exact checks — no code execution, no judge — spanning arithmetic, char
-    # counting (a classic small-model failure), pattern completion, a code-trace, proportional
-    # reasoning, and an instruction transform. This is the dimension that stops quality from
-    # rubber-stamping a model that 'can't do the job' (DESIGN §4).
+    # model, so quality saturates and can't separate a capable model from a merely fluent one. The
+    # cases are deterministic regex/exact checks (no code exec, no judge), chosen EMPIRICALLY: run
+    # across an 11-model spread (3B-32B) on the fleet, keeping only the ones that DISCRIMINATE
+    # (gemma4:26b / qwen3.5:27b pass; a 14B or a think-off reasoner fails), so quality stops pinning
+    # at 1.0 and a model that 'can't do the job' can't rubber-stamp (DESIGN §4). Mix of multi-step
+    # arithmetic, traps (bat-and-ball, machines, "all but"), a relational puzzle (Sally's sisters),
+    # spatial reasoning (painted cube), char counting, a sequence, and a code-trace.
     "reasoning": [
         ("A tank holds 240 liters. It drains at 8 liters per minute for 6 minutes, then 50 liters "
          "are added. How many liters are in the tank now? Reply with only the final number.",
          _expect_int(242)),
+        ("Sally has 5 brothers. Each of her brothers has 2 sisters. How many sisters does Sally "
+         "have? Reply with only the number.", _expect_int(1)),
+        ("A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How many "
+         "cents does the ball cost? Reply with only the number.", _expect_int(5)),
+        ("If 5 machines take 5 minutes to make 5 widgets, how many minutes do 100 machines take to "
+         "make 100 widgets? Reply with only the number.", _expect_int(5)),
+        ("A farmer has 17 sheep. All but 9 die. How many sheep are left alive? Reply with only the "
+         "number.", _expect_int(9)),
+        ("A cube is painted on all 6 faces, then cut into 27 equal small cubes. How many of the "
+         "small cubes have exactly 2 painted faces? Reply with only the number.", _expect_int(12)),
         ("How many times does the letter 'r' appear in the word 'strawberry'? Reply with only the "
          "number.", _expect_int(3)),
         ("What is the next number in this sequence: 2, 6, 12, 20, 30, ? Reply with only the "
          "number.", _expect_int(42)),
         ("What does this Python print: print(len(set([1, 2, 2, 3, 3, 3]))) — reply with only the "
          "number.", _expect_int(3)),
-        ("If 3 pens cost 6 dollars, how much do 5 pens cost in dollars? Reply with only the "
-         "number.", _expect_int(10)),
-        ("Take the word PYTHON, reverse it, and write it in lowercase. Reply with only the result.",
-         _check_reverse_python),
     ],
 }
 
