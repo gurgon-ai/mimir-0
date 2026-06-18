@@ -851,7 +851,7 @@ def update_catalogue_scores(
     talk: float | None,
     tools: float | None,
     code: float | None,
-    coherence: float | None,
+    coherence: float | None = None,   # legacy column, no longer scored (kept so the DB shape holds)
     discipline: float | None = None,
     epistemics: float | None = None,
     reasoning: float | None = None,

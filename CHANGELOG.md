@@ -107,6 +107,19 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **Dropped the coherence dimension — it measured nothing.** The peer-judged coherence pass scored
+  every model mid-range (🟡) regardless of quality: the probe was trivial (every model answered it),
+  the same fixed panel graded everyone's ~identical answer, and a vague "rate 0.0–1.0" prompt makes
+  LLM judges cluster ~0.65 — so it never discriminated *and* it duplicated what `epistemics` already
+  measures deterministically. Removed the judge panel + canary + the coherence column (and its uniform
+  drag on `quality`). The DB column is kept (NULL) to avoid a migration. (A genuine multi-turn
+  coherence probe — the one thing nothing else measures — is noted as a future *finalists-only* test,
+  too costly to run fleet-wide.)
+- **Verifiable dims scored greedily (temperature 0) — no more luck-flips.** The single-correct-answer
+  dimensions (talk/tools/code/reasoning/vision) now run at temperature 0, so a near-tied model isn't
+  knocked to 🟡 by one unlucky high-temperature draw (the observed "gemma4:e2b all-green but the
+  stronger e4b yellow on one dim" bug). `discipline` and `epistemics` keep the sampled temperature on
+  purpose — their signal is consistency across runs (a stochastic tag-leak / repeated gauntlet).
 - **Vision in documents + image upload — the scanned-doc gap closed.** Drop an image in the documents
   folder (or upload one with 📎: `.png/.jpg/.jpeg/.webp/.gif/.bmp`) and the **`vision`-role model
   describes + transcribes it** (`VISION_DESCRIBE_SYSTEM`: description + verbatim OCR) into recallable
