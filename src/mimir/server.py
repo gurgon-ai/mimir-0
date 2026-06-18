@@ -2870,7 +2870,7 @@ function renderTourney(s) {
     const onModel = s.current ? ` · ${Math.round((Date.now() - _tourneyCurT) / 1000)}s on this model` : "";
     const slow = s.current && (Date.now() - _tourneyCurT) > 90000 ? " ⏳ (slow — a latency cap would skip models like this)" : "";
     const eta = (s.eta != null) ? ` · ~${fmtDuration(s.eta)} left` : "";
-    h += `<div class="hint" style="margin:6px 0;">${s.total ? `Scoring ${s.i}/${s.total}: ${s.current}…${onModel}${eta}${slow}` : (s.current || "Preparing…")}</div>`;
+    h += `<div class="hint" style="margin:6px 0;">${s.total ? `Scoring ${s.current}… · ${s.i}/${s.total} done${onModel}${eta}${slow}` : (s.current || "Preparing…")}</div>`;
   }
   if (s.round_key === "finals") h += renderFinals(s.recommendations);
   // An empty round that's NOT still running means nothing qualified — explain why (don't look broken).
