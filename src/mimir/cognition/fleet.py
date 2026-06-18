@@ -9,6 +9,7 @@ human-facing "what's on my network" view. Phase 2 benchmarking fills the ``retur
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -157,6 +158,7 @@ def _collapse_by_model(
             entry.model,
             {
                 "family": entry.family,
+                "params_b": entry.params_b,
                 "quality": entry.quality,
                 "talk": entry.talk,
                 "tools": entry.tools,
@@ -180,6 +182,54 @@ def _collapse_by_model(
     return by_model
 
 
+# Points model (DESIGN §4). Quality DOMINATES — the harder, empirically-chosen battery is what
+# actually separates models (a newer 12B beating an old 27B shows up here, on merit). Speed is a
+# strong, UNIVERSAL term — a 4-minute background worker or a laggy chat is useless, so every role
+# values it (a "fast"-preferring role values it more). Size is only a faint nudge: a weak prior that
+# bigger ≈ more capable, just enough to break a near-tie toward capacity — never enough to override
+# a real quality or speed gap (size is an indicator, not a verdict). Total points are transparent so
+# the board can show WHY a model ranked where it did.
+_W_QUALITY = 100.0
+_W_SPEED = 18.0
+_W_SIZE = 6.0
+
+
+def _role_quality(data: dict[str, Any], capabilities: tuple[str, ...]) -> float:
+    """Quality for THIS role — the mean of the dims it actually needs (so a chat-strong model isn't
+    dragged down by code/vision it never uses). Falls back to overall quality if the role lists no
+    measured dims."""
+    vals = [data[c] for c in capabilities if data.get(c) is not None]
+    return sum(vals) / len(vals) if vals else (data.get("quality") or 0.0)
+
+
+def _size_points(params_b: float | None) -> float:
+    """A faint capacity prior, log-scaled: ~0 below 1B, full near 70B. Weak on purpose — it only
+    nudges near-ties, since a newer small model can out-reason an older big one (the battery, not
+    size, is the real signal)."""
+    p = params_b or 0.0
+    return _W_SIZE * min(1.0, math.log10(1.0 + p) / math.log10(71.0)) if p > 0 else 0.0
+
+
+def _speed_points(return_time: float | None) -> float:
+    """Faster = more points, for EVERY role (slow kills both chat and background work). None
+    (untimed) earns nothing. ~13 at 1.2s/turn, ~9 at 3s, ~6 at 6s, ~1 at 60s — a smooth decay, not a
+    cliff (the hard latency cap already excludes the unusable before scoring)."""
+    if return_time is None:
+        return 0.0
+    return _W_SPEED / (1.0 + return_time / 3.0)
+
+
+def _role_score(data: dict[str, Any], role: str) -> float:
+    """The composite points for a model in a role: quality (dominant) + speed (strong, universal) +
+    size (faint nudge). A ``fast``-preferring role weights speed half-again as much."""
+    capabilities, prefer = ROLE_NEEDS[role]
+    speed = _speed_points(data.get("return_time"))
+    if prefer == "fast":
+        speed *= 1.5
+    return (_W_QUALITY * _role_quality(data, capabilities) + speed
+            + _size_points(data.get("params_b")))
+
+
 def _rank_for_role(
     by_model: dict[str, dict[str, Any]], role: str
 ) -> list[tuple[str, dict[str, Any]]]:
@@ -187,33 +237,39 @@ def _rank_for_role(
     (``recommend_roles``) and pooled (``roster_for``) staffing read, so a role's "best" never
     disagrees with itself.
 
-    Eligibility is the shared ``_bar_reason`` gate (never a silent drop); order follows the role's
-    ``prefer``: ``fast`` → lowest latency; ``quality`` → highest quality, latency only breaking ties
-    (under the cap you've already decided the wait is worth it — no soft speed penalty; §4).
-    """
-    capabilities, prefer = ROLE_NEEDS[role]
+    Eligibility is the shared ``_bar_reason`` gate (never a silent drop); order is by the composite
+    points (``_role_score``): quality for THIS role dominates, speed is a strong universal term, and
+    size a faint nudge (DESIGN §4)."""
+    capabilities, _prefer = ROLE_NEEDS[role]
     candidates = [
         (name, data)
         for name, data in by_model.items()
         if _bar_reason(data, capabilities, _ROLE_FLOORS.get(role)) is None
     ]
-    if prefer == "fast":
-        candidates.sort(key=lambda c: c[1]["return_time"] or 1e9)
-    else:
-        candidates.sort(key=lambda c: (-(c[1]["quality"] or 0.0), c[1]["return_time"] or 1e9))
+    candidates.sort(key=lambda c: -_role_score(c[1], role))
     return candidates
 
 
-def _as_pick(name: str, data: dict[str, Any], prefer: str) -> dict[str, Any]:
-    """A ranked candidate as the public pick shape (``recommend_roles``/``roster_for`` output)."""
+def _as_pick(name: str, data: dict[str, Any], role: str) -> dict[str, Any]:
+    """A ranked candidate as the public pick shape (``recommend_roles``/``roster_for`` output), with
+    the composite ``score`` + its parts so the board can show WHY it ranked where it did."""
+    capabilities, prefer = ROLE_NEEDS[role]
+    speed = _speed_points(data.get("return_time")) * (1.5 if prefer == "fast" else 1.0)
     return {
         "model": name,
         "family": data["family"],
+        "params_b": data.get("params_b"),
         "quality": data["quality"],
         "return_time": data["return_time"],
         "node": data["node"],  # the fastest node holding this model
         "nodes": data["nodes"],
         "prefer": prefer,
+        "score": round(_role_score(data, role), 1),
+        "points": {
+            "quality": round(_W_QUALITY * _role_quality(data, capabilities), 1),
+            "speed": round(speed, 1),
+            "size": round(_size_points(data.get("params_b")), 1),
+        },
     }
 
 
@@ -232,9 +288,9 @@ def recommend_roles(
     """
     by_model = _collapse_by_model(storage, disabled or set(), disabled_nodes or set())
     recommendations: dict[str, dict[str, Any] | None] = {}
-    for role, (_caps, prefer) in ROLE_NEEDS.items():
+    for role in ROLE_NEEDS:
         ranked = _rank_for_role(by_model, role)
-        recommendations[role] = _as_pick(*ranked[0], prefer) if ranked else None
+        recommendations[role] = _as_pick(ranked[0][0], ranked[0][1], role) if ranked else None
     return recommendations
 
 
@@ -249,9 +305,9 @@ def recommend_roles_detailed(
     a model the gate would bar."""
     by_model = _collapse_by_model(storage, disabled or set(), disabled_nodes or set())
     out: dict[str, list[dict[str, Any]]] = {}
-    for role, (_caps, prefer) in ROLE_NEEDS.items():
+    for role in ROLE_NEEDS:
         ranked = _rank_for_role(by_model, role)[:max_candidates]
-        out[role] = [_as_pick(name, data, prefer) for name, data in ranked]
+        out[role] = [_as_pick(name, data, role) for name, data in ranked]
     return out
 
 
@@ -275,8 +331,7 @@ def roster_for(
     if role not in ROLE_NEEDS:
         raise ValueError(f"unknown role {role!r}; known: {sorted(ROLE_NEEDS)}")
     by_model = _collapse_by_model(storage, disabled or set(), disabled_nodes or set())
-    _caps, prefer = ROLE_NEEDS[role]
-    return [_as_pick(name, data, prefer) for name, data in _rank_for_role(by_model, role)[:n]]
+    return [_as_pick(name, data, role) for name, data in _rank_for_role(by_model, role)[:n]]
 
 
 # Per-role ideal size (params_b) for the pre-benchmark heuristic — a defensible first guess only;

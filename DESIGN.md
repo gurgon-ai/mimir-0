@@ -219,8 +219,11 @@ but configurable.* Resolution is a strict hierarchy, each level vetoing models t
 and anything the pool can't currently reach:
 
 1. **explicit pin** — a named model always wins; the system never overrides the operator;
-2. **measured-best** — the benchmarked, role-gated recommendation (quality + the discipline floor
-   for identity roles), so it future-proofs itself as new models are benchmarked;
+2. **measured-best** — the benchmarked, role-gated recommendation, ranked by a transparent **points
+   total**: quality for *that* role (dominant) + speed (a strong, universal term — a slow model is bad
+   for chat *and* background work) + a faint size prior to break near-ties toward capacity. Not
+   quality alone, so a coin-flip tie on a saturated battery can't crown the wrong model; it
+   future-proofs itself as new models are benchmarked;
 3. **approved-family heuristic** — before any benchmark, a curated-family model near the role's
    ideal size (approved models win the first round);
 4. **any reachable model** — last resort, so `auto` always yields something runnable.
@@ -253,10 +256,14 @@ different minds. Diversity is emergent from the hardware, not a config chore.
    nightly role. **Latency** is timed from one *real-length* generation (normalized to seconds per
    ~256-token turn), so a slow remote model can't masquerade as instant on a 3-token reply. A model
    that fails here never costs a judge call. The gate scores six capability dimensions — *talk*,
-   *tools*, *code*, **reasoning**, **discipline**, and **epistemics**. *Reasoning* tests whether the
-   model can actually **solve** a problem with one regex-checkable answer (multi-step arithmetic,
-   letter-counting, a code-trace, an instruction transform), not merely follow a format — the
-   dimension that keeps *quality* from saturating near 1.0 for any fluent model. *Discipline* tests
+   *tools*, *code*, **reasoning**, **discipline**, and **epistemics** (plus an informational *vision*
+   check that doesn't affect the score). *Reasoning* tests whether the model can actually **solve** a
+   problem with one regex-checkable answer — multi-step arithmetic, classic traps (bat-and-ball, the
+   "all but" trap, a relational puzzle, a painted-cube count), letter-counting, a code-trace — and
+   its cases are chosen **empirically**: run across a 3B→32B model spread on the fleet, keeping only
+   those that *discriminate* strong models from weak, so *quality* can't saturate near 1.0 for any
+   fluent model (the failure that made the picker recommend a small model over a clearly better big
+   one). *Discipline* tests
    whether the model honors prohibitions, above all **not reproducing the internal
    `[tier=...; source=...]` scaffolding it is shown** (the failure that forced the §10 output
    sanitizer); its probe replicates the production condition that triggers the leak (a tag-saturated
