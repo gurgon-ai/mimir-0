@@ -2695,6 +2695,7 @@ class Mimir:
         persist: bool = True,
         progress: Callable[[int, int, str, float | None], None] | None = None,
         on_result: Callable[[ModelBenchmark, str], None] | None = None,
+        on_done: Callable[[str], None] | None = None,
     ) -> FleetBenchmarkResult:
         """Scan + benchmark the fleet's models (speed + capability dimensions) (DESIGN §4).
 
@@ -2731,6 +2732,7 @@ class Mimir:
             persist=persist,
             progress=progress,
             on_result=on_result,
+            on_done=on_done,
         )
 
     def complete_speed_matrix(
@@ -2751,6 +2753,7 @@ class Mimir:
         *,
         progress: Callable[[int, int, str, float | None], None] | None = None,
         on_result: Callable[[ModelBenchmark, str], None] | None = None,
+        on_done: Callable[[str], None] | None = None,
     ) -> FleetBenchmarkResult:
         """Grade the COUNCIL pool: the models **above** the chat size cap, with the user-facing caps
         OFF (no upper size limit, no latency gate) — so the big/slow models a chat cap excludes get
@@ -2777,6 +2780,7 @@ class Mimir:
             persist=True,
             progress=progress,
             on_result=on_result,
+            on_done=on_done,
         )
 
     def evaluate_epistemics(
