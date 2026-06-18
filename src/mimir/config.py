@@ -213,6 +213,10 @@ class Config:
     # Citation guard (DESIGN §10): flag a reply that cites a source the system doesn't hold (an
     # invented "[National Fire Code]") — appended as a fail-loud note, never silently deleted.
     library_citation_guard: bool = True
+    # Vision in documents: an ingested image is described + transcribed by the `vision`-role model
+    # into recallable text. Needs a vision model (empirical benchmark + `[roles.vision]`); with none
+    # an image ingest fails loud. Off = skip images even if a vision model exists.
+    vision_describe_images: bool = True
     # Web server / integration API (DESIGN §8: a brain with endpoints, no built-in hands).
     # ``api_token`` (or the env var named by ``[server] api_token_env``, default MIMIR_API_TOKEN,
     # which wins) gates every ``/api/*`` route via a Bearer check; unset = open (localhost dev). Run
@@ -389,6 +393,7 @@ def load_config(path: str | Path) -> Config:
         draft_rag_enabled=bool(raw.get("draft_rag", {}).get("enabled", False)),
         draft_rag_top_k=int(raw.get("draft_rag", {}).get("top_k", 4)),
         draft_rag_tokens=int(raw.get("draft_rag", {}).get("draft_tokens", 160)),
+        vision_describe_images=bool(raw.get("vision", {}).get("describe_images", True)),
         inner_life_enabled=bool(raw.get("inner_life", {}).get("enabled", False)),
         inner_life_cadence_s=float(raw.get("inner_life", {}).get("cadence_s", 300.0)),
         inner_life_idle_floor_s=float(raw.get("inner_life", {}).get("idle_floor_s", 30.0)),

@@ -68,6 +68,11 @@ library_page_claims(page_id, claim_id)                                          
   doc the surfaced claims came from — deterministic, no second pass), or the **Phase-2 model fetch**
   (the model opens a page itself; opt-in). Full pages count as grounding for the uncertainty gate.
 - **On demand (verbatim):** the exact source line/page via a claim's `locator` — for quoting/checking.
+- **Images (vision):** an ingested image (drop folder or 📎 upload — `.png/.jpg/.jpeg/.webp/.gif/.bmp`)
+  is described + transcribed (verbatim OCR) by the **`vision`-role model** into recallable document-tier
+  text, then flows through everything else like any document. Gated on a vision model (empirical
+  benchmark + `[roles.vision]`); without one, an image ingest fails loud. `[vision] describe_images`
+  toggles it. (Still TODO: OCR of image-only *pages inside* a PDF/DOCX.)
 - **Per-document + per-layer context toggles:** each document has an **include-in-context** toggle
   (Library tab, compact list — name + checkbox, click to expand details/index-time/delete); a disabled
   doc's chunks + claims are excluded from recall **at the SQL load layer**, so an unselected book costs

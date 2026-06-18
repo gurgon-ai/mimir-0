@@ -1357,7 +1357,7 @@ _HTML = """<!doctype html>
       <div id="ivProgress"></div>
     </div>
     <form id="composer">
-      <label class="clip" id="clip" title="Upload a document (.txt .md .pdf .docx) — it's saved to your documents folder and ingested">📎<input type="file" id="docFile" accept=".txt,.text,.md,.markdown,.pdf,.docx" hidden/></label>
+      <label class="clip" id="clip" title="Upload a document (.txt .md .pdf .docx) or an image (.png .jpg …, needs a vision model) — saved to your documents folder and ingested">📎<input type="file" id="docFile" accept=".txt,.text,.md,.markdown,.pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,.bmp" hidden/></label>
       <input type="text" id="text" placeholder="Say something to Mimir…" autocomplete="off"/>
       <button type="submit" id="send">Send</button>
     </form>
@@ -2233,6 +2233,9 @@ async function loadLibrary() {
     const fp = escapeHtml(data.source_folder_abs || data.source_folder);
     $("docFolder").innerHTML = data.source_folder_exists ? `Drop folder: <code>${fp}</code>`
       : `Drop folder: <code>${fp}</code> <span style="color:#e0a04a;">— doesn't exist yet (made on first upload; relative paths follow the server's working dir).</span>`;
+    $("docFolder").innerHTML += data.vision_model
+      ? `<br><span style="color:#7fd17f;">🖼 Images are described by <code>${escapeHtml(data.vision_model)}</code> (vision) and made recallable.</span>`
+      : `<br><span style="color:#8a94a3;">🖼 Images won't ingest — no vision model assigned (set <b>vision</b> in the role tab / run a benchmark).</span>`;
   }
   libTitles = {}; pages.forEach(p => { libTitles[p.id] = p.title; });
   pagesEl.innerHTML = pages.length ? pages.map(p =>

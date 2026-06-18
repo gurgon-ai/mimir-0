@@ -107,6 +107,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **Vision in documents + image upload — the scanned-doc gap closed.** Drop an image in the documents
+  folder (or upload one with 📎: `.png/.jpg/.jpeg/.webp/.gif/.bmp`) and the **`vision`-role model
+  describes + transcribes it** (`VISION_DESCRIBE_SYSTEM`: description + verbatim OCR) into recallable
+  document-tier text — so it answers about photos and scanned pages. Gated on a vision model existing
+  (the empirical benchmark + `[roles.vision]`); with none, an image ingest **fails loud** with the
+  reason (never silent). `[vision] describe_images` toggles it off entirely. The Library tab shows the
+  active vision model (or "no vision model — images won't ingest"). New `ingest_text()` shares the
+  chunk/embed/store path; `list_documents` now includes images. (Next/limit: still no OCR for
+  image-only *pages inside* a PDF/DOCX — standalone images + photos work now.)
 - **Vision role + self-describing role assignment.** A new optional **`vision`** role (the model that
   reads images, for the upcoming image/document-vision path): `[roles.vision] = "auto"` binds the best
   model that *passes the vision probe* (gated on the `vision` score, ranked by quality) — a non-vision

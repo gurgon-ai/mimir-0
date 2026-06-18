@@ -256,3 +256,8 @@ model = "auto"
 # benchmark, not advertised metadata); a fleet with no vision-capable model simply has no pick.
 [roles.vision]
 model = "auto"
+
+[vision]
+# When an image is ingested (drop folder or 📎 upload), describe + transcribe it with [roles.vision]
+# into recallable text. Needs a vision model; with none, an image ingest fails loud. Off = skip images.
+# describe_images = true
