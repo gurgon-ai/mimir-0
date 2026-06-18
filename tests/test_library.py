@@ -369,6 +369,24 @@ def test_ingest_records_per_document_index_time(mock_config: Config, tmp_path) -
         brain.close()
 
 
+def test_load_chips_skip_weakly_matched_documents(mock_config: Config, tmp_path) -> None:
+    """The after-reply Load chips offer only documents the claims are *clearly* relevant to — a
+    barely-matching off-topic doc (e.g. a stray README) shouldn't offer its page."""
+    brain = _libbrain(mock_config, tmp_path)
+    try:
+        folder = brain._library_source_folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "bees.md").write_text("# Bees\n\nEach hive has a single queen. Bees make honey.")
+        (folder / "cars.md").write_text("# Cars\n\nTorque is rotational force from the engine.")
+        brain.ingest_pending_library()
+        result = brain.turn("tell me about hives and queens and honey")
+        titles = [s["title"].lower() for s in result.library_sources]
+        assert any("bees" in t for t in titles)           # the on-topic doc is offered
+        assert not any("cars" in t for t in titles)        # the off-topic doc is not
+    finally:
+        brain.close()
+
+
 def test_draft_rag_folds_in_memory_surfaced_by_the_draft(mock_config: Config) -> None:
     """Draft-RAG (two-pass): a short draft answer re-retrieves memory and folds the new hits into
     the recall set — surfacing a memory the user's literal wording started without."""
