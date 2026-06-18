@@ -2681,17 +2681,26 @@ class Mimir:
         return self._model.role_nodes()
 
     def _apply_role_recs(self, recs: dict[str, Any]) -> dict[str, str]:
-        """Re-point the real roles (chat/bake/reasoning) at the given recommendations. Shared by
-        'Apply best' and the tournament finals. Updates routing in memory — persist via toml."""
+        """Re-point the real roles (chat/bake/reasoning) at the given recommendations AND persist
+        them, so 'Apply best' and the tournament finals SURVIVE A RESTART. (They used to update only
+        the in-memory config — lost on reboot, so the role reverted while the recommendation still
+        showed; §4.) Each becomes a model-pin (routing still picks its live-best node); re-apply
+        after a fresh benchmark to move it."""
         applied: dict[str, str] = {}
         for role in ("chat", "bake", "reasoning"):
             rec = recs.get(role)
             if rec and role in self.config.roles:
-                self._model.set_role_model(role, rec["model"])
-                self.config.roles[role].model = rec["model"]
-                applied[role] = rec["model"]
+                model = rec["model"]
+                self._model.set_role_model(role, model)
+                self.config.roles[role] = RoleSpec(
+                    model=model, params=self.config.roles[role].params
+                )
+                self._auto_roles.discard(role)
+                self._model.set_role_fallbacks(role, [])
+                self._persist_role_pin(role, model, None)   # survive restart (pin model, not node)
+                applied[role] = model
         if applied:
-            log.info("fleet: applied role recommendations %s", applied)
+            log.info("fleet: applied + pinned role recommendations %s", applied)
         return applied
 
     def apply_recommendations(self) -> dict[str, str]:
