@@ -3096,6 +3096,17 @@ function ipTag(node) {
   const parts = host.split("."); return "IP." + parts[parts.length - 1];
 }
 
+// One-line descriptions so the role names are self-explaining in the assignment tab.
+const ROLE_DESC = {
+  chat: "Talks to you — the voice of the assistant.",
+  bake: "Extracts facts from each turn to remember.",
+  reasoning: "Background cognition: summaries, reflections, self-model, narratives, claim distillation.",
+  embed: "Turns text into vectors for memory recall.",
+  background: "Loose model for idle 'inner-life' musings (off the record, not identity-gated).",
+  council: "Adversarial deliberation — a diverse pool of models.",
+  vision: "Reads images (image & document vision). Auto-binds the best model that passes the vision probe.",
+};
+
 function renderRoleAssign(data) {
   // Per-role model picker. "auto" + EVERY (node, model) placement, grouped by model — so a model
   // that lives on several nodes is selectable per node (pin a role onto an edge box, off the beast).
@@ -3130,7 +3141,12 @@ function renderRoleAssign(data) {
     const row = document.createElement("div"); row.className = "field";
     row.style.display = "flex"; row.style.alignItems = "center"; row.style.gap = "10px";
     const lab = document.createElement("label"); lab.style.minWidth = "90px"; lab.style.margin = "0";
-    lab.textContent = role;
+    lab.textContent = role; lab.title = ROLE_DESC[role] || "";
+    if (ROLE_DESC[role]) {
+      const hint = document.createElement("span"); hint.className = "hint";
+      hint.style.cssText = "font-size:11px; flex:1 1 100%; margin:-4px 0 4px 0; order:9;";
+      hint.textContent = ROLE_DESC[role]; row.style.flexWrap = "wrap"; row.appendChild(hint);
+    }
     const sel = document.createElement("select");
     const autoOpt = document.createElement("option");
     autoOpt.value = "auto"; autoOpt.textContent = isAuto ? "auto (pick best)" : "auto (pick best)";

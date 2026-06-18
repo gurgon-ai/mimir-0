@@ -32,6 +32,14 @@ def test_vision_probe_scores_a_text_only_model_low() -> None:
     assert benchmark.score_vision(_text_only) < 1.0
 
 
+def test_count_only_fluke_stays_below_the_role_floor() -> None:
+    # A text model that ignores the image but guesses '3' gets only the count weight (0.4) — below
+    # the 0.5 capability floor, so it can't masquerade as vision-capable.
+    def count_guesser(messages):
+        return "3" if "circle" in messages[-1]["content"].lower() else "no idea"
+    assert benchmark.score_vision(count_guesser) < 0.5
+
+
 def test_vision_is_none_when_probe_missing(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(benchmark, "_VISION_PROBE", tmp_path / "nope.png")
     assert benchmark.score_vision(_vision_capable) is None   # not tested, not a false zero

@@ -107,6 +107,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **Vision role + self-describing role assignment.** A new optional **`vision`** role (the model that
+  reads images, for the upcoming image/document-vision path): `[roles.vision] = "auto"` binds the best
+  model that *passes the vision probe* (gated on the `vision` score, ranked by quality) — a non-vision
+  fleet simply gets no pick. The role-assignment tab now shows a **one-line description under each
+  role** (chat / bake / reasoning / embed / background / council / vision), so what each does is
+  obvious without renaming — notably clarifying that `reasoning` is *background cognition* (summaries,
+  reflections, distillation), distinct from the loose `background` (inner-life) role. The vision probe
+  is now OCR-weighted (0.6 word / 0.4 count) so a text model's lucky count-guess stays below the role
+  floor and can't pose as vision-capable.
 - **Vision benchmark dimension — capability determined empirically (DESIGN §4 "Round 4").** A model's
   vision is *tested*, not read from advertised metadata: the benchmark sends a fixed probe image
   (`assets/vision_probe.png` — the word GLYPHON + three red circles) and scores reading the word (OCR)

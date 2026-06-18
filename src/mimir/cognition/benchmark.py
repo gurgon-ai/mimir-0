@@ -292,11 +292,14 @@ CAPABILITY_TESTS: dict[str, list[tuple[str, Callable[[str], bool]]]] = {
 # The fixed probe image (the word GLYPHON + three red circles on white), from the repo root.
 # Absent → vision is 'not tested' (None), never a false zero. See assets/vision_probe.README.md.
 _VISION_PROBE = Path(__file__).resolve().parents[3] / "assets" / "vision_probe.png"
+# (prompt, check, weight). Reading the made-up word GLYPHON is the definitive vision signal and
+# carries most weight; a text-only model can only *guess* the count, and that lucky guess alone
+# (0.4) stays below the 0.5 role floor — so it can't masquerade as vision-capable.
 _VISION_CASES = [
     ("What single word is written in this image? Reply with just the word.",
-     lambda out: "glyphon" in out.lower()),
+     lambda out: "glyphon" in out.lower(), 0.6),
     ("How many red circles are in this image? Reply with only the number.",
-     lambda out: bool(re.search(r"\b(3|three)\b", out.lower()))),
+     lambda out: bool(re.search(r"\b(3|three)\b", out.lower())), 0.4),
 ]
 
 
@@ -316,16 +319,16 @@ def score_vision(chat_fn: ChatFn) -> float | None:
     if b64 is None:
         log.warning("benchmark: vision probe image missing at %s — skipping vision", _VISION_PROBE)
         return None
-    passed = 0
-    for prompt, check in _VISION_CASES:
+    score = 0.0
+    for prompt, check, weight in _VISION_CASES:
         try:
             out = chat_fn([{"role": "user", "content": prompt, "images": [b64]}])
         except Exception as exc:  # a non-vision model may error on an image — a 0 for that case
             log.warning("benchmark: vision call failed: %s", exc)
             out = ""
         if check(out):
-            passed += 1
-    return passed / len(_VISION_CASES)
+            score += weight
+    return score
 
 
 def score_capability(chat_fn: ChatFn, capability: str) -> float:

@@ -81,6 +81,10 @@ ROLE_NEEDS: dict[str, tuple[tuple[str, ...], str]] = {
     # `council_roster`). The brain harness queries these via `roster_for` to staff itself.
     "background": (("reasoning",), "quality"),
     "council": (("reasoning",), "quality"),
+    # Vision (DESIGN §4 "Round 4"): EMPIRICALLY gated — only models that passed the image probe
+    # qualify (vision >= floor); ranked by overall quality (the most capable model that can also
+    # SEE). For the image/document-vision path; a non-vision fleet simply has no pick (None).
+    "vision": (("vision",), "quality"),
 }
 # Roles whose value is a DIVERSE POOL, not a single best — staffed by `council_roster`, not by the
 # single-best ranking. `roster_for` routes these to the diversity picker.
