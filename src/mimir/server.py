@@ -28,6 +28,7 @@ import binascii
 import hmac
 import json
 import logging
+import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1189,10 +1190,19 @@ def serve(config_path: str, host: str = "127.0.0.1", port: int = 8765) -> None:
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        pass
+        print("\nStopping Mimir…", flush=True)
     finally:
         server.shutdown()
-        brain.close()
+        server.server_close()   # release the listening socket so a restart can rebind immediately
+        brain.close()           # stops the brain's daemon workers + closes storage cleanly (bounded)
+    # Force-terminate after the clean shutdown above. A benchmark/tournament in flight runs a
+    # ThreadPoolExecutor whose workers are NON-daemon (concurrent.futures, 3.9+) and blocked in
+    # uninterruptible model calls; the interpreter's atexit handler would JOIN them, hanging the
+    # operator's terminal on Ctrl-C until a slow remote call returns. Storage is already closed
+    # (SQLite commits per op — no corruption, at worst a half-scored catalogue a re-run completes),
+    # so abandoning that background work is safe. os._exit skips finalizers we've already run.
+    log.info("Mimir stopped.")
+    os._exit(0)
 
 
 def _setup_logging(log_file: str | None) -> None:
