@@ -334,6 +334,8 @@ class Mimir:
         self._resolve_auto_roles()
         # Re-apply persisted manual role pins (survive restart; override config + auto). DESIGN §4.
         self._restore_role_pins()
+        # Apply the saved context-size preset (KV-cache window + how much context we push in).
+        self._apply_context_size()
 
     def _init_fleet(self, refresh_interval_s: float) -> None:
         """Inventory the fleet once, then start the active-health prober (off the boot path)."""
@@ -1155,6 +1157,17 @@ class Mimir:
 
     _SETTINGS_KEY = "settings"
 
+    # Context-size presets (the slider): name → (num_ctx KV-cache window, context_budget_tokens).
+    # Bigger = more unique facts pushed in, but more VRAM/KV-cache. The window and the amount of
+    # context we assemble move together (no point pushing facts you can't fit). `medium` matches the
+    # proven 8k operational default.
+    _CONTEXT_PRESETS: dict[str, tuple[int, int]] = {
+        "small":  (4096, 2048),
+        "medium": (8192, 4096),
+        "large":  (16384, 8192),
+        "xlarge": (32768, 12288),
+    }
+
     def _settings_defaults(self) -> dict[str, Any]:
         """The settable keys and their config-supplied defaults. Config is the headless default;
         these overrides are the live, UI-set preference (stored in kv, so no TOML mutation)."""
@@ -1166,7 +1179,20 @@ class Mimir:
             "deliberation_enabled": self.config.deliberation_enabled,
             "inner_life_enabled": self.config.inner_life_enabled,
             "inner_life_cadence_s": self.config.inner_life_cadence_s,
+            "context_size": "medium",   # KV-cache window + how many facts we push in (the slider)
         }
+
+    def _apply_context_size(self) -> None:
+        """Apply the context-size preset: the KV-cache window (``num_ctx``, injected into every call
+        so all callers agree), how much context we assemble (``context_budget_tokens``), and the
+        window we qualify at (``benchmark_num_ctx``). Read live, so the slider takes effect without
+        a restart (it does reload warm models at the new window — expected)."""
+        size = self._overrides().get("context_size", "medium")
+        num_ctx, budget = self._CONTEXT_PRESETS.get(size, self._CONTEXT_PRESETS["medium"])
+        self._model.set_operational_num_ctx(num_ctx)
+        self.config.context_budget_tokens = budget
+        if self.config.backend:
+            self.config.backend.benchmark_num_ctx = num_ctx
 
     def _overrides(self) -> dict[str, Any]:
         raw = kv_get(self._storage, self._SETTINGS_KEY)
@@ -1184,6 +1210,10 @@ class Mimir:
         overrides = self._overrides()
         effective = {k: overrides.get(k, d) for k, d in defaults.items()}
         effective["overridden"] = sorted(k for k in overrides if k in defaults)
+        # The slider's options + what each resolves to, so the UI can label "Medium (8192 ctx)".
+        effective["context_presets"] = {
+            k: {"num_ctx": n, "budget_tokens": b} for k, (n, b) in self._CONTEXT_PRESETS.items()
+        }
         return effective
 
     def update_settings(self, changes: dict[str, Any]) -> dict[str, Any]:
@@ -1211,8 +1241,16 @@ class Mimir:
                 val = bool(val)
             elif key == "inner_life_cadence_s":
                 val = max(30.0, float(val))  # floor at 30s so a typo can't hammer the fleet
+            elif key == "context_size":
+                val = str(val)
+                if val not in self._CONTEXT_PRESETS:
+                    raise ConfigError(
+                        f"unknown context_size: {val!r} (one of {sorted(self._CONTEXT_PRESETS)})"
+                    )
             overrides[key] = val
         kv_set(self._storage, self._SETTINGS_KEY, json.dumps(overrides))
+        if "context_size" in changes:
+            self._apply_context_size()   # take effect now (reloads warm models at the new window)
         return self.settings()
 
     def _tz(self) -> str | None:

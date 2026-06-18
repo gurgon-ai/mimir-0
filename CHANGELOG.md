@@ -8,6 +8,14 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **A Context-size slider (Small / Medium / Large / X-Large) — one knob for the KV-cache window and
+  how much you recall.** VRAM and KV-cache size vary by box, and there's no point pushing in more
+  unique facts than the window can hold — so the two move together. Each preset sets the operational
+  `num_ctx` injected into *every* model call (consistent, so a warm model isn't reloaded between
+  callers), the `context_budget_tokens` we assemble, and the `benchmark_num_ctx` we qualify at:
+  Small 4096/2048 · Medium 8192/4096 · Large 16384/8192 · X-Large 32768/12288. A runtime setting
+  (kv override, default Medium), applied live on the Sleep tab — changing it reloads warm models at
+  the new window. `brain._apply_context_size()` / `ModelGateway.set_operational_num_ctx()`.
 - **The Finals "Your champions" picker is now the onboarding surface: per-role colour, role
   descriptions, and a checkable council pool.** Each role's dropdown is coloured by what *that* role
   needs (🟢 strong · 🟡 ok · 🔴 weak), defaulting to the top pick, with the role's description shown
