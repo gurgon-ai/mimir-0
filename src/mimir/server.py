@@ -2760,7 +2760,7 @@ function _visionEmoji(v) { return v == null ? "·" : v <= 0 ? "❌" : v >= 1 ? "
 // Vision is a capability CHECK, separate from the scored dimensions (it does NOT affect quality), so
 // it sits in its own column after Speed, set off by a left border.
 const VIS_SEP = "border-left:2px solid #3a4150;";
-const VIS_TH = `<th style="${VIS_SEP}" title="Vision is a capability check — it does NOT affect the quality score">Vis</th>`;
+const VIS_TH = `<th style="${VIS_SEP}" title="Vision is a capability check — it does NOT affect the quality score">Vision</th>`;
 const VIS_TD = ` style="${VIS_SEP}"`;
 function _medal(i) { return i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : (i + 1) + "."; }
 function _stars(q) { const n = Math.max(0, Math.min(5, Math.round((q || 0) * 5))); return "★".repeat(n) + "☆".repeat(5 - n); }
@@ -2804,7 +2804,7 @@ function renderBenchResults(results, header, speeds) {
   const all = [...byModel.values()].sort((a, b) => (b.quality || 0) - (a.quality || 0)
     || _bestSpeed(a.model, a.return_time, speeds) - _bestSpeed(b.model, b.return_time, speeds));
   let h = `<h2>${header || "🏁 Benchmarking…"} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="showPlacement()">📊 Per-node placement</button> <button class="secondary" style="padding:4px 10px;" onclick="showCouncil()">🏟️ Council</button> <button class="secondary" style="padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
-  h += '<div class="legend">✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; ★ = quality &nbsp;|&nbsp; one row per model; Speed = each node it runs on (🖥️ local · 🌐 LAN), fastest first &nbsp;|&nbsp; <b>Vis</b> is a capability check (❌ none · 🟡 sees · ✅ full) — it does <b>not</b> affect the score</div>';
+  h += '<div class="legend">✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; ★ = quality &nbsp;|&nbsp; one row per model; Speed = each node it runs on (🖥️ local · 🌐 LAN), fastest first &nbsp;|&nbsp; <b>Vision</b> is a capability check (❌ none · 🟡 sees · ✅ full) — it does <b>not</b> affect the score</div>';
   if (!all.length) { $("benchBoard").innerHTML = h + '<div class="hint" style="margin-top:12px;">Warming up the first model…</div>'; return; }
   h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th><th>Epistemics</th><th>Speed/turn (per node)</th>" + VIS_TH + "</tr>";
   all.forEach((r, i) => {
@@ -2827,7 +2827,7 @@ async function showPlacement() {
 function renderPlacement(data) {
   _benchBoardClosed = false; benchShow(true);
   let h = '<h2>📊 Per-node placement — what runs best on each node <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>';
-  h += '<div class="legend">🏆 node winner (best quality, speed breaks ties) · ⚡ fastest here · ✅ ≥0.80 🟡 0.50–0.79 ❌ &lt;0.50 · speed is per-node · roles: green = eligible, ⊘ = barred · <b>Vis</b> is a check (does not affect score)</div>';
+  h += '<div class="legend">🏆 node winner (best quality, speed breaks ties) · ⚡ fastest here · ✅ ≥0.80 🟡 0.50–0.79 ❌ &lt;0.50 · speed is per-node · roles: green = eligible, ⊘ = barred · <b>Vision</b> is a check (does not affect score)</div>';
   h += '<div class="hint" style="margin:6px 0;">☑ Untick a machine to <b>exclude it from qualification + routing</b> — e.g. disable the GPU box to see what your edge nodes can do <i>on their own</i> (the whole point: useful home AI without killer compute). Takes effect on the next benchmark/tournament.</div>';
   const disabledNodes = new Set(data.disabled_nodes || []);
   const nodes = Object.keys(data.by_node || {}).sort((a, b) => {
@@ -2992,7 +2992,7 @@ function renderTourney(s) {
   benchShow(true);
   const round = s.round || 1, phase = s.phase, label = s.round_label || `Round ${round}`;
   let h = `<h2>🏆 Tournament — ${label} · ${s.round_name || ""} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
-  h += `<div class="legend">${s.blurb || ""} &nbsp;|&nbsp; ✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; <b>Vis</b> is a check (does not affect score)</div>`;
+  h += `<div class="legend">${s.blurb || ""} &nbsp;|&nbsp; ✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; <b>Vision</b> is a check (does not affect score)</div>`;
   if (phase === "running") {
     // Elapsed comes from the SERVER (true time on the longest-running in-flight model — the real
     // bottleneck across the concurrent per-node workers), so the timer never sticks on a model that
