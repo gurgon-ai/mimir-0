@@ -81,7 +81,8 @@ evidence) with a conversation dropdown on top (**Restore** a past conversation o
 **🕸 Graph** toggle that flips it to a drifting galaxy of memory blobs + entities — click any blob to
 review/edit it. The side tabs cover **Profile** (the seeding interview / your orienting facts),
 **Mind**, **Memories**, **Graph**, **Habits**, **Council**, **Fleet** (role assignment → qualify →
-models), and **Docs**. It binds to localhost by default; it's a reference adapter, not a hardened
+models), and **Library** (your documents — ingest, per-doc include toggles, composite pages, ZIM).
+It binds to localhost by default; it's a reference adapter, not a hardened
 public service — put a reverse proxy in front if you expose it.
 
 Under the hood it's a small JSON API (`/api/turn` + `/api/turn/stream`, `/api/identity`,
@@ -272,10 +273,10 @@ Two ways in, same result:
 - **📎 by the chat box** — click the paperclip, pick a `.txt`/`.md`/`.pdf`/`.docx`; it's saved into the
   folder and ingested immediately (recallable on the next turn).
 - **Drop files into the folder** yourself — they're picked up by an **idle pass** (a sleep-cycle
-  phase, or the **"Scan folder now"** button on the Docs tab).
+  phase, or the **"Scan & index now"** button on the Library tab).
 
 The idle pass ingests new/changed files (content-hashed, so unchanged files are skipped) and writes
-a **short summary of each** — a small browsable "wiki" on the Docs tab that the model also draws on.
+a **short summary of each** — a small browsable "wiki" on the Library tab that the model also draws on.
 A changed file is re-ingested (its old chunks replaced) and re-summarized.
 
 ### Enabling PDF and DOCX (the one extra step)
@@ -292,7 +293,7 @@ never silently skips. Once installed, both work through the 📎, the drop folde
 `brain.ingest(...)`. (python-docx reads `.docx` only, not legacy `.doc`; on Windows the extra also
 pulls a `lxml` binary wheel — no compiler needed.)
 
-> **If "Scan folder now" reports `Ingested 0`** and your files don't appear, the Docs tab now tells
+> **If "Scan & index now" reports `Ingested 0`** and your files don't appear, the Library tab now tells
 > you why: per-file failures show **in red** with the reason (most often the missing-extra message
 > above), and wrong-type drops show **in amber** as skipped. One bad file never aborts the rest of the
 > scan. The scan only ingests **new or changed** files (content-hashed), so an unchanged file already
@@ -303,7 +304,7 @@ pulls a `lxml` binary wheel — no compiler needed.)
 > Recall covers what was extracted, not what's locked in pictures.
 
 The drop folder is **non-recursive** — files must sit directly in the folder, not in subdirectories.
-Relative folder paths resolve against the **server's working directory**; the Docs tab shows the
+Relative folder paths resolve against the **server's working directory**; the Library tab shows the
 resolved absolute path so you can confirm where it's actually looking (use an absolute path in
 `mimir.toml` if you launch from elsewhere).
 
@@ -602,6 +603,6 @@ model server.
 | `found a 'memories' table but no schema_version marker` | You pointed Mimir at a non-Mimir or corrupt DB. Use a fresh `[storage] path`. |
 | Mimir greets with the wrong name, or inverts who serves whom | A too-small `reasoning` model hallucinated its self-model. Use **≥12B** for `chat`/`reasoning` (§5.1) and let the self-model re-synthesize (it refreshes on the `[self_model] refresh_every` cadence). Your `[identity]` anchors are not the problem. |
 | Internal `[tier=…; source=…]` tags appear in replies | A small model echoing the prompt's tag style. They're stripped automatically — if you still see them, you're on **old code**; restart the server. A larger `chat` model stops producing them at the source. |
-| "Scan folder now" says `Ingested 0`, documents don't appear | A `.pdf`/`.docx` without the extra (`pip install 'mimir-0[documents]'`) — the Docs tab shows the failure in **red** with the install line. Also check the **resolved folder path** shown on the Docs tab (relative paths follow the server's working directory) and that files sit **directly** in it (the scan is non-recursive). Unchanged, already-ingested files are a correct no-op. |
-| Document has text but recall finds nothing | Image-heavy/scanned PDF/DOCX yields little or no extractable text (**no OCR**). Confirm the chunk count on the Docs tab — a multi-MB file with 0–1 chunks is mostly images. |
+| "Scan & index now" says `Ingested 0`, documents don't appear | A `.pdf`/`.docx` without the extra (`pip install 'mimir-0[documents]'`) — the Library tab shows the failure in **red** with the install line. Also check the **resolved folder path** shown on the Library tab (relative paths follow the server's working directory) and that files sit **directly** in it (the scan is non-recursive). Unchanged, already-ingested files are a correct no-op. |
+| Document has text but recall finds nothing | Image-heavy/scanned PDF/DOCX yields little or no extractable text (**no OCR**). Confirm the chunk count on the Library tab — a multi-MB file with 0–1 chunks is mostly images. |
 | Recall got worse after changing `[roles.embed]` | Vectors from a different embed model are incomparable (even at the same dimension). Stop the server and run `python -m mimir.server --config mimir.toml --reembed`, then restart. Pin the exact embed tag to avoid accidental swaps. |

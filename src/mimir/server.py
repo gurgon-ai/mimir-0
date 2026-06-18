@@ -1378,7 +1378,6 @@ _HTML = """<!doctype html>
       <button data-tab="procedures">Habits</button>
       <button data-tab="council">Council</button>
       <button data-tab="fleet">Fleet</button>
-      <button data-tab="docs">Docs</button>
       <button data-tab="library">Library</button>
     </div>
 
@@ -1551,48 +1550,42 @@ _HTML = """<!doctype html>
       <div id="poolList"></div>
     </div>
 
-    <div class="tabpane hidden" id="tab-docs">
-      <h2>Your documents <span class="hint" style="font-weight:normal;">— the local wiki</span></h2>
-      <div class="hint" style="margin-bottom:8px;">Upload with the 📎 by the chat box, or drop files
-        straight into the folder below. Idle time ingests them into recallable knowledge and writes a
-        short summary of each. <code>.txt</code>/<code>.md</code> work out of the box;
-        <code>.pdf</code> needs the optional extra (see docs/SETUP.md).</div>
-      <div id="docFolder" class="hint" style="margin-bottom:8px;">—</div>
-      <button class="secondary" id="docScan" type="button">Scan folder now</button>
-      <label class="hint" style="margin-left:10px;"><input type="checkbox" id="docForce"/> force
-        re-ingest (re-read unchanged files)</label>
-      <span id="docScanMsg" class="hint" style="margin-left:8px;"></span>
-      <div id="docList" style="margin-top:12px;"></div>
-
-      <h2 style="margin-top:22px;">Ingest a file by path</h2>
-      <div class="field">
-        <input type="text" id="docPath" placeholder="/path/to/notes.md (.txt .md .pdf)"/>
-      </div>
-      <button id="ingestBtn" type="button">Ingest</button>
-      <div id="ingestResult"></div>
-      <div class="hint">Path is read on the server (this is a local tool).</div>
-
-      <h2 style="margin-top:22px;">Offline encyclopedia</h2>
-      <div class="hint" style="margin-bottom:8px;">A live reference layer over a local Kiwix/ZIM (set the <code>[wiki]</code> block in mimir.toml). Optional.</div>
-      <div id="wikiStatus" class="hint">checking…</div>
-      <button class="secondary" id="wikiRecheck" type="button" style="margin-top:8px;">Recheck</button>
-    </div>
-
     <div class="tabpane hidden" id="tab-library">
-      <h2>Library <span class="hint" style="font-weight:normal;">— books I've read</span></h2>
-      <div class="hint" style="margin-bottom:8px;">Three tiers: your source documents (ground truth),
-        short <b>cited claims</b> distilled into the database (always-on, surfaced in chat with their
-        source), and <b>composite pages</b> — the synthesized understanding. Built in idle from the
-        documents folder; pin a page to pull its full detail into the next message.</div>
-      <button class="secondary" id="libScan" type="button">Scan library now</button>
+      <h2>Library <span class="hint" style="font-weight:normal;">— your documents &amp; what's been read</span></h2>
+      <div class="hint" style="margin-bottom:8px;">Upload with the 📎 by the chat box, or drop files
+        into the folder below. Idle time ingests each into recallable chunks + a short summary, and
+        distils it into <b>cited claims</b> (always-on in chat) and a <b>composite page</b>.
+        <code>.txt</code>/<code>.md</code> in core; <code>.pdf</code>/<code>.docx</code> need the
+        optional extra (see docs/SETUP.md). Toggle a document's checkbox to include/exclude it from
+        recall; click its name for details.</div>
+      <div id="docFolder" class="hint" style="margin-bottom:8px;">—</div>
+      <button class="secondary" id="libScan" type="button">Scan &amp; index now</button>
       <label class="hint" style="margin-left:10px;"><input type="checkbox" id="libForce"/> force
-        re-distil (re-read unchanged docs)</label>
+        re-index (re-read unchanged files)</label>
       <span id="libScanMsg" class="hint" style="margin-left:8px;"></span>
-      <h2 style="margin-top:16px;">Source documents</h2>
+
+      <h2 style="margin-top:16px;">Documents</h2>
       <div id="libDocs"></div>
-      <h2 style="margin-top:16px;">Composite pages</h2>
-      <div id="libPages"></div>
-      <div id="libDetail" style="margin-top:14px;"></div>
+
+      <details style="margin-top:14px;"><summary style="cursor:pointer; color:#9fb3c8;">Composite pages</summary>
+        <div id="libPages" style="margin-top:8px;"></div>
+        <div id="libDetail" style="margin-top:10px;"></div>
+      </details>
+
+      <details style="margin-top:10px;"><summary style="cursor:pointer; color:#9fb3c8;">Ingest a file by path</summary>
+        <div class="field" style="margin-top:8px;">
+          <input type="text" id="docPath" placeholder="/path/to/notes.md (.txt .md .pdf .docx)"/>
+        </div>
+        <button id="ingestBtn" type="button">Ingest</button>
+        <div id="ingestResult"></div>
+        <div class="hint">Path is read on the server (this is a local tool).</div>
+      </details>
+
+      <details style="margin-top:10px;"><summary style="cursor:pointer; color:#9fb3c8;">Offline encyclopedia (Kiwix/ZIM)</summary>
+        <div class="hint" style="margin:8px 0;">A live reference layer over a local Kiwix/ZIM (set the <code>[wiki]</code> block in mimir.toml). Optional.</div>
+        <div id="wikiStatus" class="hint">checking…</div>
+        <button class="secondary" id="wikiRecheck" type="button" style="margin-top:8px;">Recheck</button>
+      </details>
     </div>
   </aside>
 </main>
@@ -2201,32 +2194,7 @@ async function loadWikiStatus() {
 }
 $("wikiRecheck").addEventListener("click", loadWikiStatus);
 
-async function loadDocuments() {
-  const list = $("docList");
-  try {
-    const r = await api("GET", "/api/documents");
-    if (!r.folder) {
-      $("docFolder").innerHTML =
-        "No documents folder configured (set <code>[documents] folder</code> in mimir.toml).";
-    } else if (r.folder_exists) {
-      $("docFolder").innerHTML = `Drop folder: <code>${escapeHtml(r.folder_abs || r.folder)}</code>`;
-    } else {
-      $("docFolder").innerHTML = `Drop folder: <code>${escapeHtml(r.folder_abs || r.folder)}</code>` +
-        ` <span style="color:#e0a04a;">— does not exist yet (create it, or it's made on first ` +
-        `upload). Relative paths resolve against the server's working directory.</span>`;
-    }
-    const docs = r.documents || [];
-    if (!docs.length) { list.innerHTML = '<div class="hint">No documents yet — upload one with 📎 or drop a file in the folder.</div>'; return; }
-    list.innerHTML = docs.map(d => {
-      const meta = `${d.chunks || 0} chunk(s)` + (d.ingested_at ? " · " + forumWhen(d.ingested_at) : "");
-      const sum = d.summary ? escapeHtml(d.summary) : '<span class="hint">summary pending (generated on the next idle pass)</span>';
-      return `<div class="mem"><div class="text"><b>${escapeHtml(d.name || d.source)}</b></div>` +
-        `<div class="text" style="color:#9fb3c8;">${sum}</div>` +
-        `<div class="meta">${meta}</div></div>`;
-    }).join("");
-  } catch (e) { list.innerHTML = '<div class="hint">Error: ' + escapeHtml(e.message) + '</div>'; }
-}
-async function loadDocsTab() { await loadDocuments(); loadWikiStatus(); }
+async function loadLibraryTab() { await loadLibrary(); loadWikiStatus(); }
 
 // --- Library (docs/LIBRARY.md): cited claims + composite pages, with a pin-to-chat Load ---
 const activeSources = new Set();   // composite page ids pinned into the next message
@@ -2248,6 +2216,14 @@ async function loadLibrary() {
   try { data = await api("GET", "/api/library"); }
   catch (e) { pagesEl.innerHTML = '<div class="hint">Error: ' + escapeHtml(e.message) + '</div>'; return; }
   const pages = data.pages || [], docs = data.documents || [];
+  // The drop-folder path (resolved), so it's clear where to put files.
+  if (!data.source_folder) {
+    $("docFolder").innerHTML = "No documents folder configured (set <code>[documents] folder</code> in mimir.toml).";
+  } else {
+    const fp = escapeHtml(data.source_folder_abs || data.source_folder);
+    $("docFolder").innerHTML = data.source_folder_exists ? `Drop folder: <code>${fp}</code>`
+      : `Drop folder: <code>${fp}</code> <span style="color:#e0a04a;">— doesn't exist yet (made on first upload; relative paths follow the server's working dir).</span>`;
+  }
   libTitles = {}; pages.forEach(p => { libTitles[p.id] = p.title; });
   pagesEl.innerHTML = pages.length ? pages.map(p =>
     `<div class="mem"><div class="text"><b>${escapeHtml(p.title)}</b></div>` +
@@ -2255,18 +2231,22 @@ async function loadLibrary() {
     `<div class="meta"><a href="#" data-page="${p.id}">view</a> · ` +
     `<a href="#" data-pin="${p.id}">${activeSources.has(p.id) ? "pinned ✓" : "pin to chat"}</a></div></div>`
   ).join("") : '<div class="hint">No composite pages yet — drop documents and let it run (or Scan).</div>';
-  // Compact list: an include-in-context checkbox + the name; click the name to expand details.
+  // Compact list: include-in-context checkbox + name; click the name to expand the full detail.
   docsEl.innerHTML = docs.length ? docs.map((d, i) => {
     const src = escapeHtml(d.path || d.filename);
-    const idx = d.index_seconds != null ? `${d.index_seconds}s to index` : "index time n/a";
+    const chunks = d.chunks != null ? `${d.chunks} chunk(s)` : "no chunks";
+    const times = [d.ingest_seconds != null ? `${d.ingest_seconds}s ingest` : "",
+                   d.index_seconds != null ? `${d.index_seconds}s index` : ""].filter(Boolean).join(" · ");
+    const sum = d.summary ? escapeHtml(d.summary) : "summary pending (next idle pass)";
     return `<div class="mem" style="padding:6px 8px;"><div class="text" style="display:flex; align-items:center; gap:8px;">` +
       `<input type="checkbox" data-enable="${src}" ${d.enabled ? "checked" : ""} title="Include this document in context"/>` +
       `<a href="#" data-expand="${i}" style="flex:1; ${d.enabled ? "" : "opacity:.5;"}">${escapeHtml(d.filename)}</a>` +
-      `<span class="hint">${d.claims} claim(s)</span></div>` +
+      `<span class="hint">${chunks} · ${d.claims} claim(s)</span></div>` +
       `<div id="docDetail${i}" style="display:none; margin-top:6px; color:#9fb3c8; font-size:12px;">` +
-      `${(d.size_bytes/1024).toFixed(1)} KB · ${idx} · ${d.enabled ? "in context" : "excluded from recall"}` +
-      ` <a href="#" data-forget="${src}" data-name="${escapeHtml(d.filename)}" style="float:right; color:#e0604a;">🗑 delete</a></div></div>`;
-  }).join("") : '<div class="hint">No source documents indexed yet.</div>';
+      `<div>${sum}</div>` +
+      `<div class="meta" style="margin-top:4px;">${(d.size_bytes/1024).toFixed(1)} KB${times ? " · " + times : ""} · ${d.enabled ? "in context" : "excluded from recall"}` +
+      ` <a href="#" data-forget="${src}" data-name="${escapeHtml(d.filename)}" style="float:right; color:#e0604a;">🗑 delete</a></div></div></div>`;
+  }).join("") : '<div class="hint">No documents yet — upload with 📎 or drop a file in the folder.</div>';
   pagesEl.querySelectorAll("[data-page]").forEach(a => a.addEventListener("click", (e) => {
     e.preventDefault(); openLibraryPage(parseInt(a.dataset.page)); }));
   pagesEl.querySelectorAll("[data-pin]").forEach(a => a.addEventListener("click", (e) => {
@@ -2311,27 +2291,23 @@ async function openLibraryPage(id) {
   } catch (e) { el.innerHTML = '<div class="hint">Error: ' + escapeHtml(e.message) + '</div>'; }
 }
 $("libScan").addEventListener("click", async () => {
-  $("libScanMsg").textContent = "Scanning…";
+  $("libScanMsg").innerHTML = "Scanning + indexing… (the index pass can take a while on big docs)";
+  const force = $("libForce").checked;
   try {
-    const r = await api("POST", "/api/library/scan", { force: $("libForce").checked });
-    $("libScanMsg").textContent = `${(r.documents||[]).length} doc(s) → ${r.claims||0} claim(s), ${r.composed||0} composite(s).`;
-    loadLibrary();
-  } catch (e) { $("libScanMsg").textContent = "Error: " + e.message; }
-});
-
-$("docScan").addEventListener("click", async () => {
-  $("docScanMsg").textContent = "Scanning…";
-  try {
-    const r = await api("POST", "/api/documents/scan", { force: $("docForce").checked });
-    const failed = r.failed || [], unsupported = r.unsupported || [];
-    let html = `Ingested ${(r.ingested||[]).length}, summarized ${r.summarized||0}.`;
+    // Both passes: ingest chunks + wiki summaries, then distil cited claims + composite pages.
+    const d = await api("POST", "/api/documents/scan", { force });
+    const l = await api("POST", "/api/library/scan", { force });
+    const failed = d.failed || [], unsupported = d.unsupported || [];
+    let html = `Ingested ${(d.ingested||[]).length}, summarized ${d.summarized||0} · ` +
+      `indexed ${(l.documents||[]).length} doc(s) → ${l.claims||0} claim(s), ${l.composed||0} page(s)`;
+    if (d.forgotten && d.forgotten.length) html += ` · forgot ${d.forgotten.length} deleted`;
     if (failed.length) html += `<br><span style="color:#e0604a;">Failed (${failed.length}): ` +
       failed.map(f => `<b>${escapeHtml(f.name)}</b> — ${escapeHtml(f.error)}`).join("; ") + `</span>`;
-    if (unsupported.length) html += `<br><span style="color:#e0a04a;">Skipped (unsupported type): ` +
+    if (unsupported.length) html += `<br><span style="color:#e0a04a;">Skipped (unsupported): ` +
       unsupported.map(escapeHtml).join(", ") + `</span>`;
-    $("docScanMsg").innerHTML = html;
-    loadDocuments();
-  } catch (e) { $("docScanMsg").textContent = "Error: " + e.message; }
+    $("libScanMsg").innerHTML = html;
+    loadLibrary();
+  } catch (e) { $("libScanMsg").textContent = "Error: " + e.message; }
 });
 
 // 📎 upload: read the file as base64 and POST it; the server saves it to the drop folder + ingests.
@@ -2348,8 +2324,8 @@ $("docFile").addEventListener("change", async (e) => {
       fr.readAsDataURL(file);
     });
     const r = await api("POST", "/api/documents/upload", { name: file.name, data });
-    msg.textContent = `Ingested ${escapeHtml(r.name)} (${r.chunks} chunk(s)). It's now recallable; a summary follows on the next idle pass.`;
-    if (!$("tab-docs").classList.contains("hidden")) loadDocuments();
+    msg.textContent = `Ingested ${escapeHtml(r.name)} (${r.chunks} chunk(s)). It's now recallable; claims + a summary follow on the next idle pass.`;
+    if (!$("tab-library").classList.contains("hidden")) loadLibrary();
   } catch (err) {
     msg.textContent = "Upload failed: " + err.message;
   } finally {
@@ -2358,7 +2334,7 @@ $("docFile").addEventListener("change", async (e) => {
 });
 
 // --- tabs ---
-const loaders = { mind: loadMind, sleep: loadSleepTab, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet, docs: loadDocsTab, library: loadLibrary };
+const loaders = { mind: loadMind, sleep: loadSleepTab, memories: loadMemories, graph: loadGraph, procedures: loadProcedures, fleet: loadFleet, library: loadLibraryTab };
 document.querySelectorAll(".tabs button").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));

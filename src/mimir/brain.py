@@ -2275,16 +2275,35 @@ class Mimir:
         counts = {d.id: len(claims_for_document(self._storage, d.id)) for d in docs}
         disabled = self._disabled_documents()
         timings = self._library_timings()
+        ledger = self._load_docs_ledger()
+        # One unified row per document = the library record (claims, index time) joined with the
+        # drop-folder ledger (chunks, wiki summary, ingest time), keyed by the shared source path.
+        by_path: dict[str, dict[str, Any]] = {}
+        for d in docs:
+            by_path[d.path] = {
+                "id": d.id, "filename": d.filename, "title": d.title, "path": d.path,
+                "size_bytes": d.size_bytes, "claims": counts.get(d.id, 0),
+                "ingested_at": d.ingested_at, "enabled": d.path not in disabled,
+                "index_seconds": timings.get(d.path),
+                "chunks": None, "summary": None, "ingest_seconds": None,
+            }
+        for src, entry in ledger.items():
+            row = by_path.get(src)
+            if row is None:  # ingested to chunks but not yet distilled into the library
+                row = {"id": None, "filename": entry.get("name") or src, "title": "", "path": src,
+                       "size_bytes": 0, "claims": 0, "ingested_at": entry.get("ingested_at", 0.0),
+                       "enabled": src not in disabled, "index_seconds": None}
+                by_path[src] = row
+            row["chunks"] = entry.get("chunks")
+            row["summary"] = entry.get("summary")
+            row["ingest_seconds"] = entry.get("ingest_seconds")
+        folder = self.config.documents_folder
         return {
-            "source_folder": self.config.documents_folder,
+            "source_folder": folder,
+            "source_folder_abs": str(Path(folder).resolve()) if folder else None,
+            "source_folder_exists": bool(folder) and Path(folder).is_dir(),
             "compose_folder": self.config.library_folder,
-            "documents": [
-                {"id": d.id, "filename": d.filename, "title": d.title, "path": d.path,
-                 "size_bytes": d.size_bytes, "claims": counts.get(d.id, 0),
-                 "ingested_at": d.ingested_at, "enabled": d.path not in disabled,
-                 "index_seconds": timings.get(d.path)}
-                for d in docs
-            ],
+            "documents": sorted(by_path.values(), key=lambda r: (r.get("filename") or "").lower()),
             "pages": [
                 {"id": p.id, "title": p.title, "summary": p.summary, "path": p.path,
                  "updated_at": p.updated_at}
