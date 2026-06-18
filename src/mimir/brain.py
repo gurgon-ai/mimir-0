@@ -485,6 +485,18 @@ class Mimir:
             if info.get("samples", 0) and info.get("return_time") is not None:
                 update_catalogue_speed(self._storage, node, model, float(info["return_time"]))
 
+    def catalogue_speeds(self) -> dict[str, dict[str, float]]:
+        """Per-model, per-node measured latency from the catalogue (the speed-test's output), as
+        ``{model: {node: return_time}}``. Quality is model-wide (scored once, on one node); speed is
+        per ``(node, model)``. The leaderboard uses this to show a model's speed on EVERY node it
+        runs on — not just the single node its capability happened to be scored on."""
+        out: dict[str, dict[str, float]] = {}
+        for e in list_catalogue(self._storage):
+            if e.return_time is None or "embed" in e.model.lower():
+                continue
+            out.setdefault(e.model, {})[e.node] = e.return_time
+        return out
+
     def node_health(self) -> dict[str, Any]:
         """Live fleet health for introspection/UI: pool stats (reachable/saturated/load + fastest
         per-node speed) plus the full per-(node, model) live latency snapshot (DESIGN §5)."""

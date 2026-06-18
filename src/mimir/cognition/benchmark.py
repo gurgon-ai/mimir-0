@@ -52,34 +52,61 @@ _LATENCY_PROMPT: list[Message] = [
 ]
 _LATENCY_NORM_TOKENS: int = 256   # report seconds per ~256-token turn (verbosity-independent)
 _LATENCY_MIN_TOKENS: int = 32     # floor so a terse/refusing model can't divide-by-tiny to nonsense
-_GATE_PREDICT: int = 64           # tokens the pre-gate generates to measure real per-turn latency
+_GATE_PREDICT: int = 128          # tokens the pre-gate generates: enough to clear the decode
+#                                   warmup ramp (a 64-token probe under-reads a fast MoE ~20%)
 
 
-def _measure_turn_latency(chat_fn: Callable[[list[Message]], str]) -> float | None:
-    """Time one substantial generation and normalize to seconds per ~256-token turn.
+def _throughput_seconds(eval_count: int, eval_duration_ns: int) -> float | None:
+    """Seconds per ~256-token turn from Ollama's own generation metrics: ``eval_count`` tokens
+    generated in ``eval_duration`` ns of *pure generation* (decode). Model-load / VRAM-swap and
+    prompt-eval are excluded, so this is true per-token throughput (TPS = ``256 / result``) — and
+    it's identical whether the sample was 64 tokens or 600, which is what makes the pre-gate probe
+    and the full battery finally agree. Returns None if Ollama didn't report usable metrics (the
+    caller falls back to a wall-clock estimate)."""
+    if eval_count <= 0 or eval_duration_ns <= 0:
+        return None
+    return round((eval_duration_ns / 1e9) / eval_count * _LATENCY_NORM_TOKENS, 3)
 
-    The capability battery emits only a handful of tokens per call, so its round-trip is dominated
-    by prompt-eval/overhead and barely moves between a 3B and a 12B. A real turn generates hundreds
-    of tokens, where per-token throughput is what the user actually feels. We time one real
-    generation and divide by its (estimated) token count, scaled to a fixed turn length — robust to
-    how verbose a model happens to be.
+
+def _wallclock_latency(out: str, elapsed: float) -> float:
+    """Fallback per-256-token estimate from wall-clock + an output-length token guess. Used ONLY
+    when generation metrics are unavailable (mock / non-Ollama provider). Contaminated by load and
+    prompt-eval time, so it's a last resort — real Ollama paths use :func:`_throughput_seconds`."""
+    approx_tokens = max(_LATENCY_MIN_TOKENS, len(out) // 4)  # ~4 chars/token; no tokenizer dep
+    return round(elapsed / approx_tokens * _LATENCY_NORM_TOKENS, 3)
+
+
+def _measure_turn_latency(
+    chat_fn: Callable[[list[Message]], str],
+    timed_fn: Callable[[list[Message]], tuple[str, int, int]] | None = None,
+) -> float | None:
+    """Time one real generation and normalize to seconds per ~256-token turn (TPS = 256 / result).
+
+    With ``timed_fn`` (the real Ollama path) latency comes from Ollama's own
+    ``eval_count``/``eval_duration`` — *pure decode* time, immune to the cold model-load / VRAM-swap
+    that made a fast MoE (gemma4:26b, 4B active, ~210 TPS) record a fake ~38s/turn on a contended
+    node and lose speed-weighted roles to a genuinely slower dense model. eval_duration is already
+    an average over every generated token, so a single sample is stable (decode TPS barely varies
+    run-to-run); we don't need to average many turns. Without ``timed_fn`` (mock/gateway) we fall
+    back to a wall-clock estimate over the output length.
 
     Returns **None** if the probe fails (timeout/transport error) — NEVER 0.0. A failed probe is the
     opposite of instant: recording 0.0 made a timing-out model sort as the *fastest* and pass any
-    latency cap (observed: a model that aced the short capability probes but timed out on this
-    longer generation showing 0.0s/turn and winning 'fastest node'). None means 'unmeasured'; every
-    consumer treats it as not-fast / not-viable (``return_time or 1e9``) and the matrix re-times it.
+    latency cap. None means 'unmeasured'; every consumer treats it as not-fast / not-viable
+    (``return_time or 1e9``) and the matrix re-times it.
     """
     started = time.monotonic()
     try:
-        out = chat_fn(_LATENCY_PROMPT)
+        if timed_fn is not None:
+            out, eval_count, eval_dur = timed_fn(_LATENCY_PROMPT)
+        else:
+            out, eval_count, eval_dur = chat_fn(_LATENCY_PROMPT), 0, 0
     except Exception as exc:
         log.warning("benchmark: latency probe failed after %.1fs (recorded as unmeasured): %s",
                     time.monotonic() - started, exc)
         return None
-    elapsed = time.monotonic() - started
-    approx_tokens = max(_LATENCY_MIN_TOKENS, len(out) // 4)  # ~4 chars/token; no tokenizer dep
-    return round(elapsed / approx_tokens * _LATENCY_NORM_TOKENS, 3)
+    tps = _throughput_seconds(eval_count, eval_dur)
+    return tps if tps is not None else _wallclock_latency(out, time.monotonic() - started)
 
 # Families known to follow instructions well — the recommended floor (README curates this).
 APPROVED_FAMILIES = ("llama", "qwen", "gemma", "mistral", "phi", "command-r", "deepseek")
@@ -281,9 +308,10 @@ CAPABILITY_TESTS: dict[str, list[tuple[str, Callable[[str], bool]]]] = {
 # The fixed probe image (the word GLYPHON + three red circles on white), from the repo root.
 # Absent → vision is 'not tested' (None), never a false zero. See assets/vision_probe.README.md.
 _VISION_PROBE = Path(__file__).resolve().parents[3] / "assets" / "vision_probe.png"
-# (prompt, check, weight). Reading the made-up word GLYPHON is the definitive vision signal and
-# carries most weight; a text-only model can only *guess* the count, and that lucky guess alone
-# (0.4) stays below the 0.5 role floor — so it can't masquerade as vision-capable.
+# (prompt, check, weight). Reading the made-up word GLYPHON is the strongest vision signal (it can't
+# be guessed) and carries most weight; counting the shapes is lighter (a text model could guess it).
+# Passing EITHER case counts as having vision — the board bands it 🟡 (partial) and the vision role
+# admits it (see `_VISION_FLOOR`); both cases → ✅. A text model that sees nothing scores 0 → ❌.
 _VISION_CASES = [
     ("What single word is written in this image? Reply with just the word.",
      lambda out: "glyphon" in out.lower(), 0.6),
@@ -400,10 +428,17 @@ def benchmark_model(
                     else {"num_ctx": num_ctx, "temperature": temp})
             return lambda messages: scorer.chat(model_name, messages, dict(opts))
 
+        def timed_latency(messages: list[Message]) -> tuple[str, int, int]:
+            # Greedy + Ollama's own decode metrics → load-immune TPS (DESIGN §4).
+            return scorer.chat_timed(
+                model_name, messages, {"num_ctx": num_ctx, "temperature": 0.0})
+
         def _warm() -> None:
             warmer.chat(model_name, [{"role": "user", "content": "ok"}],
                         {"num_ctx": num_ctx, "max_tokens": 1})
     else:
+        timed_latency = None   # mock/gateway: no decode metrics → wall-clock fallback
+
         def make_chat(temp: float | None) -> ChatFn:
             base: dict[str, object] = {"num_ctx": num_ctx, "__timeout_s__": call_timeout_s}
             if temp is not None:
@@ -439,7 +474,7 @@ def benchmark_model(
     # slow remote 12B from a snappy local 3B — which lets a big model look 'instant' and sweep even
     # the speed-weighted roles it should lose. A real turn generates hundreds of tokens, throughput
     # is what the user feels (DESIGN §4: latency must reflect an actual turn).
-    return_time = _measure_turn_latency(chat_fn)
+    return_time = _measure_turn_latency(chat_fn, timed_latency)
 
     # The expensive identity-qualification dimensions — only in the FULL benchmark (not at triage).
     # Epistemics: does the model exploit Mimir's tiered/provenance/gated context (DESIGN §3)? The
@@ -509,15 +544,17 @@ def _measure_node_speed(
     provider = OllamaProvider(node, timeout=bound)
     started = time.monotonic()
     try:
-        out = provider.chat(model_name, _LATENCY_PROMPT, {**opts, "max_tokens": _GATE_PREDICT})
+        out, eval_count, eval_dur = provider.chat_timed(
+            model_name, _LATENCY_PROMPT, {**opts, "max_tokens": _GATE_PREDICT})
     except Exception:
         # Failed generating → ranks it slow → skip. Use the elapsed but FLOOR it at the timeout
         # bound: a real timeout already ≈ bound, and this stops an *instant* transport failure
         # (elapsed ≈ 0) being recorded as the fastest model — a failed probe must never sort fast.
         return round(max(bound, time.monotonic() - started), 3)
-    elapsed = time.monotonic() - started
-    approx_tokens = max(_LATENCY_MIN_TOKENS, len(out) // 4)   # ~4 chars/token
-    return round(elapsed / approx_tokens * _LATENCY_NORM_TOKENS, 3)   # seconds per ~256-token turn
+    # True decode TPS from Ollama's metrics (load-immune) — identical units to the battery, so the
+    # pre-gate probe and the full benchmark finally agree. Wall-clock only if metrics are absent.
+    tps = _throughput_seconds(eval_count, eval_dur)
+    return tps if tps is not None else _wallclock_latency(out, time.monotonic() - started)
 
 
 # When the user hasn't set a latency target, still skip a model whose trivial-prompt call takes

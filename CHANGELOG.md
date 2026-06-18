@@ -92,6 +92,39 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
 
 ### Fixed
+- **Benchmark speed is now true decode throughput (TPS), not contaminated wall-clock — so a fast MoE
+  stops losing to a slower dense model.** `return_time` was timed as wall-clock (model load +
+  prompt-eval + decode) and normalized by an *estimated* token count, so a fast MoE (gemma4:26b, 4B
+  active, ~210 tok/s) caught mid VRAM-swap recorded a fake ~38s/turn and lost speed-weighted roles to
+  a genuinely slower dense model (deepseek-r1:14b), which a terse think-off reply made look fast. The
+  provider now exposes Ollama's `eval_count`/`eval_duration` (`chat_timed`), and both the battery and
+  the pre-gate probe compute **seconds-per-256-token-turn from pure decode** — load-immune, identical
+  whether the sample is 64 or 600 tokens, so the leaderboard, the placement matrix, and role
+  selection finally agree on one number. The pre-gate probe also grew 64→128 tokens to clear the
+  decode warmup ramp (a 64-token probe under-read a fast MoE ~20%).
+- **The leaderboard is one row per model again (per-node speed lives in the cell, not in duplicate
+  rows).** A per-node expansion had blown each model into one row per node it was *timed* on —
+  duplicating models, leaving gaps where a node wasn't timed (reading like a per-node "fail"), and
+  generally a mess. Capability is model-wide (scored once), so the board shows it once, ranked by
+  quality (speed breaks ties), with a **Speed/turn** cell listing every node it runs on (🖥️ local ·
+  🌐 LAN, fastest first). The per-`(node, model)` breakdown stays in 📊 Per-node placement.
+- **The "scoring…" header no longer sticks on a finished model for minutes.** Scoring runs one worker
+  per node concurrently, but progress tracked a single `current` = the last model to *enter* scoring,
+  so when a fast node finished a model (already in the list) while a slow node ground on, the header
+  showed the finished model's name with a timer climbing past 10 minutes. Status now tracks an
+  in-flight map and reports the **longest-running in-flight model** (the real bottleneck — never one
+  already done), its true elapsed, and a `+N more` count, for both the tournament and the benchmark.
+- **Council membership is the diverse pool it was meant to be, not a near-empty list.** It required
+  `reasoning ≥ 0.50` (the full identity-role floor), which dropped most yellow models — so the
+  "second lineup" collapsed to a handful. Council is diversity-first: it now admits every yellow/green
+  model (`quality ≥ 0.50`) that can reason at all (a light `reasoning ≥ 0.25` floor), via a
+  per-(role, capability) floor-override mechanism (`_ROLE_FLOORS`). (The single-model "council" line
+  in the Finals is its strongest member; the diverse roster is the Council tab.)
+- **Vision reads yellow when a model sees but can't OCR — it was wrongly red.** Vision is capability
+  *detection*, but the board ran it through the quality scale (`<0.5 → red`), so a model that counted
+  the probe's shapes (it sees) but missed the pseudoword OCR scored 0.4 and rendered red, as if blind.
+  It now bands as a capability: **❌ none · 🟡 sees (partial) · ✅ full**, and the vision role gate
+  agrees (any model that passes a vision case, `≥ 0.4`, is vision-capable; only 0.0 is barred).
 - **A downed embedding backend no longer crashes the brain — it degrades to keyword recall, loudly.**
   Found a live run where the only embedding-capable node was offline, so every embed (query recall,
   bake, procedures, inner life) raised `model "nomic-embed-text:v1.5" not found` and the loop spammed
