@@ -960,6 +960,8 @@ class _Handler(BaseHTTPRequestHandler):
             # Embedding models are excluded from the chat placement matrix, so the embed role gets
             # its own per-(node, model) list — else "no machines" even with an embedder everywhere.
             pool["embed_placement"] = brain.embed_placements()
+            # Each role's required dims, so the picker colours a model PER ROLE by what it needs.
+            pool["role_caps"] = brain.role_requirements()
             pool["role_nodes"] = brain.role_nodes()
             # Disabled machines, so the role dropdown won't offer a model stranded on one (OFI).
             pool["disabled_nodes"] = sorted(disabled_nodes(brain._storage))
@@ -3290,18 +3292,26 @@ function renderRoleAssign(data) {
     });
   });
   if (active.embed && active.embed !== "auto") embedByModel[active.embed] = embedByModel[active.embed] || [];
-  // Benchmark status → option text colour: all dims ≥0.8 = green, any 0.5–0.79 = yellow, any <0.5 =
-  // red, not-yet-benchmarked = default (white). Vision is informational, so it's excluded here.
+  // Option text colour is PER ROLE, by that role's required capabilities — a model strong for chat
+  // but weak at vision/code reads green in the chat list, not a deceptive generic red. green = every
+  // required dim ≥0.8, yellow = all ≥0.5 (eligible, not stellar), red = a required dim falls short,
+  // white = not benchmarked. Vision bands as a capability (none/sees/full), not on the 0.5/0.8 scale.
   const statusColor = { green: "#7fd17f", yellow: "#e0c060", red: "#e0604a" };
-  const modelStatus = {};
-  (data.models || []).forEach(m => {
-    if (m.quality == null) return;   // untested → leave undefined → white text
-    const dims = [m.talk, m.tools, m.code, m.reasoning, m.discipline, m.epistemics]
-      .filter(v => v != null);
-    if (!dims.length) return;
-    const lo = Math.min(...dims);
-    modelStatus[m.model] = lo < 0.5 ? "red" : (lo < 0.8 ? "yellow" : "green");
-  });
+  const roleCaps = data.role_caps || {};
+  const dimsByModel = {};
+  (data.models || []).forEach(m => { dimsByModel[m.model] = m; });
+  function _capBand(cap, v) {
+    if (v == null) return null;
+    if (cap === "vision") return v <= 0 ? 0 : (v >= 1 ? 2 : 1);   // none · sees · full
+    return v < 0.5 ? 0 : (v >= 0.8 ? 2 : 1);
+  }
+  function roleBand(model, role) {
+    const m = dimsByModel[model];
+    if (!m || m.quality == null) return "";   // untested → white
+    const bands = (roleCaps[role] || []).map(c => _capBand(c, m[c])).filter(b => b != null);
+    if (!bands.length) return "";              // role has no measured requirement (e.g. embed)
+    return ["red", "yellow", "green"][Math.min(...bands)];
+  }
   const roles = Object.keys(active);
   if (!roles.length) { wrap.innerHTML = '<div class="hint">No roles configured.</div>'; return; }
   const enc = (m, n) => JSON.stringify({ m, n });
@@ -3325,7 +3335,7 @@ function renderRoleAssign(data) {
       // No enabled node has this model → not routable. Hide it, unless it's the current pin (then
       // show it flagged so you can see why the role is failing and switch away).
       if (!nodes.length && m !== curModel) return;
-      const col = statusColor[modelStatus[m]] || "";   // benchmark status → text colour
+      const col = statusColor[roleBand(m, role)] || "";   // colour by THIS role's requirements
       const grp = document.createElement("optgroup");
       grp.label = nodes.length ? m : `${m} (no enabled node — re-enable its machine)`;
       if (col) grp.style.color = col;

@@ -2543,6 +2543,12 @@ class Mimir:
             disabled_nodes=disabled_nodes(self._storage),
         )
 
+    def role_requirements(self) -> dict[str, list[str]]:
+        """Each role's required capability dimensions — so the picker can colour a model PER ROLE by
+        what that role actually needs (strong-for-chat reads green in the chat list even if weak at
+        vision/code), instead of one deceptive generic status."""
+        return {role: list(caps) for role, (caps, _prefer) in ROLE_NEEDS.items()}
+
     def role_candidates(self) -> dict[str, list[dict[str, Any]]]:
         """Per-role ranked eligible candidates (best first) for the interactive Finals picker — so a
         role can be overridden to any eligible model, with the recommendation pre-selected."""

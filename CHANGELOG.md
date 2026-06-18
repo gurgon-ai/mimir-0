@@ -107,6 +107,12 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
 
 ### Fixed
+- **The role picker colours each model PER ROLE, by that role's requirements — not one deceptive
+  generic status.** A model strong for chat but weak at vision/code was painted red in *every* role's
+  dropdown, implying it was a bad chat pick when it's a great one. Now green/yellow/red reflects only
+  the dims the role actually needs (`brain.role_requirements()` → `role_caps`): green = every required
+  dim ≥0.8, yellow = all ≥0.5 (eligible), red = a required dim falls short. Vision colours as a
+  capability (none/sees/full), matching its column.
 - **Vision is scored best-across-nodes — a model isn't marked blind because it was tested on a node
   whose Ollama mangles its vision.** Vision turned out to be *per-node*, not model-wide: a
   byte-identical model file (same digest, same vision projector) reads the probe image perfectly
