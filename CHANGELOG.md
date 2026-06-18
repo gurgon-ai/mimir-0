@@ -92,6 +92,14 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
 
 ### Fixed
+- **Ctrl-C stops the server even mid-benchmark.** A running benchmark/tournament drives a
+  `ThreadPoolExecutor` whose workers are non-daemon (`concurrent.futures`, 3.9+) and blocked in
+  uninterruptible model calls; the interpreter's `atexit` handler joins them, so Ctrl-C hung the
+  terminal until a slow remote call returned (and daemon HTTP threads spewed `storage gateway is
+  closed` 500s in the meantime). `serve()` now does a clean shutdown — stop serving, `server_close()`
+  the socket, `brain.close()` (storage commits per op, so abandoning in-flight scoring is safe, at
+  worst a half-scored catalogue a re-run completes) — then force-terminates so background work can't
+  hold the terminal hostage.
 - **Benchmark speed is now true decode throughput (TPS), not contaminated wall-clock — so a fast MoE
   stops losing to a slower dense model.** `return_time` was timed as wall-clock (model load +
   prompt-eval + decode) and normalized by an *estimated* token count, so a fast MoE (gemma4:26b, 4B
