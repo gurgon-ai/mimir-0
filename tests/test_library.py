@@ -369,6 +369,34 @@ def test_ingest_records_per_document_index_time(mock_config: Config, tmp_path) -
         brain.close()
 
 
+def test_draft_rag_folds_in_memory_surfaced_by_the_draft(mock_config: Config) -> None:
+    """Draft-RAG (two-pass): a short draft answer re-retrieves memory and folds the new hits into
+    the recall set — surfacing a memory the user's literal wording started without."""
+    import dataclasses
+    from types import SimpleNamespace
+
+    from mimir.storage.models import EvidenceTier, Memory
+    from mimir.storage.repo import list_memories, save_memory
+
+    brain = Mimir(dataclasses.replace(mock_config, draft_rag_enabled=True))
+    try:
+        save_memory(brain._storage, Memory(
+            text="The latch is stainless steel.",
+            evidence_tier=EvidenceTier.STATED_BY_PRIMARY_USER))
+        cands = list_memories(brain._storage)
+        # The draft names the latch; re-retrieval against it pulls that memory in.
+        brain._model.chat = lambda role, messages, **k: "latch stainless steel"
+        merged = brain._draft_rag(SimpleNamespace(prompt="sys"), cands, [], None, None, "the gate")
+        assert any("latch" in s.memory.text.lower() for s in merged)
+        # Fail-soft: a draft error leaves the input recall untouched.
+        def boom(*a, **k):
+            raise RuntimeError("model down")
+        brain._model.chat = boom
+        assert brain._draft_rag(SimpleNamespace(prompt="sys"), cands, [], None, None, "x") == []
+    finally:
+        brain.close()
+
+
 def test_citation_guard_flags_an_invented_source_in_a_turn(mock_config: Config, tmp_path) -> None:
     """End-to-end: a reply that cites a document the system doesn't hold gets a fail-loud note; a
     reply citing a real held document does not."""

@@ -625,7 +625,8 @@ class Mimir:
     def turn(self, text: str, user: str | None = None, *,
              speaker_kind: str = "human", loaded_pages: list[int] | None = None,
              deep_read: bool = False, include_memory: bool = True,
-             include_library: bool = True, include_wiki: bool = True) -> TurnResult:
+             include_library: bool = True, include_wiki: bool = True,
+             draft_rag: bool | None = None) -> TurnResult:
         # ``speaker_kind`` ("human"/"ai_peer") is the caller's declaration of what kind of speaker
         # this is; validate it up front so a bad value fails the turn cleanly (DESIGN §3b).
         normalize_speaker_kind(speaker_kind)
@@ -687,29 +688,25 @@ class Mimir:
                 lib_refs, lib_count, library = [], 0, None
             wiki = self._wiki_context(text) if include_wiki else None
 
-            # 2. Assemble the epistemic prompt.
-            bundle = build_context(
-                query=text,
-                user=user,
-                identity=self.config.identity,
-                retrieved=retrieved,
-                sentinel_note=note,
-                embed_mode=self._embedder.mode,
-                budget_tokens=self.config.context_budget_tokens,
-                self_knowledge=self_knowledge,
-                working_memory=working_memory,
-                graph_facts=graph_facts,
-                procedures=procedures,
-                time_context=self._time_context(),
-                temporal_awareness=awareness,
-                recent_history=self._recent_history(),
-                background_notes="\n".join(notes) if notes else None,
-                wiki_context=wiki,
-                library=library,
-                library_count=lib_count,
-                system_health=self._error_context(),
-                now_ts=now,
-            )
+            # 2. Assemble the prompt (a closure so draft-RAG can rebuild with more recall).
+            def assemble(rset: list) -> ContextBundle:
+                return build_context(
+                    query=text, user=user, identity=self.config.identity, retrieved=rset,
+                    sentinel_note=note, embed_mode=self._embedder.mode,
+                    budget_tokens=self.config.context_budget_tokens, self_knowledge=self_knowledge,
+                    working_memory=working_memory, graph_facts=graph_facts, procedures=procedures,
+                    time_context=self._time_context(), temporal_awareness=awareness,
+                    recent_history=self._recent_history(),
+                    background_notes="\n".join(notes) if notes else None,
+                    wiki_context=wiki, library=library, library_count=lib_count,
+                    system_health=self._error_context(), now_ts=now,
+                )
+            bundle = assemble(retrieved)
+            # 2b. Output-triggered RAG (opt-in, slower): a short draft surfaces what the reply is
+            #     about, then re-retrieve memory against it and rebuild with the richer recall.
+            if draft_rag if draft_rag is not None else self.config.draft_rag_enabled:
+                retrieved = self._draft_rag(bundle, candidates, retrieved, user, sid, text)
+                bundle = assemble(retrieved)
 
             # 3. Generate the reply through the model gateway. Strip any internal epistemic tags the
             #    model echoed (small models mimic the [tier=...; source=...] style) before it lands.
@@ -760,6 +757,7 @@ class Mimir:
         self, text: str, user: str | None = None, *, speaker_kind: str = "human",
         loaded_pages: list[int] | None = None, deep_read: bool = False,
         include_memory: bool = True, include_library: bool = True, include_wiki: bool = True,
+        draft_rag: bool | None = None,
     ) -> Generator[str, None, dict[str, Any]]:
         """Like ``turn`` but yields the reply token-by-token; returns the introspection dict.
 
@@ -816,28 +814,24 @@ class Mimir:
             else:
                 lib_refs, lib_count, library = [], 0, None
             wiki = self._wiki_context(text) if include_wiki else None
-            bundle = build_context(
-                query=text,
-                user=user,
-                identity=self.config.identity,
-                retrieved=retrieved,
-                sentinel_note=note,
-                embed_mode=self._embedder.mode,
-                budget_tokens=self.config.context_budget_tokens,
-                self_knowledge=self_knowledge,
-                working_memory=working_memory,
-                graph_facts=graph_facts,
-                procedures=procedures,
-                time_context=self._time_context(),
-                temporal_awareness=awareness,
-                recent_history=self._recent_history(),
-                background_notes="\n".join(notes) if notes else None,
-                wiki_context=wiki,
-                library=library,
-                library_count=lib_count,
-                system_health=self._error_context(),
-                now_ts=now,
-            )
+
+            def assemble(rset: list) -> ContextBundle:
+                return build_context(
+                    query=text, user=user, identity=self.config.identity, retrieved=rset,
+                    sentinel_note=note, embed_mode=self._embedder.mode,
+                    budget_tokens=self.config.context_budget_tokens, self_knowledge=self_knowledge,
+                    working_memory=working_memory, graph_facts=graph_facts, procedures=procedures,
+                    time_context=self._time_context(), temporal_awareness=awareness,
+                    recent_history=self._recent_history(),
+                    background_notes="\n".join(notes) if notes else None,
+                    wiki_context=wiki, library=library, library_count=lib_count,
+                    system_health=self._error_context(), now_ts=now,
+                )
+            bundle = assemble(retrieved)
+            # Output-triggered RAG (opt-in, slower): draft → re-retrieve memory → rebuild richer.
+            if draft_rag if draft_rag is not None else self.config.draft_rag_enabled:
+                retrieved = self._draft_rag(bundle, candidates, retrieved, user, sid, text)
+                bundle = assemble(retrieved)
             # Stream the reply (honoring an opt-in model fetch of a full library page); internal
             # epistemic tags are stripped as we go (a tag may straddle deltas) inside the helper.
             reply = yield from self._stream_chat_with_fetch(bundle, lib_refs, user, sid, text)
@@ -2100,6 +2094,33 @@ class Mimir:
                 continue
             out.append(m)
         return out
+
+    def _draft_rag(
+        self, bundle: ContextBundle, candidates: list[Memory], retrieved: list,
+        user: str | None, sid: str | None, text: str,
+    ) -> list:
+        """Draft-RAG (synchronous two-pass recall). Generate a cheap, SHORT draft answer, then
+        re-retrieve memory against *that draft* — it names what the reply is about, which the user's
+        wording alone may miss — and fold the new hits into the recall set. Two LLM calls per turn
+        (slower, opt-in); fail-soft: any draft error falls back to the input-only recall."""
+        try:
+            draft = strip_epistemic_tags(self._model.chat(
+                "chat",
+                [{"role": "system", "content": bundle.prompt},
+                 *self._history_messages(user, sid), {"role": "user", "content": text}],
+                params={"max_tokens": max(32, self.config.draft_rag_tokens)},
+            ))
+        except Exception as exc:  # the draft is an optimization — never sink the turn (§10)
+            log.warning("draft-rag: draft failed (%s); using input-only recall", exc)
+            return retrieved
+        if not draft.strip():
+            return retrieved
+        extra = retrieve(draft, self._embedder.embed(draft), candidates,
+                         top_k=max(1, self.config.draft_rag_top_k))
+        seen = {s.memory.id for s in retrieved}
+        added = [s for s in extra if s.memory.id not in seen]
+        log.info("draft-rag: draft surfaced %d new memory(ies)", len(added))
+        return list(retrieved) + added
 
     def _citation_note(self, reply: str) -> str:
         """A fail-loud note if the reply cited a source the system doesn't hold ('' if none/off)."""
