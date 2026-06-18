@@ -247,15 +247,17 @@ installed, filters to eligible models, and assigns personas across them. **1 eli
 single-model council, persona diversity via distinct system prompts. **N models** → N genuinely
 different minds. Diversity is emergent from the hardware, not a config chore.
 
-### The qualification battery — three filters, cheapest first
-"Could model X do the job as well as Y?" — don't guess; gate, judge, then watch.
+### The qualification battery — gate, rank, then watch
+"Could model X do the job as well as Y?" — don't guess; measure deterministically, rank, then watch.
 
 1. **Deterministic gate** (mechanical, zero judge cost): does output parse as valid JSON against the
    role schema? Required fields, sane types? **Consistency** across K runs (5/5 vs 3/5 is a real
    score). **Latency** against a per-role ceiling — too slow for `chat` may still qualify for a
-   nightly role. **Latency** is timed from one *real-length* generation (normalized to seconds per
-   ~256-token turn), so a slow remote model can't masquerade as instant on a 3-token reply. A model
-   that fails here never costs a judge call. The gate scores six capability dimensions — *talk*,
+   nightly role. **Latency** is each model's true decode throughput — from Ollama's own
+   `eval_count`/`eval_duration` (pure generation, so a cold model-load or VRAM swap can't distort it),
+   normalized to seconds per ~256-token turn — and it's measured for **every `(model, node)`
+   pairing**, since a node can be far faster than the one a model's capability happened to be scored
+   on. The gate scores six capability dimensions — *talk*,
    *tools*, *code*, **reasoning**, **discipline**, and **epistemics** (plus an informational *vision*
    check that doesn't affect the score). *Reasoning* tests whether the model can actually **solve** a
    problem with one regex-checkable answer — multi-step arithmetic, classic traps (bat-and-ball, the
@@ -276,18 +278,19 @@ different minds. Diversity is emergent from the hardware, not a config chore.
    `reasoning`) gate on **both** *discipline* and *epistemics* (and *reasoning*): a model that leaks
    the scaffolding, ignores evidence tiers, OR can't solve a problem is never recommended to speak as
    the system — caught in qualification, not discovered in production.
-2. **Coherence judgment** (judge + human anchor, only on survivors): the candidate answers a fixed
-   **golden case** (prompt + fixed context + reference answer); a trusted model judges it against a
-   rubric (faithful to context, cites the right memory, refuses to hallucinate). Sample outputs
-   surface to a human for a thumbs up/down — the human is the calibration anchor.
-3. **Continuous governance**: usage signal (correction rate, engagement) as a coherence proxy; the
-   **golden set self-expands** — when a human corrects the running system, that correction becomes a
-   new golden case. Re-qualify after a runtime/model update.
+2. **Rank by points** (over the gate's survivors): the recommendation is a transparent points total
+   — quality for the role (dominant) + speed (a strong, *universal* term: a slow model is bad for
+   chat *and* background) + a faint size prior to break near-ties — so a saturated quality score
+   can't crown the wrong model on a coin-flip. (This replaced an earlier *judged coherence* pass: it
+   scored every model the same middling yellow and discriminated nothing, and a judge can't catch an
+   error it would also make. The harder, empirically-chosen reasoning battery in filter 1 does the
+   de-saturating job instead — deterministically, no judge call.)
+3. **Continuous governance** *(forward-looking)*: usage signal (correction rate, engagement) as a
+   coherence proxy; a **golden set that self-expands** — when a human corrects the running system,
+   that correction becomes a new golden case. Re-qualify after a runtime/model update.
 
-**Guardrails:** the judge can't catch an error it would also make → mitigated by the human anchor,
-rubric+reference judging, and the council's adversarial structure. The qualifier ships a **canary
-pair** (a known-good model that must score high, a garbled one that must score low); if the canary
-inverts, the *qualifier* is broken → loud alarm, never a silent pass.
+**Guardrail:** the acceptance loop itself ships a **canary** (a known-good run that must pass); if
+the self-test breaks, that's loud, never a silent pass (§10).
 
 > **The full inference-engine spec** — discovery, recommended-model registry, first-run onboarding
 > (wizard + headless), progressive/trusted-judge qualification, local-first routing, staleness, and
@@ -659,9 +662,10 @@ model backend is now a **distributed fleet** (DESIGN §5): it auto-discovers Oll
 (zero setup on them — just `ollama serve`), catalogues their models, and routes each request to a
 node that has the model, with active health checks and least-loaded selection — so the brain can
 run on a tiny box and borrow GPUs over the network. The **qualification battery** (DESIGN §4) is
-layered on top: a benchmark scores each model's speed and a capability "IQ test" (talk / tools /
-code, deterministic) plus a coherence pass voted by a panel of other models, guarded by a canary
-pair — filling the catalogue so model→role fitness is *tested, not asserted* — and the catalogue
+layered on top: a benchmark scores each model on a deterministic capability "IQ test" (talk / tools /
+code / reasoning / discipline / epistemics, with empirically-chosen reasoning cases that actually
+discriminate) and speed-tests every `(model, node)` pairing — filling the catalogue so model→role
+fitness is *tested, not asserted* — and a transparent **points** rank (quality + speed + size)
 drives **per-role recommendations** ("for chat, use X on node Y"). The whole DESIGN architecture
 is now implemented end-to-end; it remains pre-alpha and unhardened, but the spine, every typed
 knowledge layer, the async cognition, and the distributed/qualified model fleet are all live and

@@ -4,6 +4,14 @@
 we learned shipping the sequential version (`cognition/benchmark.py`) and the live testing that
 shaped it. Companion to `INFERENCE_ENGINE.md` §6/§6a; this is the detailed scheduler spec.
 
+> **Note (superseded in part):** the **coherence / peer-review judging** discussed below (§4-ish, the
+> `judges_trustworthy` canary, the panel-voted coherence pass) was **removed** — it scored every
+> model the same middling yellow and discriminated nothing. Its de-saturation job is now done
+> deterministically by an **empirically-chosen harder reasoning battery** (cases probed across the
+> fleet, kept only if they separate strong models from weak), and ranking is a transparent **points**
+> total (quality + speed + size). Concurrency is built; the benchmark also **speed-tests every
+> `(model, node)` pairing** as an automatic final phase. Read the judging sections as history.
+
 ---
 
 ## 0. Framing — what this is and isn't

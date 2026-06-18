@@ -444,9 +444,12 @@ the catalogue's `quality` and `return_time`. Each model runs a capability batter
 (instruction following), *tools* (emit a valid tool call), *code* (write parseable code), *reasoning*
 (solve a problem with one checkable answer), *discipline* (don't leak the internal `[tier=…]` tags),
 and *epistemics* (use Mimir's tiered/provenance context — defer to the high tier under noise, recall
-context-only facts, handle long context) — plus a *coherence* pass scored by a panel of your other
-models, guarded by a canary (the judges must rank a known-good answer above a garbled one, or
-coherence is skipped). It's call-heavy, so run it on-demand. Recommended models are
+context-only facts, handle long context). The reasoning cases are chosen empirically so strong
+models actually separate from weak ones, and after scoring the benchmark **speed-tests every
+`(model, node)` pairing automatically** (so each model's true fastest node is known). The per-role
+recommendation is a transparent **points** rank — quality (dominant) + speed + a faint size prior.
+It's call-heavy, so run it on-demand (or add a model later with **＋ Qualify new**, which scores only
+the new ones). Recommended models are
 instruction-following families — `gemma`, `qwen`, `llama`, `mistral`, `phi`, `command-r`, `deepseek`;
 running a **variety** of families is ideal.
 
