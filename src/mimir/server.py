@@ -1588,10 +1588,10 @@ _HTML = """<!doctype html>
       <label class="hint" style="margin-left:10px;"><input type="checkbox" id="libForce"/> force
         re-distil (re-read unchanged docs)</label>
       <span id="libScanMsg" class="hint" style="margin-left:8px;"></span>
-      <h2 style="margin-top:16px;">Composite pages</h2>
-      <div id="libPages"></div>
       <h2 style="margin-top:16px;">Source documents</h2>
       <div id="libDocs"></div>
+      <h2 style="margin-top:16px;">Composite pages</h2>
+      <div id="libPages"></div>
       <div id="libDetail" style="margin-top:14px;"></div>
     </div>
   </aside>
