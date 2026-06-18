@@ -51,7 +51,8 @@ $10k AI box), the engine *is* the difference between good and useless cognition.
 1. **Model-agnostic.** No model is hardcoded or privileged in code. A curated *recommended* list is
    a documented, versioned default — never a lock-in. Any model the user installs can compete.
 2. **Objective measurement.** A model earns a role by **measured** behaviour on a fixed battery
-   (talk, tools, code, reasoning, discipline, epistemics, coherence), not by reputation or size.
+   (talk, tools, code, reasoning, discipline, epistemics; vision is an informational check), not by
+   reputation or size — then ranked by points (quality + speed + a faint size prior).
 3. **Local-first, distributed-optional.** Default is local-only; the LAN fleet is opt-in and, when
    enabled, *local is preferred* — remote nodes are for burst, overflow, or edge deployments.
 4. **Evergreen.** New models are first-class. Stale measurements self-invalidate (model digest +
@@ -103,7 +104,7 @@ nodes           ["http://192.168.2.50:11434", ...]   # every node that has it
 digest          "sha256:1a2b…"        # [new] Ollama model digest — staleness key (§8)
 recommended     true                  # [new] present in the registry (§4)
 enabled         true                  # user veto (model_prefs.enabled)
-scores          { <dimension>: ScoreRecord }   # talk/tools/code/reasoning/discipline/epistemics/coherence
+scores          { <dimension>: ScoreRecord }   # talk/tools/code/reasoning/discipline/epistemics(+vision check)
 quality         0.92                  # aggregate
 return_time     0.86                  # fastest node, seconds
 battery_version 3                     # [new] which battery produced `scores` (§8)
@@ -250,8 +251,9 @@ models, new hardware, a model update), preserving overrides unless changed.
 ## 6. Qualification  **[partial]**
 
 The battery (`DESIGN.md` §4) scores **six deterministic dimensions** — **talk, tools, code,
-reasoning, discipline, epistemics** — plus a judged **coherence** pass, outside-in ordered and
-size/latency-bounded. **[built]**
+reasoning, discipline, epistemics** (plus an informational **vision** check), outside-in ordered and
+size/latency-bounded; the **reasoning** cases are chosen empirically so strong models separate from
+weak. (An earlier judged **coherence** pass was removed — it discriminated nothing.) **[built]**
 
 What the non-obvious dimensions actually test **[built]**:
 
@@ -268,9 +270,11 @@ What the non-obvious dimensions actually test **[built]**:
   **long-context needle** (a nonce planted mid-way through a ~2k-token document, past Ollama's 2048
   default). The chat-LLM qualifier; chat/reasoning gate on it.
 
-**Representative latency [built].** `return_time` is timed from one *real-length* generation,
-normalized to seconds per ~256-token turn — not the round-trip of a 3-token reply, which can't tell a
-slow remote 12B from a snappy local 3B. **Context window [built]:** every benchmark call pins
+**Representative latency [built].** `return_time` is each model's true decode throughput — from
+Ollama's own `eval_count`/`eval_duration` (pure generation, so a cold model-load can't distort it),
+normalized to seconds per ~256-token turn — and it's measured for **every `(model, node)` pairing**
+(a node can be far faster than the one a model was scored on). **Context window [built]:** every
+benchmark call pins
 `backend.benchmark_num_ctx` (default 24576 — the operational window, qualify at the size you deploy
 at) so Ollama's 2048 default can't silently truncate the layered prompts, and the long-context probe
 sizes its haystack to ~60% of it (testing the real window, not just clearing 2048). **Size bounds [built]:** `max_model_size_b` (ceiling) and `min_model_size_b` (floor —
@@ -387,10 +391,12 @@ Resolution hierarchy (`auto` roles): **pin > measured-best (role-gated) > recomm
 heuristic > any reachable model** — re-resolved on every rescan, with user disables vetoing at every
 level. **[built]**
 
-**The objective [built].** *The best-scoring model for this system that you're willing to wait for.*
-Within the cap every role ranks on **pure quality** — a dominant model wins outright and speed only
-breaks ties. So a 26B a second behind a 4B at a higher score wins. (This replaced an earlier
-quality-minus-speed "balanced" formula for `chat`.)
+**The objective [built].** *The best model for this system that you're willing to wait for.* Within
+the latency cap, roles rank by a transparent **points** total — quality for the role (dominant) +
+speed (a strong, *universal* term: a slow model is bad for chat *and* background) + a faint size
+prior to break near-ties. A clearly better model wins outright; among near-equals the faster (and,
+as a last nudge, bigger) one wins, instead of a coin-flip. (This replaced a quality-only rank whose
+speed-only tiebreak handed saturated ties to the smallest, fastest model.)
 
 **Latency is a USER-FACING concern only [next].** Most of Mimir's cognition is idle/between-turns
 (council, the async sentinel, sleep, the burst worker reclaiming idle GPU) — for that work nobody is
