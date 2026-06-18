@@ -1837,8 +1837,11 @@ function applyTransform() {
     `translate(${graph.px.toFixed(1)},${graph.py.toFixed(1)}) scale(${graph.k.toFixed(3)})`);
 }
 // White-hot at the centre (important) → deep blue at the rim, for the lightning look.
-function glowColor(t) {
-  const a = [59, 130, 246], b = [233, 246, 255];
+function glowColor(t, type) {
+  // Memories: blue → blue-white. Entities: teal/cyan → pale cyan. Importance (t) drives brightness.
+  const [a, b] = type === "memory"
+    ? [[59, 130, 246], [233, 246, 255]]
+    : [[20, 170, 180], [196, 244, 240]];
   const m = i => Math.round(a[i] + (b[i] - a[i]) * t);
   return `rgb(${m(0)},${m(1)},${m(2)})`;
 }
@@ -1882,7 +1885,8 @@ async function loadGraphMap() {
   graph.px = 0; graph.py = 0; graph.k = 1; applyTransform();
   $("graphLegend").innerHTML =
     `${graph.nodes.length} nodes · ${graph.links.length} links — click a blob to edit` +
-    `<br><span style="opacity:.7;">scroll = zoom · drag = pan · double-click = reset</span>`;
+    `<br><span style="color:#5b9bf6;">● memories</span> · <span style="color:#22aab4;">● entities</span>` +
+    ` <span style="opacity:.7;">· scroll = zoom · drag = pan · double-click = reset</span>`;
   graph.frozen = false; graph.phase = 0;
   // Pre-settle off-screen so the first visible frame is already calm (no opening chaos). Bounded
   // physics → safe to run many steps; capped so a huge graph can't stall the load.
@@ -1907,7 +1911,7 @@ function buildGraphSvg() {
   graph.links.forEach(l => { l.el = document.createElementNS(GNS, "line"); root.appendChild(l.el); });
   graph.nodes.forEach(n => {
     const g = document.createElementNS(GNS, "g"); g.setAttribute("class", "node");
-    const col = glowColor(n.impN);
+    const col = glowColor(n.impN, n.type);
     const halo = document.createElementNS(GNS, "circle");
     halo.setAttribute("class", "halo");        // thin white glow: ~4–10px beyond the core, gradient-faded
     halo.setAttribute("r", (n.rad + 4 + n.impN * 6).toFixed(1));
