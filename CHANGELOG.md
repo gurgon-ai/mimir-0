@@ -8,6 +8,13 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **The Finals "Your champions" picker is now the onboarding surface: per-role colour, role
+  descriptions, and a checkable council pool.** Each role's dropdown is coloured by what *that* role
+  needs (🟢 strong · 🟡 ok · 🔴 weak), defaulting to the top pick, with the role's description shown
+  to the right (the board is wide and this is where you first meet the roles). **Council** moved to
+  the bottom (after vision) and lists *every* eligible model with a **checkbox each** — toggle a
+  model in/out of the adversarial pool (`council_excluded`, persisted; benched from deliberation
+  without disabling it everywhere) via `POST /api/fleet/council/member`.
 - **A points-based recommendation + a harder, de-saturating battery — so the picker stops crowning
   the wrong model.** Two compounding flaws made it recommend a small old model over a clearly better
   big one: (1) the battery was too easy — `talk`/`tools`/`code` were 1.00 for nearly everyone, so

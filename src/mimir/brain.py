@@ -2530,11 +2530,31 @@ class Mimir:
 
     def council_roster(self, *, size: int = 5) -> dict[str, Any]:
         """The diverse adversarial-council roster (the 'second lineup') — a spread of model families
-        for council / background reasoning, not the top-N ranking. Not latency-gated."""
+        for council / background reasoning, not the top-N ranking. Not latency-gated. Models the
+        user has unchecked from the pool (``council_excluded``) are left out."""
         return council_roster(
             self._storage, size=size, disabled=disabled_models(self._storage),
-            disabled_nodes=disabled_nodes(self._storage),
+            disabled_nodes=disabled_nodes(self._storage), excluded=self.council_excluded(),
         )
+
+    _COUNCIL_EXCLUDED_KEY = "council_excluded"
+
+    def council_excluded(self) -> set[str]:
+        """Models the user has toggled OUT of the council pool (persisted) — eligible by score but
+        deliberately benched from adversarial deliberation, without disabling them everywhere."""
+        raw = kv_get(self._storage, self._COUNCIL_EXCLUDED_KEY)
+        try:
+            return set(json.loads(raw)) if raw else set()
+        except (ValueError, TypeError):
+            return set()
+
+    def set_council_member(self, model: str, included: bool) -> dict[str, Any]:
+        """Toggle a model in/out of the council pool (persists; survives restart)."""
+        ex = self.council_excluded()
+        ex.discard(model) if included else ex.add(model)
+        kv_set(self._storage, self._COUNCIL_EXCLUDED_KEY, json.dumps(sorted(ex)))
+        log.info("council pool: %s %s", "included" if included else "excluded", model)
+        return {"model": model, "included": included, "excluded": sorted(ex)}
 
     def fleet_recommendations(self) -> dict[str, Any]:
         """Best model per role from the benchmarked catalogue (recommend-only; DESIGN §4)."""
