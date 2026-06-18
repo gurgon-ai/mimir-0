@@ -1286,8 +1286,8 @@ _HTML = """<!doctype html>
   details.section { border-top:1px solid #232a35; }
   details.section > summary { cursor:pointer; font-weight:bold; font-size:15px; color:#d7dde5; padding:10px 0; list-style:none; user-select:none; }
   details.section > summary::-webkit-details-marker { display:none; }
-  details.section > summary::before { content:"\25B8\00a0"; color:#8a94a3; }
-  details.section[open] > summary::before { content:"\25BE\00a0"; color:#8a94a3; }
+  details.section > summary::before { content:"\\25B8\\00a0"; color:#8a94a3; }
+  details.section[open] > summary::before { content:"\\25BE\\00a0"; color:#8a94a3; }
   .selfmodel { background:#11161d; border:1px solid #232a35; border-radius:8px; padding:11px; font-size:13px; white-space:pre-wrap; color:#c3ccd8; }
   .stats { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
   .stat { background:#161c24; border:1px solid #232a35; border-radius:6px; padding:5px 9px; font-size:12px; }
