@@ -653,7 +653,7 @@ class _Handler(BaseHTTPRequestHandler):
         return {"nodes": result.nodes, "models": result.models}
 
     def _run_benchmark_bg(
-        self, run: Any, *, scanning: str = "scanning the fleet…"
+        self, run: Any, *, scanning: str = "scanning the fleet…", speed_test: bool = True
     ) -> dict[str, Any]:
         """Shared background-run scaffold for any benchmark-style pass: sets up bench_state, the
         progress/on_result callbacks, and the worker thread; ``run(progress, on_result)`` does the
@@ -687,13 +687,30 @@ class _Handler(BaseHTTPRequestHandler):
             with srv.bench_lock:
                 srv.bench_state.get("inflight", {}).pop(model, None)
 
+        def _speed_progress(i: int, total: int, model: str) -> None:
+            with srv.bench_lock:
+                srv.bench_state.update(i=i, total=total, phase="speed",
+                                       current=f"speed-test {i}/{total}: {model}")
+
         def _run() -> None:
             try:
                 with srv.brain_lock:
                     result = run(_progress, _on_result, _on_done)
+                    # Phase 3 — speed-test EVERY remaining (model, node) pairing, so each model's
+                    # TRUE fastest node is known: a node can be far faster than the one a model's
+                    # capability was scored on, and the recommendation's speed term (+ the per-node
+                    # Speed column) depend on it. Only times the untimed/acceptable, so it's cheap if
+                    # already done (DESIGN §4). Part of the run so it's never silently skipped.
+                    timed = 0
+                    if speed_test:
+                        with srv.bench_lock:
+                            srv.bench_state.update(phase="speed", inflight={},
+                                                   current="speed-testing every (model, node) pair…")
+                        timed = self.server.brain.complete_speed_matrix(progress=_speed_progress)
                 with srv.bench_lock:
                     srv.bench_state.update(
-                        running=False, done=True, current="", inflight={},
+                        running=False, done=True, current="", inflight={}, phase=None,
+                        speed_timed=timed,
                         benchmarked=result.benchmarked,
                         eligible=result.eligible, skipped_too_big=result.skipped_too_big,
                         skipped_too_small=result.skipped_too_small,
@@ -915,6 +932,11 @@ class _Handler(BaseHTTPRequestHandler):
             with srv.tourney_lock:
                 srv.tourney_state.get("inflight", {}).pop(model, None)
 
+        def _speed_progress(i: int, total: int, model: str) -> None:
+            with srv.tourney_lock:
+                srv.tourney_state.update(i=i, total=total, phase="speed",
+                                         current=f"speed-test {i}/{total}: {model}")
+
         def _run() -> None:
             try:
                 with srv.brain_lock:
@@ -929,6 +951,14 @@ class _Handler(BaseHTTPRequestHandler):
                         only_models=keep, framework=not triage, persist=not triage,
                         progress=_progress, on_result=_on_result, on_done=_on_done,
                     )
+                    # After the REAL (persisting) round, speed-test every (model, node) pairing so
+                    # the finals are computed with each model's true fastest node — not the one node
+                    # it happened to be scored on (a node can be far faster). Triage stays fast.
+                    if not triage:
+                        with srv.tourney_lock:
+                            srv.tourney_state.update(phase="speed", inflight={},
+                                                     current="speed-testing every (model, node) pair…")
+                        srv.brain.complete_speed_matrix(progress=_speed_progress)
                 with srv.tourney_lock:
                     srv.tourney_state.update(phase="awaiting_veto", current="", inflight={})
             except Exception as exc:  # surfaced via status, never a silent death (DESIGN §10)
@@ -1609,7 +1639,7 @@ _HTML = """<!doctype html>
         <button class="secondary" id="fleetMatrixBtn" type="button" title="The time trial: speed-test each qualified model on every node it's installed on but not yet timed, so we know which edge can run what (the background-worker map). Records even slow results. Disabled while a benchmark/tournament is running.">3 · Speed-test</button>
         <button class="secondary" id="fleetApplyBtn" type="button" title="Point each role at its top-scoring model from the benchmark.">4 · Apply best</button>
       </div>
-      <div class="hint" style="margin-top:6px;"><b>Find</b> lists installed models (fast, no scoring) → <b>Benchmark</b> scores them all (slow) → <b>Speed-test</b> fills the <b>placement matrix</b> (times each qualified model on the other nodes it lives on, so you learn which edges can host which models for background/council work — slow is fine there) → <b>Apply</b> routes each role to the best.</div>
+      <div class="hint" style="margin-top:6px;"><b>Find</b> lists installed models (fast, no scoring) → <b>Benchmark</b> scores them all <b>and then speed-tests every (model, node) pairing automatically</b> (so each model's true fastest node is known — a node can be far faster than the one it was scored on) → <b>Apply</b> routes each role to the best. <b>Speed-test</b> is a manual re-run (e.g. after re-enabling a node); the benchmark already does it.</div>
       <div class="row" style="margin-top:8px; align-items:center; gap:14px; flex-wrap:wrap;">
         <label class="hint" style="display:flex; align-items:center; gap:6px;">Benchmark — min model size (B)
           <input type="number" id="benchMinSize" min="0" step="1" autocomplete="off" style="width:70px;"/></label>
@@ -3011,10 +3041,12 @@ function renderTourney(s) {
     const slow = (s.current && secs != null && secs > 90) ? " ⏳ (slow — a latency cap would skip models like this)" : "";
     const eta = (s.eta != null) ? ` · ~${fmtDuration(s.eta)} left` : "";
     h += `<div class="hint" style="margin:6px 0;">${s.total ? `Scoring ${s.current}…${more} · ${s.i}/${s.total} done${onModel}${eta}${slow}` : (s.current || "Preparing…")}</div>`;
+  } else if (phase === "speed") {
+    h += `<div class="hint" style="margin:6px 0;">⏱ Speed-testing every (model, node) pairing — ${s.i || 0}/${s.total || 0}: ${s.current || ""} <span style="opacity:.7;">(so each model's true fastest node is known before the finals)</span></div>`;
   }
   if (s.round_key === "finals") h += renderFinals(s.recommendations, s.role_candidates);
   // An empty round that's NOT still running means nothing qualified — explain why (don't look broken).
-  if (phase !== "running" && !(s.results || []).length) {
+  if (phase !== "running" && phase !== "speed" && !(s.results || []).length) {
     const sc = s.scope || {};
     h += `<div class="hint" style="margin:10px 0; color:#ff8a8a;">No models qualified this round. Your scope may exclude everything — size band min <b>${sc.min_model_size_b ?? 0}</b>B / max <b>${sc.max_model_size_b ?? "∞"}</b>B (an inverted band excludes all). Widen the size fields and re-run.</div>`;
   }
@@ -3046,10 +3078,14 @@ async function pollTournament() {
       // under the hood), so they're not stuck grey while the tournament runs.
       btnState("fleetScanBtn", "done");   // the tournament scans the fleet first
       btnState("fleetBenchBtn", s.phase === "running" ? "working" : "done");
-      if (s.phase === "running") {
-        const eta = (s.eta != null) ? ` · ~${fmtDuration(s.eta)} left` : "";
-        const lbl = s.round_label || `Round ${s.round}`;
-        $("fleetMsg").textContent = s.total ? `${lbl}: ${s.i}/${s.total} ${s.current}…${eta}` : `${lbl}: ${s.current || "preparing"}…`;
+      if (s.phase === "running" || s.phase === "speed") {   // both are live — keep polling
+        if (s.phase === "speed") {
+          $("fleetMsg").textContent = `⏱ Speed-testing every (model, node) pairing — ${s.i || 0}/${s.total || 0}: ${s.current || ""}`;
+        } else {
+          const eta = (s.eta != null) ? ` · ~${fmtDuration(s.eta)} left` : "";
+          const lbl = s.round_label || `Round ${s.round}`;
+          $("fleetMsg").textContent = s.total ? `${lbl}: ${s.i}/${s.total} ${s.current}…${eta}` : `${lbl}: ${s.current || "preparing"}…`;
+        }
         await new Promise(r => setTimeout(r, 1500));
         continue;
       }
@@ -3133,9 +3169,10 @@ async function pollBenchmark() {
           if (s.skipped_too_small) skips.push(`${s.skipped_too_small} too small`);
           if (s.skipped_too_slow) skips.push(`${s.skipped_too_slow} too slow`);
           const skipped = skips.length ? ` (${skips.join(", ")} skipped)` : "";
-          $("fleetMsg").textContent = `Benchmarked ${s.benchmarked || 0} of ${s.eligible || 0} eligible model(s)${skipped}` + ".";
+          const sp = s.speed_timed ? ` · speed-tested ${s.speed_timed} (model, node) pairing(s)` : "";
+          $("fleetMsg").textContent = `Benchmarked ${s.benchmarked || 0} of ${s.eligible || 0} eligible model(s)${skipped}${sp}.`;
           const best = (s.results || []).slice().sort((a, b) => (b.quality || 0) - (a.quality || 0))[0];
-          renderBenchResults(s.results, `✅ Benchmark complete — ${s.benchmarked || 0} scored${best ? `, top 🏆 ${best.model}` : ""}`, s.speeds);
+          renderBenchResults(s.results, `✅ Done — ${s.benchmarked || 0} scored, per-node speeds filled${best ? ` · top 🏆 ${best.model}` : ""}`, s.speeds);
         }
         loadFleet();
         break;
@@ -3144,8 +3181,10 @@ async function pollBenchmark() {
       const eta = (s.eta != null) ? `  ·  ~${fmtDuration(s.eta)} left` : "";
       // current = the longest-running in-flight model (server-tracked); +N for the other nodes.
       const more = (s.inflight && s.inflight.length > 1) ? ` (+${s.inflight.length - 1})` : "";
-      $("fleetMsg").textContent = s.total ? `Benchmarking ${s.i}/${s.total}: ${s.current}${more}…${eta}` : `${s.current || "Preparing…"}`;
-      const header = s.total ? `🏁 Benchmarking ${s.i}/${s.total}${eta}` : `🔎 ${s.current || "Preparing…"}`;
+      const speedPhase = s.phase === "speed";
+      $("fleetMsg").textContent = speedPhase ? `${s.current}` : (s.total ? `Benchmarking ${s.i}/${s.total}: ${s.current}${more}…${eta}` : `${s.current || "Preparing…"}`);
+      const header = speedPhase ? `⏱ Speed-testing every (model, node) pairing — ${s.i}/${s.total}`
+        : (s.total ? `🏁 Benchmarking ${s.i}/${s.total}${eta}` : `🔎 ${s.current || "Preparing…"}`);
       renderBenchResults(s.results, header, s.speeds);   // live scoreboard takes over the chat pane
       await new Promise(r => setTimeout(r, 1500));
     }
