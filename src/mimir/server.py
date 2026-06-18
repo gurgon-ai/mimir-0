@@ -842,14 +842,15 @@ class _Handler(BaseHTTPRequestHandler):
         if cur == 2:
             with srv.brain_lock:
                 recs = srv.brain.tournament_finals(keep)
+                cands = srv.brain.role_candidates()   # all eligible per role → the picker's options
             with srv.tourney_lock:
                 prev = [r for r in srv.tourney_state.get("results", []) if r["model"] in keep]
                 meta = _TOURNEY_ROUNDS[2]
                 srv.tourney_state.update(
                     round=3, round_name=meta["name"], round_key="finals",
                     round_label=meta["label"], blurb=meta["blurb"],
-                    phase="done", current="", inflight={}, recommendations=recs, results=prev,
-                    finalists=sorted(keep),
+                    phase="done", current="", inflight={}, recommendations=recs,
+                    role_candidates=cands, results=prev, finalists=sorted(keep),
                 )
             return {"advanced": True}
         return {"advanced": False, "error": "the tournament is already at the finals"}
@@ -940,6 +941,9 @@ class _Handler(BaseHTTPRequestHandler):
             # Per-(node, model) placements + current node pins, so manual override can target a
             # specific edge node — a model on several nodes is selectable per node, not collapsed.
             pool["placement"] = brain.placement_matrix()
+            # Embedding models are excluded from the chat placement matrix, so the embed role gets
+            # its own per-(node, model) list — else "no machines" even with an embedder everywhere.
+            pool["embed_placement"] = brain.embed_placements()
             pool["role_nodes"] = brain.role_nodes()
             # Disabled machines, so the role dropdown won't offer a model stranded on one (OFI).
             pool["disabled_nodes"] = sorted(disabled_nodes(brain._storage))
@@ -2733,6 +2737,11 @@ function _emoji(v) { return v == null ? "·" : v >= 0.8 ? "✅" : v >= 0.5 ? "�
 // → 🟡 (has vision, imperfect), aced → ✅. So a model that sees but isn't a perfect OCR reads yellow,
 // not a misleading red. null = not tested (·).
 function _visionEmoji(v) { return v == null ? "·" : v <= 0 ? "❌" : v >= 1 ? "✅" : "🟡"; }
+// Vision is a capability CHECK, separate from the scored dimensions (it does NOT affect quality), so
+// it sits in its own column after Speed, set off by a left border.
+const VIS_SEP = "border-left:2px solid #3a4150;";
+const VIS_TH = `<th style="${VIS_SEP}" title="Vision is a capability check — it does NOT affect the quality score">Vis</th>`;
+const VIS_TD = ` style="${VIS_SEP}"`;
 function _medal(i) { return i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : (i + 1) + "."; }
 function _stars(q) { const n = Math.max(0, Math.min(5, Math.round((q || 0) * 5))); return "★".repeat(n) + "☆".repeat(5 - n); }
 
@@ -2775,14 +2784,15 @@ function renderBenchResults(results, header, speeds) {
   const all = [...byModel.values()].sort((a, b) => (b.quality || 0) - (a.quality || 0)
     || _bestSpeed(a.model, a.return_time, speeds) - _bestSpeed(b.model, b.return_time, speeds));
   let h = `<h2>${header || "🏁 Benchmarking…"} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="showPlacement()">📊 Per-node placement</button> <button class="secondary" style="padding:4px 10px;" onclick="showCouncil()">🏟️ Council</button> <button class="secondary" style="padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
-  h += '<div class="legend">✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; Vis: ❌ none · 🟡 sees · ✅ full &nbsp;|&nbsp; ★ = quality &nbsp;|&nbsp; one row per model; Speed = each node it runs on (🖥️ local · 🌐 LAN), fastest first</div>';
+  h += '<div class="legend">✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; ★ = quality &nbsp;|&nbsp; one row per model; Speed = each node it runs on (🖥️ local · 🌐 LAN), fastest first &nbsp;|&nbsp; <b>Vis</b> is a capability check (❌ none · 🟡 sees · ✅ full) — it does <b>not</b> affect the score</div>';
   if (!all.length) { $("benchBoard").innerHTML = h + '<div class="hint" style="margin-top:12px;">Warming up the first model…</div>'; return; }
-  h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th><th>Epistemics</th><th>Vis</th><th>Speed/turn (per node)</th></tr>";
+  h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th><th>Epistemics</th><th>Speed/turn (per node)</th>" + VIS_TH + "</tr>";
   all.forEach((r, i) => {
     h += `<tr class="${i === 0 ? "top" : ""}"><td>${_medal(i)}</td><td>${r.model}</td>`
       + `<td class="q">${_stars(r.quality)} <span style="color:#8a94a3; font-weight:400;">${(r.quality ?? 0).toFixed(2)}</span></td>`
-      + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td><td>${_emoji(r.epistemics)}</td><td>${_visionEmoji(r.vision)}</td>`
-      + `<td>${speedCell(r.model, r.return_time, speeds)}</td></tr>`;
+      + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td><td>${_emoji(r.epistemics)}</td>`
+      + `<td>${speedCell(r.model, r.return_time, speeds)}</td>`
+      + `<td${VIS_TD}>${_visionEmoji(r.vision)}</td></tr>`;
   });
   $("benchBoard").innerHTML = h + "</table>";
 }
@@ -2797,7 +2807,7 @@ async function showPlacement() {
 function renderPlacement(data) {
   _benchBoardClosed = false; benchShow(true);
   let h = '<h2>📊 Per-node placement — what runs best on each node <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>';
-  h += '<div class="legend">🏆 node winner (best quality, speed breaks ties) · ⚡ fastest here · ✅ ≥0.80 🟡 0.50–0.79 ❌ &lt;0.50 · speed is per-node · roles: green = eligible, ⊘ = barred</div>';
+  h += '<div class="legend">🏆 node winner (best quality, speed breaks ties) · ⚡ fastest here · ✅ ≥0.80 🟡 0.50–0.79 ❌ &lt;0.50 · speed is per-node · roles: green = eligible, ⊘ = barred · <b>Vis</b> is a check (does not affect score)</div>';
   h += '<div class="hint" style="margin:6px 0;">☑ Untick a machine to <b>exclude it from qualification + routing</b> — e.g. disable the GPU box to see what your edge nodes can do <i>on their own</i> (the whole point: useful home AI without killer compute). Takes effect on the next benchmark/tournament.</div>';
   const disabledNodes = new Set(data.disabled_nodes || []);
   const nodes = Object.keys(data.by_node || {}).sort((a, b) => {
@@ -2811,7 +2821,7 @@ function renderPlacement(data) {
     const champ = off ? null : models.find(m => m.champion);
     h += `<div style="${off ? "opacity:0.45;" : ""}">`;
     h += `<div class="nodehdr" style="margin-top:14px;"><label style="cursor:pointer;" title="Use this machine in the fleet. Untick to exclude it from qualification + routing."><input type="checkbox" ${off ? "" : "checked"} onchange="toggleNodeFromView('${node}', this.checked)"> ${shortNode(node)}</label> · ${models.length} model(s)${off ? " — <b>disabled</b> (excluded)" : (champ ? ` · winner 🏆 <b>${champ.model}</b> (q${(champ.quality ?? 0).toFixed(2)} · ${champ.return_time != null ? champ.return_time.toFixed(1) + "s" : "·"})` : "")}</div>`;
-    h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Disc</th><th>Epis</th><th>Vis</th><th>Speed</th><th>Roles</th></tr>";
+    h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Disc</th><th>Epis</th><th>Speed</th>" + VIS_TH + "<th>Roles</th></tr>";
     models.forEach(m => {
       const flag = (m.champion ? "🏆" : "") + (m.fastest ? "⚡" : "");
       const elig = (m.eligible_roles || []).join(", ");
@@ -2820,8 +2830,9 @@ function renderPlacement(data) {
       const barTitle = barEntries.map(([r, w]) => `${r}: ${w}`).join("; ");
       h += `<tr class="${m.champion ? "top" : ""}" style="${m.enabled ? "" : "opacity:0.5;"}"><td>${flag}</td><td>${m.model}</td>`
         + `<td class="q">${_stars(m.quality)} <span style="color:#8a94a3; font-weight:400;">${(m.quality ?? 0).toFixed(2)}</span></td>`
-        + `<td>${_emoji(m.talk)}</td><td>${_emoji(m.tools)}</td><td>${_emoji(m.code)}</td><td>${_emoji(m.reasoning)}</td><td>${_emoji(m.discipline)}</td><td>${_emoji(m.epistemics)}</td><td>${_visionEmoji(m.vision)}</td>`
+        + `<td>${_emoji(m.talk)}</td><td>${_emoji(m.tools)}</td><td>${_emoji(m.code)}</td><td>${_emoji(m.reasoning)}</td><td>${_emoji(m.discipline)}</td><td>${_emoji(m.epistemics)}</td>`
         + `<td>${m.return_time != null ? m.return_time.toFixed(1) + "s" : "·"}</td>`
+        + `<td${VIS_TD}>${_visionEmoji(m.vision)}</td>`
         + `<td style="font-size:11px;"><span style="color:#7fd17f;">${elig}</span> <span style="color:#e0a0a0;" title="${barTitle}">${bars}</span></td></tr>`;
     });
     h += "</table></div>";
@@ -2883,16 +2894,48 @@ function renderCouncil(data) {
 }
 
 // -- the qualifying tournament: same board, plus round chrome + keep-checkboxes + the FIGHT button.
-function renderFinals(recs) {
-  let h = '<div class="selfmodel" style="margin:8px 0;"><b>🏆 Finals — your champions</b>';
-  const roles = Object.entries(recs || {}).filter(([_r, v]) => v);
-  if (!roles.length) h += '<div class="hint" style="margin-top:6px;">No finalist cleared a role\\'s gate — keep more models or re-run.</div>';
-  roles.forEach(([role, r]) => {
-    const q = (r.quality != null) ? `q${r.quality}` : "";
-    const t = (r.return_time != null) ? ` · ${r.return_time}s` : "";
-    h += `<div style="margin-top:5px;">${role} → <b>${r.model}</b> (${q}${t}) on ${shortNode(r.node)}</div>`;
+// Interactive "Your champions": each role is a pick list of its eligible models, defaulting to the
+// recommendation; changing one pins the role immediately (like the Fleet-tab picker). Council is
+// multi-model — it shows the whole eligible pool (adversarial reasoning uses the spread, not one).
+function _finalsOpt(c, picked) {
+  const q = (c.quality != null) ? ` · q${c.quality}` : "";
+  const t = (c.return_time != null) ? ` · ${c.return_time}s` : "";
+  const where = c.node ? ` · ${ipTag(c.node) || c.node}` : "";
+  const sel = (c.model === picked) ? " selected" : "";
+  return `<option data-m="${c.model}" data-n="${c.node || ''}"${sel}>${c.model}${q}${t}${where}</option>`;
+}
+function renderFinals(recs, candidates) {
+  candidates = candidates || {};
+  let h = '<div class="selfmodel" style="margin:8px 0;"><b>🏆 Finals — your champions</b>'
+    + '<div class="hint" style="margin:2px 0 8px;">Pick per role (defaults to the recommended); '
+    + 'changing one pins it. Council is multi-model — it uses the whole eligible pool.</div>';
+  const roles = Object.keys(candidates).length ? Object.keys(candidates).sort()
+    : Object.keys(recs || {}).sort();
+  const live = roles.filter(role => role === "council" ? (candidates[role] || []).length : (recs || {})[role]);
+  if (!live.length) return h + '<div class="hint">No finalist cleared a role\\'s gate — keep more models or re-run.</div></div>';
+  live.forEach(role => {
+    const rec = (recs || {})[role];
+    const cands = candidates[role] || (rec ? [rec] : []);
+    if (role === "council") {
+      const names = cands.map(c => c.model);
+      h += `<div style="margin-top:6px;"><span style="min-width:78px; display:inline-block;">council</span>`
+        + `→ <b>${names.length} model(s)</b> <span class="hint">(${names.slice(0, 8).join(", ")}`
+        + `${names.length > 8 ? ` +${names.length - 8} more` : ""}) — diverse adversarial pool</span></div>`;
+      return;
+    }
+    const picked = rec ? rec.model : (cands[0] && cands[0].model);
+    const opts = cands.length ? cands.map(c => _finalsOpt(c, picked)).join("")
+      : '<option>none eligible</option>';
+    h += `<div style="margin-top:6px; display:flex; align-items:center; gap:8px;">`
+      + `<span style="min-width:78px;">${role}</span>`
+      + `<select data-frole="${role}" style="flex:1 1 auto; max-width:340px;" onchange="finalsPick(this)"${cands.length ? "" : " disabled"}>${opts}</select>`
+      + `</div>`;
   });
   return h + "</div>";
+}
+function finalsPick(sel) {
+  const o = sel.selectedOptions[0]; if (!o || !o.dataset.m) return;
+  setRole(sel.getAttribute("data-frole"), o.dataset.m, o.dataset.n || "");
 }
 
 function tourneyTable(results, showChecks, round) {
@@ -2905,7 +2948,7 @@ function tourneyTable(results, showChecks, round) {
   const span = 10 + (full ? 1 : 0) + (showChecks ? 1 : 0);
   let cols = `<th></th>${showChecks ? "<th>Keep</th>" : ""}<th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th>`;
   if (full) cols += "<th>Epistemics</th>";
-  cols += "<th>Vis</th><th>Speed/turn</th>";
+  cols += "<th>Speed/turn</th>" + VIS_TH;
   let h = `<table><tr>${cols}</tr>`;
   order.forEach(node => {
     const rows = groups[node].sort((a, b) => (b.quality || 0) - (a.quality || 0));
@@ -2918,7 +2961,7 @@ function tourneyTable(results, showChecks, round) {
         + `<td class="q">${_stars(r.quality)} <span style="color:#8a94a3; font-weight:400;">${(r.quality ?? 0).toFixed(2)}</span></td>`
         + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td>`;
       if (full) h += `<td>${_emoji(r.epistemics)}</td>`;
-      h += `<td>${_visionEmoji(r.vision)}</td><td>${r.return_time != null ? r.return_time.toFixed(1) + "s" : "·"}</td></tr>`;
+      h += `<td>${r.return_time != null ? r.return_time.toFixed(1) + "s" : "·"}</td><td${VIS_TD}>${_visionEmoji(r.vision)}</td></tr>`;
     });
   });
   return h + "</table>";
@@ -2929,7 +2972,7 @@ function renderTourney(s) {
   benchShow(true);
   const round = s.round || 1, phase = s.phase, label = s.round_label || `Round ${round}`;
   let h = `<h2>🏆 Tournament — ${label} · ${s.round_name || ""} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
-  h += `<div class="legend">${s.blurb || ""} &nbsp;|&nbsp; ✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50</div>`;
+  h += `<div class="legend">${s.blurb || ""} &nbsp;|&nbsp; ✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; <b>Vis</b> is a check (does not affect score)</div>`;
   if (phase === "running") {
     // Elapsed comes from the SERVER (true time on the longest-running in-flight model — the real
     // bottleneck across the concurrent per-node workers), so the timer never sticks on a model that
@@ -2941,7 +2984,7 @@ function renderTourney(s) {
     const eta = (s.eta != null) ? ` · ~${fmtDuration(s.eta)} left` : "";
     h += `<div class="hint" style="margin:6px 0;">${s.total ? `Scoring ${s.current}…${more} · ${s.i}/${s.total} done${onModel}${eta}${slow}` : (s.current || "Preparing…")}</div>`;
   }
-  if (s.round_key === "finals") h += renderFinals(s.recommendations);
+  if (s.round_key === "finals") h += renderFinals(s.recommendations, s.role_candidates);
   // An empty round that's NOT still running means nothing qualified — explain why (don't look broken).
   if (phase !== "running" && !(s.results || []).length) {
     const sc = s.scope || {};
@@ -3205,6 +3248,17 @@ function renderRoleAssign(data) {
   // Models discovered live but not yet in the catalogue still get an "any node" option.
   (data.available || []).forEach(m => { byModel[m] = byModel[m] || []; });
   Object.values(active).forEach(v => { if (v && v !== "auto") byModel[v] = byModel[v] || []; });
+  // Embedding models are NOT in the chat placement matrix, so the embed role draws from its own
+  // per-(node, model) list — otherwise the embed dropdown shows "no machines" even with an embedder
+  // installed on every node.
+  const embedByModel = {};
+  Object.entries(data.embed_placement || {}).forEach(([m, rows]) => {
+    (rows || []).forEach(({ node, return_time }) => {
+      if (offNodes.has(node)) return;
+      (embedByModel[m] = embedByModel[m] || []).push({ node, t: return_time });
+    });
+  });
+  if (active.embed && active.embed !== "auto") embedByModel[active.embed] = embedByModel[active.embed] || [];
   // Benchmark status → option text colour: all dims ≥0.8 = green, any 0.5–0.79 = yellow, any <0.5 =
   // red, not-yet-benchmarked = default (white). Vision is informational, so it's excluded here.
   const statusColor = { green: "#7fd17f", yellow: "#e0c060", red: "#e0604a" };
@@ -3225,20 +3279,18 @@ function renderRoleAssign(data) {
     const curNode = roleNodes[role] || "";
     const isAuto = autoRoles.has(role);
     const row = document.createElement("div"); row.className = "field";
-    row.style.display = "flex"; row.style.alignItems = "center"; row.style.gap = "10px";
-    const lab = document.createElement("label"); lab.style.minWidth = "90px"; lab.style.margin = "0";
-    lab.textContent = role; lab.title = ROLE_DESC[role] || "";
-    if (ROLE_DESC[role]) {
-      const hint = document.createElement("span"); hint.className = "hint";
-      hint.style.cssText = "font-size:11px; flex:1 1 100%; margin:-4px 0 4px 0; order:9;";
-      hint.textContent = ROLE_DESC[role]; row.style.flexWrap = "wrap"; row.appendChild(hint);
-    }
+    row.style.cssText = "display:flex; align-items:center; gap:8px; margin:3px 0;";
+    const lab = document.createElement("label");
+    lab.style.cssText = "min-width:78px; margin:0; cursor:help;";
+    lab.textContent = role; lab.title = ROLE_DESC[role] || "";   // description on hover (compact UI)
     const sel = document.createElement("select");
+    sel.style.cssText = "flex:1 1 auto; max-width:300px;";   // a little narrower; leaves room for the tag
     const autoOpt = document.createElement("option");
-    autoOpt.value = "auto"; autoOpt.textContent = isAuto ? "auto (pick best)" : "auto (pick best)";
+    autoOpt.value = "auto"; autoOpt.textContent = "auto (pick best)";
     sel.appendChild(autoOpt);
-    Object.keys(byModel).sort().forEach(m => {
-      const nodes = byModel[m];
+    const bm = (role === "embed") ? embedByModel : byModel;   // embed has its own model list
+    Object.keys(bm).sort().forEach(m => {
+      const nodes = bm[m];
       // No enabled node has this model → not routable. Hide it, unless it's the current pin (then
       // show it flagged so you can see why the role is failing and switch away).
       if (!nodes.length && m !== curModel) return;
@@ -3268,9 +3320,14 @@ function renderRoleAssign(data) {
       setRole(role, m, n);
     });
     const tag = document.createElement("span"); tag.className = "tag";
-    tag.textContent = isAuto ? "auto" : (curNode ? `pinned · ${ipTag(curNode) || curNode}` : "pinned");
-    tag.title = isAuto ? "the system picks the best-qualified model for this role"
-      : (curNode ? "fixed to one model on one node" : "fixed to one model, routed to its live-best node");
+    if (isAuto) {
+      tag.textContent = "⚙️ auto";
+      tag.title = "the system picks the best-qualified model for this role";
+    } else {
+      tag.textContent = curNode ? `📌 ${ipTag(curNode) || curNode}` : "📌";
+      tag.title = curNode ? "pinned to one model on one node"
+        : "pinned to one model, routed to its live-best node";
+    }
     row.appendChild(lab); row.appendChild(sel); row.appendChild(tag);
     wrap.appendChild(row);
   });

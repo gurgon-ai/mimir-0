@@ -8,6 +8,15 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **Interactive "Your champions" + a tidier Fleet tab.** The tournament Finals is now a per-role
+  **picker**: each role is a dropdown of its eligible models, defaulting to the recommendation;
+  changing one pins the role immediately. **Council** shows as the whole eligible pool (multi-model
+  adversarial reasoning, not a single pick). The manual role-assignment list is **compressed** — the
+  per-role description moved to a hover tooltip, the pick list is narrower, and the state tag is now
+  an emoji (📌 pinned · ⚙️ auto). The **embed role** finally lists embedding models (they're excluded
+  from the chat placement matrix, so the dropdown was empty even with an embedder on every node — it
+  now has its own per-node list). **Vision** moved to its own column after Speed, set off by a
+  divider, with a note that it's a capability check that does **not** affect the quality score.
 - **`--reembed` — rebuild the whole vector store with the current embed model.** `Mimir.reembed()`
   re-embeds every memory, library claim, and procedure trigger (CLI: stop the server, run
   `python -m mimir.server --config mimir.toml --reembed`, restart). Use it after changing
