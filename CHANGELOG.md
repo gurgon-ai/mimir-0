@@ -92,6 +92,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
 
 ### Fixed
+- **A bad node no longer hangs a model's benchmark for 20 minutes — it fails fast and fails over.**
+  A node can pass the quick speed probe yet hang the real battery (intermittent, or it loads a
+  1-token warm but stalls on actual generation), so all ~12 scoring calls hit the per-call timeout in
+  turn — ~700–1200s stuck on one model, which then records a false ~0 even though the model runs fine
+  elsewhere. Now the battery aborts a node after a few transport failures (or a failed warm) and
+  **fails over to the next node the model is installed on** (capability is never failed on speed —
+  DESIGN §6), scoring it on a node that works instead of zeroing it on one that doesn't. A completion
+  signal (`on_done`) fires for every model — scored, failed-over, or no-viable-node — so the
+  progress view never leaves a ghost model climbing past 20 minutes.
 - **Ctrl-C stops the server even mid-benchmark.** A running benchmark/tournament drives a
   `ThreadPoolExecutor` whose workers are non-daemon (`concurrent.futures`, 3.9+) and blocked in
   uninterruptible model calls; the interpreter's `atexit` handler joins them, so Ctrl-C hung the

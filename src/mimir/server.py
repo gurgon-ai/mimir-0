@@ -680,12 +680,15 @@ class _Handler(BaseHTTPRequestHandler):
                     "reasoning": b.reasoning, "vision": b.vision,
                     "return_time": b.return_time, "node": node,
                 })
-                srv.bench_state.get("inflight", {}).pop(b.model, None)   # done → no longer in-flight
+
+        def _on_done(model: str) -> None:   # fires for EVERY model (scored, failed over, or skipped)
+            with srv.bench_lock:
+                srv.bench_state.get("inflight", {}).pop(model, None)
 
         def _run() -> None:
             try:
                 with srv.brain_lock:
-                    result = run(_progress, _on_result)
+                    result = run(_progress, _on_result, _on_done)
                 with srv.bench_lock:
                     srv.bench_state.update(
                         running=False, done=True, current="", inflight={},
@@ -709,16 +712,17 @@ class _Handler(BaseHTTPRequestHandler):
         cap = float(body["max_model_size_b"]) if body.get("max_model_size_b") not in (None, "") else None
         floor = float(body["min_model_size_b"]) if body.get("min_model_size_b") not in (None, "") else None
         latency = float(body["max_latency_s"]) if body.get("max_latency_s") not in (None, "") else None
-        return self._run_benchmark_bg(lambda p, r: self.server.brain.benchmark_fleet(
+        return self._run_benchmark_bg(lambda p, r, d: self.server.brain.benchmark_fleet(
             max_params_b=cap, min_params_b=floor, latency_budget_s=latency,
-            progress=p, on_result=r,
+            progress=p, on_result=r, on_done=d,
         ))
 
     def _benchmark_council(self) -> dict[str, Any]:
         """Grade the council pool — the big models above the chat cap, caps off — in place (no
         rescan, so the main pool's scores survive). Then they enter the council roster."""
         return self._run_benchmark_bg(
-            lambda p, r: self.server.brain.benchmark_council_pool(progress=p, on_result=r),
+            lambda p, r, d: self.server.brain.benchmark_council_pool(
+                progress=p, on_result=r, on_done=d),
             scanning="grading the council pool (big models, caps off)…",
         )
 
@@ -889,7 +893,10 @@ class _Handler(BaseHTTPRequestHandler):
                     "reasoning": b.reasoning, "vision": b.vision,
                     "return_time": b.return_time, "node": node,
                 })
-                srv.tourney_state.get("inflight", {}).pop(b.model, None)   # done → not in-flight
+
+        def _on_done(model: str) -> None:   # fires for EVERY model (scored, failed over, or skipped)
+            with srv.tourney_lock:
+                srv.tourney_state.get("inflight", {}).pop(model, None)
 
         def _run() -> None:
             try:
@@ -903,7 +910,7 @@ class _Handler(BaseHTTPRequestHandler):
                         min_params_b=scope.get("min_model_size_b"),
                         latency_budget_s=scope.get("max_latency_s"),
                         only_models=keep, framework=not triage, persist=not triage,
-                        progress=_progress, on_result=_on_result,
+                        progress=_progress, on_result=_on_result, on_done=_on_done,
                     )
                 with srv.tourney_lock:
                     srv.tourney_state.update(phase="awaiting_veto", current="", inflight={})

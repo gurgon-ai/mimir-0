@@ -390,6 +390,20 @@ class FleetBenchmarkResult:
     skipped_too_slow: int = 0  # eligible models skipped because a trivial call exceeded the budget
 
 
+# A node can pass the quick speed probe yet hang the real battery (intermittent, or it loads for a
+# 1-token warm but stalls on actual generation), grinding every call into a per-call timeout — ~12
+# calls × 60s ≈ a "stuck on one model for 20 minutes" run that scores a fast model a false ~0.
+# _NodeUnreliable aborts that battery so the caller can FAIL OVER to another node the model is on
+# (DESIGN §6 — capability is never failed on speed; a bad node is not a bad model). It subclasses
+# BaseException on purpose: the scorers catch `Exception` (one bad answer → 0 for that case), so a
+# plain exception would be swallowed — this sails through them straight to the failover.
+class _NodeUnreliable(BaseException):
+    pass
+
+
+_NODE_FAIL_THRESHOLD = 3   # transport failures on one node → abandon it and fail over to another
+
+
 def benchmark_model(
     model: ModelGateway, model_name: str, *, num_ctx: int = 8192,
     framework: bool = True, call_timeout_s: float = 60.0, node: str | None = None,
@@ -457,10 +471,33 @@ def benchmark_model(
     try:
         _warm()
     except Exception as exc:
-        log.warning("benchmark: warmup call failed for %s: %s", model_name, exc)
+        log.warning("benchmark: warmup failed for %s on %s: %s", model_name, node, exc)
+        if node and node.startswith("http"):
+            # Can't even load one token here → this node is unusable for the model; fail over.
+            raise _NodeUnreliable(f"{model_name}: warmup failed on {node}") from exc
 
-    chat_fn = make_chat(None)   # role/default temp — variance IS the signal (discipline/epistemics)
-    det = make_chat(0.0)        # greedy — verifiable single-answer dims, so luck can't flip them
+    # Fail-fast guard: count transport failures (timeout/refused) across the battery; once a node
+    # trips the threshold, abandon it (_NodeUnreliable) so the caller fails over to another node,
+    # rather than grinding every remaining call into a timeout (the "20 minutes on one model" bug).
+    fail = {"n": 0}
+
+    def _guard(fn: ChatFn) -> ChatFn:
+        def wrapped(messages: list[Message]) -> str:
+            if fail["n"] >= _NODE_FAIL_THRESHOLD:
+                raise _NodeUnreliable(f"{model_name}: node {node} unreliable")
+            try:
+                return fn(messages)
+            except Exception as exc:
+                fail["n"] += 1
+                if fail["n"] >= _NODE_FAIL_THRESHOLD:
+                    raise _NodeUnreliable(
+                        f"{model_name}: node {node} unreliable after {fail['n']} failed calls"
+                    ) from exc
+                raise   # let the scorer count this one case as 0 and continue
+        return wrapped
+
+    chat_fn = _guard(make_chat(None))  # role/default temp — variance IS the signal
+    det = _guard(make_chat(0.0))       # greedy — verifiable single-answer dims, so luck can't flip
 
     talk = score_capability(det, "talk")
     tools = score_capability(det, "tools")
@@ -618,6 +655,7 @@ def benchmark_fleet(
     persist: bool = True,
     progress: Callable[[int, int, str, float | None], None] | None = None,
     on_result: Callable[[ModelBenchmark, str], None] | None = None,
+    on_done: Callable[[str], None] | None = None,
 ) -> FleetBenchmarkResult:
     """Benchmark the distinct models in the catalogue and write their scores back.
 
@@ -636,6 +674,9 @@ def benchmark_fleet(
       no judge), for a fast first-round narrowing.
     - ``persist`` — ``False`` makes the run **ephemeral**: results stream via ``on_result`` but are
       NOT written to the catalogue, so a triage/scouting round can't pollute the real scores.
+    - ``on_done(model_name)`` — called once per model when it's finished (scored, failed over to
+      exhaustion, or had no viable node), so a UI can clear it from an in-flight/progress view even
+      when it never produced a result.
     """
     # An inverted size band (floor above ceiling) is always a transposed pair of fields — it would
     # otherwise silently qualify NOTHING (min ≤ size ≤ max is unsatisfiable). Swap it, loudly,
@@ -716,10 +757,18 @@ def benchmark_fleet(
             with state_lock:
                 for n, s in speeds.items():
                     update_catalogue_speed(storage, n, model_name, s)
-        if cands and chosen is None:   # installed on http nodes but none could run it (all down)
-            with state_lock:
-                no_viable.add(model_name)
-            return
+
+        # Failover order: the best (chosen) node first, then the model's OTHER candidate nodes. A
+        # node can pass the probe yet hang the real battery, and the model usually runs on several
+        # nodes — so don't record a false ~0 on a bad node when a good one is a retry away (DESIGN
+        # §6: a model is never failed on speed). No http candidates → gateway path (mock/single-
+        # local). All candidates failed even the probe → no viable node (not a quality cut).
+        if not cands:
+            order: list[str | None] = [None]
+        elif chosen is None:
+            order = []
+        else:
+            order = [chosen] + [n for n in cands if n != chosen]
 
         if progress is not None:   # the model NOW entering scoring (not one that just finished)
             with state_lock:
@@ -727,43 +776,58 @@ def benchmark_fleet(
             eta = (time.monotonic() - loop_start) / d * (total - d) if d else None
             progress(d, total, model_name, eta)
 
-        lock = node_locks.get(chosen) if chosen else None
-        if lock:
-            lock.acquire()
+        bench: ModelBenchmark | None = None
+        used: str | None = None
         try:
-            bench = benchmark_model(model, model_name, num_ctx=num_ctx,
-                                    framework=framework, call_timeout_s=call_timeout, node=chosen)
-        except Exception as exc:
-            log.warning("benchmark: %s FAILED: %s", model_name, exc)
-            return
-        finally:
-            if lock:
-                lock.release()
+            for node in order:
+                lock = node_locks.get(node) if node else None
+                if lock:
+                    lock.acquire()
+                try:
+                    bench = benchmark_model(model, model_name, num_ctx=num_ctx, framework=framework,
+                                            call_timeout_s=call_timeout, node=node)
+                    used = node
+                    break
+                except _NodeUnreliable as exc:
+                    log.warning("benchmark: %s unreliable on %s — failing over: %s",
+                                model_name, node, exc)
+                except Exception as exc:
+                    log.warning("benchmark: %s failed on %s: %s", model_name, node, exc)
+                finally:
+                    if lock:
+                        lock.release()
 
-        with state_lock:
-            done_count += 1
-            speed_str = f"{bench.return_time:.1f}s/turn" if bench.return_time is not None \
-                else "speed unmeasured"
-            log.info("benchmark: [%d/%d] %s done — q=%.2f, %s%s",
-                     done_count, total, model_name, bench.quality, speed_str,
-                     f" on {chosen}" if chosen else "")
-            if persist:
-                # Node-independent scores model-wide; return_time is per-node (NOT set here, or it
-                # would stamp the chosen node's latency onto every node row and wreck the matrix).
-                update_catalogue_scores(
-                    storage, model_name, quality=bench.quality,
-                    talk=bench.talk, tools=bench.tools, code=bench.code,
-                    discipline=bench.discipline, epistemics=bench.epistemics,
-                    reasoning=bench.reasoning, vision=bench.vision,
-                )
-                # The chosen node's real battery latency — per-node only. A failed probe (None) is
-                # left unwritten so the node row stays untimed and the speed-matrix re-probes it,
-                # rather than stamping a bogus 0.0 that would rank it 'fastest'.
-                if chosen and bench.return_time is not None:
-                    update_catalogue_speed(storage, chosen, model_name, bench.return_time)
-            results.append(bench)
-            if on_result is not None:
-                on_result(bench, chosen or (nodes_with.get(model_name) or [""])[0])
+            with state_lock:
+                done_count += 1
+                if bench is None:
+                    no_viable.add(model_name)
+                    log.warning("benchmark: %s — no node could score it (%d candidate node(s))",
+                                model_name, len(order))
+                else:
+                    speed_str = f"{bench.return_time:.1f}s/turn" if bench.return_time is not None \
+                        else "speed unmeasured"
+                    log.info("benchmark: [%d/%d] %s done — q=%.2f, %s%s",
+                             done_count, total, model_name, bench.quality, speed_str,
+                             f" on {used}" if used else "")
+                    if persist:
+                        # Node-independent scores model-wide; return_time is per-node (only the node
+                        # that scored it — stamping every row would wreck the placement matrix).
+                        update_catalogue_scores(
+                            storage, model_name, quality=bench.quality,
+                            talk=bench.talk, tools=bench.tools, code=bench.code,
+                            discipline=bench.discipline, epistemics=bench.epistemics,
+                            reasoning=bench.reasoning, vision=bench.vision,
+                        )
+                        if used and bench.return_time is not None:
+                            update_catalogue_speed(storage, used, model_name, bench.return_time)
+                    results.append(bench)
+                    if on_result is not None:
+                        on_result(bench, used or (nodes_with.get(model_name) or [""])[0])
+        finally:
+            # ALWAYS signal completion (scored, failed over to exhaustion, or no viable node), so a
+            # UI clears it from the in-flight/progress view instead of leaving a ghost climbing.
+            if on_done is not None:
+                on_done(model_name)
 
     workers = max(1, len(http_nodes))   # ~one model per node; mock/single-local → 1 → sequential
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mimir-bench") as ex:

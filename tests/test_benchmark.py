@@ -159,6 +159,27 @@ def test_size_cap_and_outside_in_order(brain: Mimir) -> None:
     assert result.results[0].model == "mock-b"
 
 
+def test_benchmark_model_abandons_an_unreachable_node_for_failover() -> None:
+    # A node that can't even WARM the model must abort the battery with _NodeUnreliable so the
+    # caller fails over to another node — NOT grind every call into a timeout (the "20 minutes on
+    # one model, scored a false ~0" bug). A refused port stands in for a dead/hung node.
+    import pytest
+
+    from mimir.cognition.benchmark import _NodeUnreliable, benchmark_model
+
+    with pytest.raises(_NodeUnreliable):
+        benchmark_model(None, "ghost:1b", node="http://127.0.0.1:9",  # type: ignore[arg-type]
+                        call_timeout_s=1.0)
+
+
+def test_benchmark_fleet_signals_done_for_every_model(brain: Mimir) -> None:
+    # on_done fires once per finished model (scored, failed over, or skipped) so a UI can clear it
+    # from the in-flight/progress view — no ghost left climbing when a model produced no result.
+    done: list[str] = []
+    brain.benchmark_fleet(only_approved=False, max_params_b=10.0, on_done=done.append)
+    assert set(done) == {"mock-a", "mock-b"}   # both scored models signalled completion
+
+
 def test_inverted_size_band_is_swapped_not_left_empty(brain: Mimir) -> None:
     # min > max is always a transposed pair — it must SWAP (to [3, 10]) and qualify the models in
     # that band, never dead-end with an empty run (the "0 eligible / empty round" bug).
