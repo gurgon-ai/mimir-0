@@ -250,9 +250,29 @@ def _rank_for_role(
     return candidates
 
 
+def _role_band(data: dict[str, Any], role: str) -> str | None:
+    """Red/yellow/green for a model IN a role, by the dims that role needs (so a chat-strong model
+    reads green in the chat picker even if weak at vision/code). green = every required dim ≥0.8,
+    yellow = all ≥0.5, red = one falls short; None = unscored. Vision bands as a capability
+    (none/sees/full), matching its column."""
+    if data.get("quality") is None:
+        return None
+    worst, seen = 2, False
+    for cap in ROLE_NEEDS[role][0]:
+        v = data.get(cap)
+        if v is None:
+            continue
+        seen = True
+        band = (0 if v <= 0 else 2 if v >= 1 else 1) if cap == "vision" \
+            else (0 if v < 0.5 else 2 if v >= 0.8 else 1)
+        worst = min(worst, band)
+    return ("red", "yellow", "green")[worst] if seen else None
+
+
 def _as_pick(name: str, data: dict[str, Any], role: str) -> dict[str, Any]:
     """A ranked candidate as the public pick shape (``recommend_roles``/``roster_for`` output), with
-    the composite ``score`` + its parts so the board can show WHY it ranked where it did."""
+    the composite ``score`` + its parts and a per-role colour ``band`` so the board can show WHY it
+    ranked where it did and colour it by what the role actually needs."""
     capabilities, prefer = ROLE_NEEDS[role]
     speed = _speed_points(data.get("return_time")) * (1.5 if prefer == "fast" else 1.0)
     return {
@@ -265,6 +285,7 @@ def _as_pick(name: str, data: dict[str, Any], role: str) -> dict[str, Any]:
         "nodes": data["nodes"],
         "prefer": prefer,
         "score": round(_role_score(data, role), 1),
+        "band": _role_band(data, role),
         "points": {
             "quality": round(_W_QUALITY * _role_quality(data, capabilities), 1),
             "speed": round(speed, 1),
@@ -535,6 +556,7 @@ def placement_matrix(
 def council_roster(
     storage: StorageGateway, *, size: int = 5, min_quality: float = _CAPABILITY_FLOOR,
     disabled: set[str] | None = None, disabled_nodes: set[str] | None = None,
+    excluded: set[str] | None = None,
 ) -> dict[str, Any]:
     """A diverse adversarial-council roster — a SPREAD of model families, not the top-N ranking.
 
@@ -553,10 +575,11 @@ def council_roster(
     """
     disabled = disabled or set()
     disabled_nodes = disabled_nodes or set()
+    excluded = excluded or set()   # models the user has unchecked from the council pool
     # Collapse to one entry per model (capability is model-wide); track its fastest enabled node.
     by_model: dict[str, dict[str, Any]] = {}
     for e in list_catalogue(storage):
-        if "embed" in e.model.lower() or e.model in disabled:
+        if "embed" in e.model.lower() or e.model in disabled or e.model in excluded:
             continue
         if e.quality is None or e.quality < min_quality:
             continue

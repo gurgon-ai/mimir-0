@@ -373,6 +373,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"applied": self._apply_recommendations()})
             elif route == "/api/fleet/role":
                 self._send_json(self._set_role(body))
+            elif route == "/api/fleet/council/member":
+                self._send_json(self._set_council_member(body))
             elif route == "/api/fleet/model":
                 self._send_json(self._set_model_enabled(body))
             elif route == "/api/fleet/node":
@@ -876,6 +878,7 @@ class _Handler(BaseHTTPRequestHandler):
             with srv.brain_lock:
                 recs = srv.brain.tournament_finals(keep)
                 cands = srv.brain.role_candidates()   # all eligible per role → the picker's options
+                excluded = sorted(srv.brain.council_excluded())   # for the council checkboxes
             with srv.tourney_lock:
                 prev = [r for r in srv.tourney_state.get("results", []) if r["model"] in keep]
                 meta = _TOURNEY_ROUNDS[2]
@@ -883,7 +886,8 @@ class _Handler(BaseHTTPRequestHandler):
                     round=3, round_name=meta["name"], round_key="finals",
                     round_label=meta["label"], blurb=meta["blurb"],
                     phase="done", current="", inflight={}, recommendations=recs,
-                    role_candidates=cands, results=prev, finalists=sorted(keep),
+                    role_candidates=cands, council_excluded=excluded,
+                    results=prev, finalists=sorted(keep),
                 )
             return {"advanced": True}
         return {"advanced": False, "error": "the tournament is already at the finals"}
@@ -1005,6 +1009,15 @@ class _Handler(BaseHTTPRequestHandler):
             raise ValueError("'role' and 'model' are required")
         with self.server.brain_lock:
             return {"roles": self.server.brain.set_role(role, model, node)}
+
+    def _set_council_member(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Toggle a model in/out of the council pool (the checkbox beside each council model)."""
+        model = str(body.get("model", "")).strip()
+        if not model:
+            raise ValueError("model is required")
+        included = bool(body.get("included", True))
+        with self.server.brain_lock:
+            return self.server.brain.set_council_member(model, included)
 
     def _set_model_enabled(self, body: dict[str, Any]) -> dict[str, Any]:
         model = str(body.get("model", "")).strip()
@@ -2797,6 +2810,8 @@ function _visionEmoji(v) { return v == null ? "·" : v <= 0 ? "❌" : v >= 1 ? "
 const VIS_SEP = "border-left:2px solid #3a4150;";
 const VIS_TH = `<th style="${VIS_SEP}" title="Vision is a capability check — it does NOT affect the quality score">Vision</th>`;
 const VIS_TD = ` style="${VIS_SEP}"`;
+// Per-role benchmark band → text colour (green all-strong, yellow eligible, red weak/barred).
+const BAND_COLOR = { green: "#7fd17f", yellow: "#e0c060", red: "#e0604a" };
 function _medal(i) { return i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : (i + 1) + "."; }
 function _stars(q) { const n = Math.max(0, Math.min(5, Math.round((q || 0) * 5))); return "★".repeat(n) + "☆".repeat(5 - n); }
 
@@ -2953,47 +2968,71 @@ function renderCouncil(data) {
 // recommendation; changing one pins the role immediately (like the Fleet-tab picker). Council is
 // multi-model — it shows the whole eligible pool (adversarial reasoning uses the spread, not one).
 function _finalsOpt(c, picked) {
-  // Headline = the composite role score (quality + speed + size), so the ranking is transparent.
+  // Headline = the composite role score (quality + speed + size), so the ranking is transparent;
+  // text colour = the per-role band (green all-strong, yellow eligible, red weak for THIS role).
   const score = (c.score != null) ? ` · ${c.score}pts` : "";
   const q = (c.quality != null) ? ` · q${c.quality}` : "";
   const t = (c.return_time != null) ? ` · ${c.return_time}s` : "";
   const where = c.node ? ` · ${ipTag(c.node) || c.node}` : "";
   const sel = (c.model === picked) ? " selected" : "";
+  const col = BAND_COLOR[c.band] || "";
+  const style = col ? ` style="color:${col}"` : "";
   const p = c.points ? ` (quality ${c.points.quality} + speed ${c.points.speed} + size ${c.points.size})` : "";
-  return `<option data-m="${c.model}" data-n="${c.node || ''}"${sel} title="${c.model}${score}${p}">${c.model}${score}${q}${t}${where}</option>`;
+  return `<option data-m="${c.model}" data-n="${c.node || ''}"${sel}${style} title="${c.model}${score}${p}">${c.model}${score}${q}${t}${where}</option>`;
 }
-function renderFinals(recs, candidates) {
+function renderFinals(recs, candidates, councilExcluded) {
   candidates = candidates || {};
+  const excluded = new Set(councilExcluded || []);
   let h = '<div class="selfmodel" style="margin:8px 0;"><b>🏆 Finals — your champions</b>'
-    + '<div class="hint" style="margin:2px 0 8px;">Pick per role (defaults to the recommended); '
-    + 'changing one pins it. Council is multi-model — it uses the whole eligible pool.</div>';
-  const roles = Object.keys(candidates).length ? Object.keys(candidates).sort()
-    : Object.keys(recs || {}).sort();
-  const live = roles.filter(role => role === "council" ? (candidates[role] || []).length : (recs || {})[role]);
+    + '<div class="hint" style="margin:2px 0 8px;">Pick per role — coloured by what that role needs '
+    + '(🟢 strong · 🟡 ok · 🔴 weak), defaulting to the top pick; changing one pins it. Council is '
+    + 'multi-model: check the models to include in the adversarial pool.</div>';
+  const all = Object.keys(candidates).length ? Object.keys(candidates) : Object.keys(recs || {});
+  // Non-council roles first (sorted); council LAST so its long, all-models list sits at the bottom.
+  const ordered = all.filter(r => r !== "council").sort();
+  if (all.includes("council")) ordered.push("council");
+  const live = ordered.filter(role =>
+    role === "council" ? (candidates[role] || []).length : (recs || {})[role]);
   if (!live.length) return h + '<div class="hint">No finalist cleared a role\\'s gate — keep more models or re-run.</div></div>';
   live.forEach(role => {
     const rec = (recs || {})[role];
     const cands = candidates[role] || (rec ? [rec] : []);
     if (role === "council") {
-      const names = cands.map(c => c.model);
-      h += `<div style="margin-top:6px;"><span style="min-width:78px; display:inline-block;">council</span>`
-        + `→ <b>${names.length} model(s)</b> <span class="hint">(${names.slice(0, 8).join(", ")}`
-        + `${names.length > 8 ? ` +${names.length - 8} more` : ""}) — diverse adversarial pool</span></div>`;
+      // ALL eligible models, each a checkbox (checked = in the pool) coloured by its council band.
+      h += '<div style="margin-top:10px; border-top:1px solid #2b333f; padding-top:8px;">'
+        + '<b>council</b> <span class="hint">— diverse adversarial pool; check to include each model</span>'
+        + '<div style="margin-top:6px; line-height:2;">';
+      cands.forEach(c => {
+        const col = BAND_COLOR[c.band] || "#c9d2dd";
+        const inc = !excluded.has(c.model);
+        h += `<label style="margin-right:14px; white-space:nowrap; cursor:pointer;">`
+          + `<input type="checkbox" ${inc ? "checked" : ""} onchange="toggleCouncilMember('${c.model}', this.checked)"> `
+          + `<span style="color:${col};">${c.model}</span></label>`;
+      });
+      h += '</div></div>';
       return;
     }
     const picked = rec ? rec.model : (cands[0] && cands[0].model);
     const opts = cands.length ? cands.map(c => _finalsOpt(c, picked)).join("")
       : '<option>none eligible</option>';
+    // This is the onboarding moment and the board is wide — show what each role IS, to the right.
+    const desc = ROLE_DESC[role] ? `<span class="hint" style="flex:1 1 40%; margin-left:4px;">${ROLE_DESC[role]}</span>` : "";
     h += `<div style="margin-top:6px; display:flex; align-items:center; gap:8px;">`
       + `<span style="min-width:78px;">${role}</span>`
-      + `<select data-frole="${role}" style="flex:1 1 auto; max-width:340px;" onchange="finalsPick(this)"${cands.length ? "" : " disabled"}>${opts}</select>`
-      + `</div>`;
+      + `<select data-frole="${role}" style="flex:0 1 340px; max-width:340px;" onchange="finalsPick(this)"${cands.length ? "" : " disabled"}>${opts}</select>`
+      + `${desc}</div>`;
   });
   return h + "</div>";
 }
 function finalsPick(sel) {
   const o = sel.selectedOptions[0]; if (!o || !o.dataset.m) return;
   setRole(sel.getAttribute("data-frole"), o.dataset.m, o.dataset.n || "");
+}
+async function toggleCouncilMember(model, included) {
+  try {
+    await api("POST", "/api/fleet/council/member", { model, included });
+    $("fleetMsg").textContent = `council pool: ${included ? "added" : "removed"} ${model}.`;
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
 }
 
 function tourneyTable(results, showChecks, round) {
@@ -3044,7 +3083,7 @@ function renderTourney(s) {
   } else if (phase === "speed") {
     h += `<div class="hint" style="margin:6px 0;">⏱ Speed-testing every (model, node) pairing — ${s.i || 0}/${s.total || 0}: ${s.current || ""} <span style="opacity:.7;">(so each model's true fastest node is known before the finals)</span></div>`;
   }
-  if (s.round_key === "finals") h += renderFinals(s.recommendations, s.role_candidates);
+  if (s.round_key === "finals") h += renderFinals(s.recommendations, s.role_candidates, s.council_excluded);
   // An empty round that's NOT still running means nothing qualified — explain why (don't look broken).
   if (phase !== "running" && phase !== "speed" && !(s.results || []).length) {
     const sc = s.scope || {};

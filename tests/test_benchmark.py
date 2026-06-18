@@ -441,6 +441,39 @@ def test_council_roster_favors_family_diversity_over_raw_ranking(db_path: str) -
         sg.close()
 
 
+def test_council_excluded_models_leave_the_roster(db_path: str) -> None:
+    # The council checkbox: a model unchecked from the pool (`excluded`) is dropped from the roster
+    # even though it's eligible by score — benched from deliberation, not disabled everywhere.
+    from mimir.cognition.fleet import council_roster
+    from mimir.storage.gateway import StorageGateway
+    from mimir.storage.models import CatalogueEntry
+    from mimir.storage.repo import (
+        replace_catalogue,
+        update_catalogue_scores,
+        update_catalogue_speed,
+    )
+
+    node = "http://127.0.0.1:11434"
+    sg = StorageGateway(db_path)
+    try:
+        replace_catalogue(sg, [
+            CatalogueEntry(node=node, model="keep:7b", family="qwen", params_b=7.0, scanned_at=1.0),
+            CatalogueEntry(node=node, model="bench:7b", family="gemma", params_b=7.0,
+                           scanned_at=1.0),
+        ])
+        for m in ("keep:7b", "bench:7b"):
+            update_catalogue_scores(sg, m, quality=0.9, talk=1.0, tools=1.0, code=1.0,
+                                    coherence=None, discipline=1.0, epistemics=1.0, reasoning=1.0)
+            update_catalogue_speed(sg, node, m, 1.0)
+        seated = {s["model"] for s in council_roster(sg, size=5)["roster"]}
+        assert {"keep:7b", "bench:7b"} <= seated                  # both in the pool by default
+        seated2 = {s["model"] for s in
+                   council_roster(sg, size=5, excluded={"bench:7b"})["roster"]}
+        assert "keep:7b" in seated2 and "bench:7b" not in seated2  # the excluded one is benched
+    finally:
+        sg.close()
+
+
 def test_council_admits_yellow_models_above_a_light_reasoning_floor() -> None:
     # Council is diversity-first (DESIGN §5a): it admits EVERY yellow/green model (quality >= 0.50)
     # that can reason AT ALL — a LIGHT reasoning floor (0.25), not the full 0.50 the identity roles
