@@ -333,6 +333,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._scan_documents(body))
             elif route == "/api/library/scan":
                 self._send_json(self._scan_library(body))
+            elif route == "/api/library/forget":
+                self._send_json(self._forget_document(body))
             elif route == "/api/sleep":
                 self._send_json(self._sleep())
             elif route == "/api/deliberate/run":
@@ -549,6 +551,14 @@ class _Handler(BaseHTTPRequestHandler):
         # force=True re-distils every source doc even if unchanged (e.g. after an extractor change).
         with self.server.brain_lock:
             return self.server.brain.ingest_pending_library(force=bool(body.get("force")))
+
+    def _forget_document(self, body: dict[str, Any]) -> dict[str, Any]:
+        # Library "delete": purge a document + its memories/claims/composite (and the file itself).
+        source = str(body.get("source") or body.get("path") or body.get("filename") or "").strip()
+        if not source:
+            raise ValueError("'source' (a document path or filename) is required")
+        with self.server.brain_lock:
+            return self.server.brain.forget_document(source, delete_file=bool(body.get("delete_file")))
 
     def _turn_stream(self) -> None:
         """Server-Sent-Events stream of a turn: token events, then a done event with introspect.
@@ -2219,7 +2229,8 @@ async function loadLibrary() {
     `<a href="#" data-pin="${p.id}">${activeSources.has(p.id) ? "pinned ✓" : "pin to chat"}</a></div></div>`
   ).join("") : '<div class="hint">No composite pages yet — drop documents and let it run (or Scan).</div>';
   docsEl.innerHTML = docs.length ? docs.map(d =>
-    `<div class="mem"><div class="text">${escapeHtml(d.filename)} <span class="hint">· ${d.claims} claim(s) · ${(d.size_bytes/1024).toFixed(1)} KB</span></div></div>`
+    `<div class="mem"><div class="text">${escapeHtml(d.filename)} <span class="hint">· ${d.claims} claim(s) · ${(d.size_bytes/1024).toFixed(1)} KB</span>` +
+    ` <a href="#" data-forget="${escapeHtml(d.path || d.filename)}" data-name="${escapeHtml(d.filename)}" style="float:right; color:#e0604a;">🗑 delete</a></div></div>`
   ).join("") : '<div class="hint">No source documents indexed yet.</div>';
   pagesEl.querySelectorAll("[data-page]").forEach(a => a.addEventListener("click", (e) => {
     e.preventDefault(); openLibraryPage(parseInt(a.dataset.page)); }));
@@ -2228,6 +2239,20 @@ async function loadLibrary() {
     activeSources.has(id) ? activeSources.delete(id) : activeSources.add(id);
     renderLibTray(); loadLibrary();
   }));
+  docsEl.querySelectorAll("[data-forget]").forEach(a => a.addEventListener("click", forgetDocument));
+}
+
+async function forgetDocument(e) {
+  e.preventDefault();
+  const source = e.currentTarget.dataset.forget, name = e.currentTarget.dataset.name || source;
+  if (!confirm(`Are you sure? This permanently deletes "${name}" — the source file, its composite ` +
+               `page, and every memory + cited claim derived from it. This cannot be undone.`)) return;
+  try {
+    const r = await api("POST", "/api/library/forget", { source, delete_file: true });
+    $("libScanMsg").textContent = `Deleted "${name}": ${r.memory_chunks} memory chunk(s), ` +
+      `${r.library_doc} library doc, ${r.pages} composite(s)${r.file_deleted ? ", file removed" : ""}.`;
+    loadLibrary();
+  } catch (err) { $("libScanMsg").textContent = "Delete failed: " + err.message; }
 }
 async function openLibraryPage(id) {
   const el = $("libDetail");

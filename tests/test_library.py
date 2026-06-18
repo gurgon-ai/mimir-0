@@ -15,7 +15,13 @@ from mimir.cognition.library import (
 )
 from mimir.config import Config
 from mimir.storage.models import LibraryClaim
-from mimir.storage.repo import claims_for_document, list_library_claims, list_library_documents
+from mimir.storage.repo import (
+    browse_memories,
+    claims_for_document,
+    list_library_claims,
+    list_library_documents,
+    list_library_pages,
+)
 
 
 def test_extract_claims_parses_and_degrades() -> None:
@@ -236,6 +242,55 @@ def test_model_fetch_intercepts_marker_when_streaming(mock_config: Config, tmp_p
         out = "".join(brain.turn_stream("what is the fence made of"))
         assert "FETCH" not in out and "cedar" in out.lower()   # marker never reached the user
         assert "Full pages you've loaded" in systems[1]        # 2nd pass got the page detail
+    finally:
+        brain.close()
+
+
+def test_forget_document_purges_every_layer(mock_config: Config, tmp_path) -> None:
+    """The Library 'delete' path: forget a doc → its memory chunks, library doc + claims, composite
+    page (row + MD file), wiki ledger entry, and (with delete_file) the source file are all gone."""
+    brain = _libbrain(mock_config, tmp_path)
+    try:
+        folder = brain._library_source_folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        f = folder / "manual.md"
+        f.write_text("# Safety\n\nReport unsafe work to a supervisor. Wear a harness above 8 feet.")
+        brain.ingest_pending_documents()   # document-tier memory chunks + wiki ledger
+        brain.ingest_pending_library()     # library doc + cited claims + composite page
+        s = brain._storage
+        assert any(m.source for m in browse_memories(s))            # doc chunks present
+        assert list_library_documents(s) and list_library_claims(s)
+        page_path = Path(list_library_pages(s)[0].path)
+        assert page_path.is_file()                                  # composite MD on disk
+
+        res = brain.forget_document(str(f), delete_file=True)
+        assert res["memory_chunks"] >= 1 and res["library_doc"] == 1 and res["file_deleted"]
+        assert not list_library_documents(s) and not list_library_claims(s)
+        assert not list_library_pages(s) and not page_path.exists()  # composite row + MD gone
+        assert not any(m.source for m in browse_memories(s))         # doc chunks gone
+        assert brain.documents() == [] and not f.exists()           # ledger + source file gone
+    finally:
+        brain.close()
+
+
+def test_deleting_the_file_self_cleans_on_the_next_scan(mock_config: Config, tmp_path) -> None:
+    """The inverse direction: just delete the source file, and an idle scan eventually forgets it
+    across every layer (no explicit delete call needed)."""
+    brain = _libbrain(mock_config, tmp_path)
+    try:
+        folder = brain._library_source_folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        f = folder / "gone.md"
+        f.write_text("# Topic\n\nA fact that will be deleted later.")
+        brain.ingest_pending_documents()
+        brain.ingest_pending_library()
+        assert brain.documents() and list_library_documents(brain._storage)
+
+        f.unlink()                                       # user removes the file directly
+        report = brain.ingest_pending_documents()        # the idle scan reconciles
+        assert "gone.md" in report["forgotten"]
+        assert brain.documents() == [] and not list_library_documents(brain._storage)
+        assert not list_library_claims(brain._storage)
     finally:
         brain.close()
 
