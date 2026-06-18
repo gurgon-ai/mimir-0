@@ -8,6 +8,12 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **"＋ Qualify new" — benchmark only models you've added, not the whole fleet.** Installing one model
+  no longer means an hour-long full re-run to re-learn what you already know. A **merge-scan**
+  discovers newly-installed models while preserving every existing score (`merge_catalogue` /
+  `scan_fleet(merge=True)`, vs. the full run's clear-then-rebuild), then only the unranked models
+  (`quality is None`) are benchmarked (`brain.qualify_new_models`, `POST /api/fleet/benchmark/new`).
+  A new Fleet-tab button runs it on the same live board; finds nothing → says so.
 - **Interactive "Your champions" + a tidier Fleet tab.** The tournament Finals is now a per-role
   **picker**: each role is a dropdown of its eligible models, defaulting to the recommendation;
   changing one pins the role immediately. **Council** shows as the whole eligible pool (multi-model

@@ -472,6 +472,41 @@ def test_vision_role_admits_a_model_that_sees_but_cannot_ocr() -> None:
         "vision 0.00 < 0.40"   # sees nothing → barred
 
 
+def test_merge_catalogue_preserves_scores_and_reconciles(db_path: str) -> None:
+    # "Qualify new models" adds the new without re-scoring the known: a merge-scan keeps existing
+    # benchmark scores, refreshes discovery fields, adds new (unscored) models, and drops gone ones.
+    # (replace_catalogue, by contrast, zeroes every score — for a from-scratch full run.)
+    from mimir.storage.gateway import StorageGateway
+    from mimir.storage.models import CatalogueEntry
+    from mimir.storage.repo import (
+        list_catalogue,
+        merge_catalogue,
+        replace_catalogue,
+        update_catalogue_scores,
+    )
+
+    node = "http://127.0.0.1:11434"
+    sg = StorageGateway(db_path)
+    try:
+        replace_catalogue(sg, [
+            CatalogueEntry(node=node, model="scored:7b", family="x", params_b=7.0, scanned_at=1.0),
+            CatalogueEntry(node=node, model="gone:3b", family="x", params_b=3.0, scanned_at=1.0),
+        ])
+        update_catalogue_scores(sg, "scored:7b", quality=0.9, talk=1.0, tools=1.0, code=1.0,
+                                coherence=None, discipline=1.0, epistemics=1.0, reasoning=1.0)
+        merge_catalogue(sg, [   # scored:7b stays (refreshed), gone:3b drops, new:8b is added
+            CatalogueEntry(node=node, model="scored:7b", family="x", params_b=7.0, scanned_at=2.0),
+            CatalogueEntry(node=node, model="new:8b", family="x", params_b=8.0, scanned_at=2.0),
+        ])
+        cat = {e.model: e for e in list_catalogue(sg)}
+        assert set(cat) == {"scored:7b", "new:8b"}    # uninstalled model dropped, new one added
+        assert cat["scored:7b"].quality == 0.9        # score PRESERVED across the merge
+        assert cat["scored:7b"].scanned_at == 2.0     # discovery field refreshed
+        assert cat["new:8b"].quality is None          # new model unscored: "qualify new" targets it
+    finally:
+        sg.close()
+
+
 def test_node_vision_skips_non_http_nodes() -> None:
     # Vision is per-node (an identical model file reads images under one Ollama version but mangles
     # them under another — a runtime regression), so the benchmark probes vision per node and takes

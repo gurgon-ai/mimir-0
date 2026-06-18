@@ -357,6 +357,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._scan_fleet())
             elif route == "/api/fleet/benchmark":
                 self._send_json(self._benchmark_fleet(body))
+            elif route == "/api/fleet/benchmark/new":
+                self._send_json(self._qualify_new(body))
             elif route == "/api/fleet/benchmark/council":
                 self._send_json(self._benchmark_council())
             elif route == "/api/fleet/tournament/start":
@@ -716,6 +718,20 @@ class _Handler(BaseHTTPRequestHandler):
             max_params_b=cap, min_params_b=floor, latency_budget_s=latency,
             progress=p, on_result=r, on_done=d,
         ))
+
+    def _qualify_new(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Benchmark ONLY models not yet ranked (merge-scan that preserves existing scores). Same
+        optional scope fields as the full benchmark; adding a model no longer means an hour re-run."""
+        cap = float(body["max_model_size_b"]) if body.get("max_model_size_b") not in (None, "") else None
+        floor = float(body["min_model_size_b"]) if body.get("min_model_size_b") not in (None, "") else None
+        latency = float(body["max_latency_s"]) if body.get("max_latency_s") not in (None, "") else None
+        return self._run_benchmark_bg(
+            lambda p, r, d: self.server.brain.qualify_new_models(
+                max_params_b=cap, min_params_b=floor, latency_budget_s=latency,
+                progress=p, on_result=r, on_done=d,
+            ),
+            scanning="finding newly-installed models…",
+        )
 
     def _benchmark_council(self) -> dict[str, Any]:
         """Grade the council pool — the big models above the chat cap, caps off — in place (no
@@ -1584,6 +1600,7 @@ _HTML = """<!doctype html>
       <div class="row" style="margin-top:6px;">
         <button class="secondary" id="fleetScanBtn" type="button" title="List what models are installed on each node. Fast — runs no models.">1 · Find models</button>
         <button class="secondary" id="fleetBenchBtn" type="button" title="Run each model through the test battery to score it. Slow — this is the expensive step.">2 · Benchmark</button>
+        <button class="secondary" id="fleetQualifyNewBtn" type="button" title="Score only models you've added since the last run — keeps every existing score (no full re-run). Use after installing a new model.">＋ Qualify new</button>
         <button class="secondary" id="fleetMatrixBtn" type="button" title="The time trial: speed-test each qualified model on every node it's installed on but not yet timed, so we know which edge can run what (the background-worker map). Records even slow results. Disabled while a benchmark/tournament is running.">3 · Speed-test</button>
         <button class="secondary" id="fleetApplyBtn" type="button" title="Point each role at its top-scoring model from the benchmark.">4 · Apply best</button>
       </div>
@@ -3091,13 +3108,14 @@ $("fleetScanBtn").addEventListener("click", async () => {
 let _benchPolling = false;
 async function pollBenchmark() {
   if (_benchPolling) return;
-  _benchPolling = true; $("fleetBenchBtn").disabled = true; btnState("fleetBenchBtn", "working"); setMatrixEnabled(false);
+  _benchPolling = true; $("fleetBenchBtn").disabled = true; btnState("fleetBenchBtn", "working");
+  $("fleetQualifyNewBtn").disabled = true; setMatrixEnabled(false);
   try {
     while (true) {
       const s = await api("GET", "/api/fleet/benchmark/status");
-      if (s.error) { $("fleetMsg").textContent = "Benchmark error: " + s.error; btnState("fleetBenchBtn", "failed"); break; }
+      if (s.error) { $("fleetMsg").textContent = "Benchmark error: " + s.error; btnState("fleetBenchBtn", "failed"); btnState("fleetQualifyNewBtn", "failed"); break; }
       if (s.done || !s.running) {
-        btnState("fleetBenchBtn", "done");
+        btnState("fleetBenchBtn", "done"); btnState("fleetQualifyNewBtn", "done");
         if (s.benchmarked !== undefined) {   // a finished run (not just the idle initial state)
           const skips = [];
           if (s.skipped_too_big) skips.push(`${s.skipped_too_big} too large`);
@@ -3121,7 +3139,7 @@ async function pollBenchmark() {
       await new Promise(r => setTimeout(r, 1500));
     }
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
-  _benchPolling = false; $("fleetBenchBtn").disabled = false; setMatrixEnabled(true);
+  _benchPolling = false; $("fleetBenchBtn").disabled = false; $("fleetQualifyNewBtn").disabled = false; setMatrixEnabled(true);
 }
 
 $("fleetBenchBtn").addEventListener("click", async () => {
@@ -3132,6 +3150,16 @@ $("fleetBenchBtn").addEventListener("click", async () => {
     await api("POST", "/api/fleet/benchmark", scope);   // returns immediately; runs in the background
     pollBenchmark();
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; btnState("fleetBenchBtn", "failed"); }
+});
+
+$("fleetQualifyNewBtn").addEventListener("click", async () => {
+  $("fleetMsg").textContent = "Finding newly-installed models…"; btnState("fleetQualifyNewBtn", "working");
+  _benchBoardClosed = false;
+  try {
+    const scope = { min_model_size_b: $("benchMinSize").value, max_model_size_b: $("benchMaxSize").value, max_latency_s: $("benchMaxLatency").value };
+    await api("POST", "/api/fleet/benchmark/new", scope);   // returns immediately; runs in the background
+    pollBenchmark();
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; btnState("fleetQualifyNewBtn", "failed"); }
 });
 
 $("fleetTourneyBtn").addEventListener("click", async () => {
