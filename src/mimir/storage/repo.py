@@ -808,7 +808,7 @@ def delete_triples(gateway: StorageGateway, ids: list[int]) -> int:
 _C_SELECT = (
     "node, model, family, params_b, quantization, context_length, capabilities, "
     "return_time, quality, scanned_at, talk, tools, code, coherence, discipline, epistemics, "
-    "reasoning"
+    "reasoning, vision"
 )
 # Scan only sets discovery fields; benchmark scores (talk/tools/code/coherence/return_time/quality)
 # are filled later by update_catalogue_scores.
@@ -855,6 +855,7 @@ def update_catalogue_scores(
     discipline: float | None = None,
     epistemics: float | None = None,
     reasoning: float | None = None,
+    vision: float | None = None,
 ) -> None:
     """Write the **node-independent** scores (quality + capability dims) to every catalogue row of a
     model. ``return_time`` is **per-node** — it belongs to ``update_catalogue_speed`` and is written
@@ -864,9 +865,9 @@ def update_catalogue_scores(
 
     def _write(conn: sqlite3.Connection) -> None:
         cols = ["quality=?", "talk=?", "tools=?", "code=?",
-                "coherence=?", "discipline=?", "epistemics=?", "reasoning=?"]
+                "coherence=?", "discipline=?", "epistemics=?", "reasoning=?", "vision=?"]
         params: list[object] = [quality, talk, tools, code, coherence, discipline,
-                                epistemics, reasoning]
+                                epistemics, reasoning, vision]
         if return_time is not None:   # legacy/single-node callers may still set it model-wide
             cols.insert(0, "return_time=?")
             params.insert(0, return_time)
@@ -968,6 +969,7 @@ def list_catalogue(gateway: StorageGateway) -> list[CatalogueEntry]:
                 discipline=r["discipline"],
                 epistemics=r["epistemics"],
                 reasoning=r["reasoning"],
+                vision=r["vision"],
                 scanned_at=r["scanned_at"],
             )
             for r in rows
