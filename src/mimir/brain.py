@@ -2152,8 +2152,11 @@ class Mimir:
             return None, [], 0
         titles = {d.id: d.title for d in list_library_documents(self._storage)}
         text = render_claims(top, titles) or None
-        # Which composite page(s) those surfaced claims belong to → after-reply Load chips.
-        claim_pages = pages_for_claims(self._storage, [c.claim.id for c in top if c.claim.id])
+        # After-reply Load chips: only the composite page(s) of *clearly relevant* claims — a weak
+        # off-topic claim that merely cleared the recall floor shouldn't offer its book to load.
+        chip_floor = 0.6 * top[0].score
+        strong = [c.claim.id for c in top if c.claim.id and c.score >= chip_floor]
+        claim_pages = pages_for_claims(self._storage, strong)
         page_ids = {pid for pids in claim_pages.values() for pid in pids}
         page_titles = {p.id: p.title for p in list_library_pages(self._storage)}
         refs = [{"page_id": pid, "title": page_titles.get(pid, "")} for pid in sorted(page_ids)]
