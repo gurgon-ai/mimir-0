@@ -153,7 +153,7 @@ def test_is_approved_matches_families() -> None:
 
 def test_size_cap_and_outside_in_order(brain: Mimir) -> None:
     # mock fleet sizes: mock-a 3B, mock-b 8B, mock-c 27B. A 10B cap keeps only a + b.
-    result = brain.benchmark_fleet(only_approved=False, judge=False, max_params_b=10.0)
+    result = brain.benchmark_fleet(only_approved=False, max_params_b=10.0)
     assert {b.model for b in result.results} == {"mock-a", "mock-b"}  # mock-c (27B) skipped
     # outside-in order = biggest first, so mock-b (8B) is scored before mock-a (3B).
     assert result.results[0].model == "mock-b"
@@ -162,21 +162,21 @@ def test_size_cap_and_outside_in_order(brain: Mimir) -> None:
 def test_inverted_size_band_is_swapped_not_left_empty(brain: Mimir) -> None:
     # min > max is always a transposed pair — it must SWAP (to [3, 10]) and qualify the models in
     # that band, never dead-end with an empty run (the "0 eligible / empty round" bug).
-    result = brain.benchmark_fleet(only_approved=False, judge=False,
+    result = brain.benchmark_fleet(only_approved=False,
                                    max_params_b=3.0, min_params_b=10.0)
     assert {b.model for b in result.results} == {"mock-a", "mock-b"}  # 3B + 8B in [3,10]; 27B out
 
 
 def test_size_floor_excludes_tiny_models(brain: Mimir) -> None:
     # A 5B floor drops mock-a (3B) so it can't out-compete the bigger models on capable hardware.
-    result = brain.benchmark_fleet(only_approved=False, judge=False, min_params_b=5.0)
+    result = brain.benchmark_fleet(only_approved=False, min_params_b=5.0)
     assert {b.model for b in result.results} == {"mock-b", "mock-c"}  # mock-a (3B) under the floor
     assert result.skipped_too_small == 1
 
 
 def test_tournament_only_models_restricts_the_round(brain: Mimir) -> None:
     # A later tournament round re-tests only the survivors the user kept.
-    result = brain.benchmark_fleet(only_approved=False, judge=False, only_models={"mock-b"})
+    result = brain.benchmark_fleet(only_approved=False, only_models={"mock-b"})
     assert {b.model for b in result.results} == {"mock-b"}
     assert result.eligible == 1  # the round's pool is just the survivor
 
@@ -186,10 +186,9 @@ def test_tournament_triage_skips_the_framework_and_can_be_ephemeral(brain: Mimir
 
     # Triage (framework=False) runs the cheap dimensions only and, ephemeral, writes nothing.
     result = brain.benchmark_fleet(
-        only_approved=False, judge=True, framework=False, persist=False,
+        only_approved=False, framework=False, persist=False,
     )
     assert result.benchmarked == 3  # all three mock models triaged
-    assert all(b.coherence is None for b in result.results)  # judge skipped in triage
     # Ephemeral: the catalogue still has no scores (the scouting round didn't pollute it).
     assert all(e.quality is None for e in list_catalogue(brain._storage))
 
@@ -454,11 +453,9 @@ def test_per_node_speed_skips_non_url_nodes(brain: Mimir) -> None:
 
 
 def test_benchmark_fleet_writes_scores(brain: Mimir) -> None:
-    # mock fleet families (alpha/beta/gamma) aren't on the allowlist → benchmark all; mock judges
-    # can't return a number, so the canary fails and coherence is skipped (judges_ok False).
-    result = brain.benchmark_fleet(only_approved=False, judge=True, limit=8)
+    # mock fleet families (alpha/beta/gamma) aren't on the allowlist → benchmark all.
+    result = brain.benchmark_fleet(only_approved=False, limit=8)
     assert result.benchmarked == 3
-    assert result.judges_ok is False  # canary correctly distrusts the mock judges
     entries = list_catalogue(brain._storage)
     assert entries and all(e.quality is not None for e in entries)
     assert all(e.talk is not None for e in entries)  # capability scores written

@@ -4,10 +4,10 @@ This fills the catalogue's empty ``return_time`` + ``quality`` (and the capabili
 running each model through a short, cheapest-first battery:
 
 - a deterministic **capability "IQ test"** — *talk* (instruction following), *tools* (emit a valid
-  tool call), *code* (write parseable code). Zero judge cost; just checkable constraints.
-- a **coherence** pass scored by a panel of *other* models (the council-as-judge idea), guarded by
-  a **canary pair**: the judges must rank a known-good answer above a deliberately garbled one, or
-  the *qualifier itself* is untrusted and coherence is skipped (DESIGN §4 — never a silent pass).
+  tool call), *code* (parseable code), *reasoning*, *discipline*, *epistemics*, *vision*. Every
+  dimension is a checkable constraint (regex/exact/probe) that genuinely separates models — no judge
+  pass (the old peer-judged *coherence* was dropped: it duplicated *epistemics* and, on a vague 0–1
+  scale, every model landed mid-range, so it discriminated nothing).
 
 Quality is the aggregate of whatever scores were obtained; speed is the average call time. An
 approved-family allowlist is the floor (the README recommends families); everything else still
@@ -85,7 +85,6 @@ def _measure_turn_latency(chat_fn: Callable[[list[Message]], str]) -> float | No
 APPROVED_FAMILIES = ("llama", "qwen", "gemma", "mistral", "phi", "command-r", "deepseek")
 
 _NUMBERED_RE = re.compile(r"^\s*\d+[.)]")
-_SCORE_RE = re.compile(r"(\d*\.?\d+)")
 
 
 def is_approved(family: str) -> bool:
@@ -126,16 +125,6 @@ def _defines_function(code: str, name: str) -> bool:
     except SyntaxError:
         return False
     return any(isinstance(n, ast.FunctionDef) and n.name == name for n in ast.walk(tree))
-
-
-def _parse_score(text: str) -> float | None:
-    match = _SCORE_RE.search(text)
-    if not match:
-        return None
-    try:
-        return max(0.0, min(1.0, float(match.group(1))))
-    except ValueError:
-        return None
 
 
 # -- the capability battery (deterministic) -------------------------------------------
@@ -346,54 +335,6 @@ def score_capability(chat_fn: ChatFn, capability: str) -> float:
     return passed / len(cases)
 
 
-# -- coherence (judged, with a canary) ------------------------------------------------
-
-# Invented facts, so a model must use the *context*, not its training knowledge.
-_CTX = "Fact: the Ariko river flows north through the village of Temb and freezes solid in winter."
-_Q = "Which direction does the Ariko river flow, and what happens to it in winter?"
-_GOOD = "The Ariko river flows north, and in winter it freezes solid."
-_GARBLED = "The Ariko river flows south into a warm sea and stays tropical and ice-free all year."
-
-
-def judge_coherence(model: ModelGateway, answer: str, *, max_judges: int = 3) -> float | None:
-    """Panel of other models rate an answer's faithfulness to the context (None if unscorable)."""
-    judges = [m for m in model.available_models() if "embed" not in m.lower()][:max_judges]
-    if not judges:
-        return None
-    prompt = (
-        f"Context:\n{_CTX}\n\nQuestion: {_Q}\n\nAnswer to grade:\n{answer}\n\n"
-        "Rate how faithful the answer is to the context and free of invented details. "
-        "Respond with ONLY a number from 0.0 to 1.0."
-    )
-    scores: list[float] = []
-    for judge in judges:
-        try:
-            out = model.chat_with_model(judge, [{"role": "user", "content": prompt}])
-        except Exception:
-            continue
-        val = _parse_score(out)
-        if val is not None:
-            scores.append(val)
-    return sum(scores) / len(scores) if scores else None
-
-
-def judges_trustworthy(model: ModelGateway) -> bool:
-    """Canary: the panel must rank a known-good answer above a garbled one (DESIGN §4)."""
-    good = judge_coherence(model, _GOOD)
-    bad = judge_coherence(model, _GARBLED)
-    if good is None or bad is None:
-        return False
-    ok = good > bad
-    if not ok:
-        log.error(
-            "benchmark: CANARY INVERTED — judges scored garbled (%.2f) >= good (%.2f); "
-            "coherence scoring is untrusted and skipped",
-            bad,
-            good,
-        )
-    return ok
-
-
 # -- per-model + fleet ----------------------------------------------------------------
 
 
@@ -406,7 +347,6 @@ class ModelBenchmark:
     discipline: float
     epistemics: float
     reasoning: float
-    coherence: float | None
     vision: float | None        # empirical image-probe score; None = not tested (no probe image)
     return_time: float | None   # None = probe failed/unmeasured (NOT fast — see measurement)
     quality: float
@@ -415,7 +355,6 @@ class ModelBenchmark:
 @dataclass(slots=True)
 class FleetBenchmarkResult:
     benchmarked: int
-    judges_ok: bool
     results: list[ModelBenchmark]
     eligible: int = 0          # approved, non-embedding models in the catalogue (any size)
     skipped_too_big: int = 0   # eligible models skipped because they exceed max_params_b
@@ -424,10 +363,10 @@ class FleetBenchmarkResult:
 
 
 def benchmark_model(
-    model: ModelGateway, model_name: str, *, judge: bool = True, num_ctx: int = 8192,
+    model: ModelGateway, model_name: str, *, num_ctx: int = 8192,
     framework: bool = True, call_timeout_s: float = 60.0, node: str | None = None,
 ) -> ModelBenchmark:
-    """Run the battery against one model. ``judge=False`` skips the coherence pass.
+    """Run the battery against one model.
 
     Every battery/epistemics/latency call routes through ``chat_fn``, which pins ``num_ctx`` so the
     layered epistemic prompts aren't truncated to Ollama's 2048 default (which would cut off the
@@ -437,31 +376,40 @@ def benchmark_model(
 
     ``framework=False`` is the tournament's **triage** mode: it runs only the cheap capability
     dimensions (talk/tools/code/discipline/reasoning + latency) and SKIPS the expensive
-    identity-qualification work — the multi-sample 8k-ctx epistemic gauntlet and the judge panel —
-    so a model about to be vetoed isn't dragged through the gauntlet. The survivors then get the
-    full benchmark in a later round. ``quality`` is the mean of whatever dimensions actually ran, so
-    a triage score is comparable only to other triage scores (not to a full score).
+    identity-qualification work — the multi-sample 8k-ctx epistemic gauntlet — so a model about to
+    vetoed isn't dragged through the gauntlet. The survivors then get the full benchmark in a later
+    round. ``quality`` is the mean of whatever dimensions actually ran, so a triage score is
+    comparable only to other triage scores (not to a full score).
+
+    The single-answer dims (talk/tools/code/reasoning/vision) are scored at **temperature 0**
+    (greedy) so a near-tied model isn't flipped to a worse score by an unlucky high-temperature draw
+    — they have ONE right answer, so greedy IS the capability. ``discipline``/``epistemics`` keep
+    the role/default temperature on purpose: their signal is *consistency across sampled runs* (a
+    probabilistic tag-leak / repeated gauntlet), which a greedy single shot would erase.
     """
     # ``node`` pins the WHOLE battery to one warm node (direct provider, no pool/retry) so the
     # scheduler can run different models on different nodes at once without the pool re-routing a
     # model's calls mid-battery and thrashing VRAM. Without it (mock / single-local), route via the
-    # gateway as before. Coherence judging always uses the gateway pool (it needs OTHER models).
+    # gateway. ``make_chat(temp)`` builds a call fn at a given temperature (None = role/default).
     if node and node.startswith("http"):
         scorer = OllamaProvider(node, timeout=call_timeout_s)
         warmer = OllamaProvider(node, timeout=WARMUP_TIMEOUT_S)
 
-        def chat_fn(messages: list[Message]) -> str:
-            return scorer.chat(model_name, messages, {"num_ctx": num_ctx})
+        def make_chat(temp: float | None) -> ChatFn:
+            opts = ({"num_ctx": num_ctx} if temp is None
+                    else {"num_ctx": num_ctx, "temperature": temp})
+            return lambda messages: scorer.chat(model_name, messages, dict(opts))
 
         def _warm() -> None:
             warmer.chat(model_name, [{"role": "user", "content": "ok"}],
                         {"num_ctx": num_ctx, "max_tokens": 1})
     else:
-        def chat_fn(messages: list[Message]) -> str:
-            return model.chat_with_model(
-                model_name, messages,
-                params={"num_ctx": num_ctx, "__timeout_s__": call_timeout_s}, max_retries=0,
-            )
+        def make_chat(temp: float | None) -> ChatFn:
+            base: dict[str, object] = {"num_ctx": num_ctx, "__timeout_s__": call_timeout_s}
+            if temp is not None:
+                base["temperature"] = temp
+            return lambda messages: model.chat_with_model(
+                model_name, messages, params=dict(base), max_retries=0)
 
         def _warm() -> None:
             model.chat_with_model(
@@ -476,13 +424,16 @@ def benchmark_model(
     except Exception as exc:
         log.warning("benchmark: warmup call failed for %s: %s", model_name, exc)
 
-    talk = score_capability(chat_fn, "talk")
-    tools = score_capability(chat_fn, "tools")
-    code = score_capability(chat_fn, "code")
-    discipline = score_capability(chat_fn, "discipline")
+    chat_fn = make_chat(None)   # role/default temp — variance IS the signal (discipline/epistemics)
+    det = make_chat(0.0)        # greedy — verifiable single-answer dims, so luck can't flip them
+
+    talk = score_capability(det, "talk")
+    tools = score_capability(det, "tools")
+    code = score_capability(det, "code")
+    discipline = score_capability(chat_fn, "discipline")  # sampled at temp: catches stochastic leak
     # Reasoning: can it actually solve problems with verifiable answers (not just follow a format)?
     # This is what keeps quality from saturating near 1.0 for any fluent model (DESIGN §4).
-    reasoning = score_capability(chat_fn, "reasoning")
+    reasoning = score_capability(det, "reasoning")
     # Representative latency from one real-length generation (NOT the battery average): the battery
     # calls emit only a few tokens, so their round-trip is dominated by overhead and can't tell a
     # slow remote 12B from a snappy local 3B — which lets a big model look 'instant' and sweep even
@@ -495,23 +446,14 @@ def benchmark_model(
     # structured-arm competence (layered gauntlet + grounding + long-context) — the chat qualifier.
     epistemics = (score_epistemic_competence(chat_fn, samples=2, num_ctx=num_ctx)
                   if framework else 0.0)
-    coherence: float | None = None
-    if framework and judge:
-        try:
-            answer = chat_fn([{"role": "user", "content": f"Context:\n{_CTX}\n\n{_Q}"}])
-            coherence = judge_coherence(model, answer)
-        except Exception as exc:
-            log.warning("benchmark: coherence pass failed for %s: %s", model_name, exc)
 
-    # Vision: empirical image-probe capability. Informational (like coherence) — kept OUT of quality
-    # so a text-only model scoring ~0 isn't penalized on a dimension it never claimed.
-    vision = score_vision(chat_fn)
+    # Vision: empirical image-probe capability (greedy — a fixed-answer probe). Informational — kept
+    # OUT of quality so a text-only model scoring ~0 isn't penalized for a dim it never claimed.
+    vision = score_vision(det)
 
     scores = [talk, tools, code, discipline, reasoning]
     if framework:
         scores.append(epistemics)
-    if coherence is not None:
-        scores.append(coherence)
     quality = sum(scores) / len(scores)
     return ModelBenchmark(
         model=model_name,
@@ -521,7 +463,6 @@ def benchmark_model(
         discipline=discipline,
         epistemics=round(epistemics, 3),
         reasoning=round(reasoning, 3),
-        coherence=coherence,
         vision=round(vision, 3) if vision is not None else None,
         return_time=round(return_time, 3) if return_time is not None else None,
         quality=round(quality, 3),
@@ -632,7 +573,6 @@ def benchmark_fleet(
     limit: int = 8,
     max_params_b: float = 30.0,
     min_params_b: float = 0.0,
-    judge: bool = True,
     latency_budget_s: float = 0.0,
     num_ctx: int = 8192,
     only_models: set[str] | None = None,
@@ -707,9 +647,8 @@ def benchmark_fleet(
     test_budget = max(_DEFAULT_SKIP_S, latency_budget_s)   # "fast enough to bother testing here"
     call_timeout = 60.0   # hang protection per scoring call (no retries); NOT the latency cap
     no_viable: set[str] = set()   # installed only on nodes that couldn't run it — not a quality cut
-    log.info("benchmark: starting — %d model(s) to score (judge=%s, test budget %.0fs/turn)",
-             total, judge, test_budget)
-    judges_ok = judges_trustworthy(model) if judge else False
+    log.info("benchmark: starting — %d model(s) to score (test budget %.0fs/turn)",
+             total, test_budget)
     results: list[ModelBenchmark] = []
 
     # CONCURRENT: one worker per enabled http node (the worker is the node's VRAM lock — a node does
@@ -755,7 +694,7 @@ def benchmark_fleet(
         if lock:
             lock.acquire()
         try:
-            bench = benchmark_model(model, model_name, judge=judges_ok, num_ctx=num_ctx,
+            bench = benchmark_model(model, model_name, num_ctx=num_ctx,
                                     framework=framework, call_timeout_s=call_timeout, node=chosen)
         except Exception as exc:
             log.warning("benchmark: %s FAILED: %s", model_name, exc)
@@ -776,7 +715,7 @@ def benchmark_fleet(
                 # would stamp the chosen node's latency onto every node row and wreck the matrix).
                 update_catalogue_scores(
                     storage, model_name, quality=bench.quality,
-                    talk=bench.talk, tools=bench.tools, code=bench.code, coherence=bench.coherence,
+                    talk=bench.talk, tools=bench.tools, code=bench.code,
                     discipline=bench.discipline, epistemics=bench.epistemics,
                     reasoning=bench.reasoning, vision=bench.vision,
                 )
@@ -794,12 +733,11 @@ def benchmark_fleet(
         list(ex.map(_qualify, enumerate(models)))
 
     log.info(
-        "benchmark: scored %d of %d eligible; %d too big, %d too small, %d no viable node; "
-        "judges_ok=%s", len(results), len(eligible), len(too_big), len(too_small),
-        len(no_viable), judges_ok,
+        "benchmark: scored %d of %d eligible; %d too big, %d too small, %d no viable node",
+        len(results), len(eligible), len(too_big), len(too_small), len(no_viable),
     )
     return FleetBenchmarkResult(
-        benchmarked=len(results), judges_ok=judges_ok, results=results,
+        benchmarked=len(results), results=results,
         eligible=len(eligible), skipped_too_big=len(too_big),
         skipped_too_small=len(too_small), skipped_too_slow=len(no_viable),
     )

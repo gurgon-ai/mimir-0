@@ -672,7 +672,7 @@ class _Handler(BaseHTTPRequestHandler):
                 srv.bench_state.setdefault("results", []).append({
                     "model": b.model, "quality": b.quality, "talk": b.talk, "tools": b.tools,
                     "code": b.code, "discipline": b.discipline, "epistemics": b.epistemics,
-                    "reasoning": b.reasoning, "coherence": b.coherence, "vision": b.vision,
+                    "reasoning": b.reasoning, "vision": b.vision,
                     "return_time": b.return_time, "node": node,
                 })
 
@@ -683,7 +683,7 @@ class _Handler(BaseHTTPRequestHandler):
                 with srv.bench_lock:
                     srv.bench_state.update(
                         running=False, done=True, current="",
-                        benchmarked=result.benchmarked, judges_ok=result.judges_ok,
+                        benchmarked=result.benchmarked,
                         eligible=result.eligible, skipped_too_big=result.skipped_too_big,
                         skipped_too_small=result.skipped_too_small,
                         skipped_too_slow=result.skipped_too_slow,
@@ -856,7 +856,7 @@ class _Handler(BaseHTTPRequestHandler):
                 srv.tourney_state.setdefault("results", []).append({
                     "model": b.model, "quality": b.quality, "talk": b.talk, "tools": b.tools,
                     "code": b.code, "discipline": b.discipline, "epistemics": b.epistemics,
-                    "reasoning": b.reasoning, "coherence": b.coherence, "vision": b.vision,
+                    "reasoning": b.reasoning, "vision": b.vision,
                     "return_time": b.return_time, "node": node,
                 })
 
@@ -872,7 +872,7 @@ class _Handler(BaseHTTPRequestHandler):
                         min_params_b=scope.get("min_model_size_b"),
                         latency_budget_s=scope.get("max_latency_s"),
                         only_models=keep, framework=not triage, persist=not triage,
-                        judge=not triage, progress=_progress, on_result=_on_result,
+                        progress=_progress, on_result=_on_result,
                     )
                 with srv.tourney_lock:
                     srv.tourney_state.update(phase="awaiting_veto", current="")
@@ -1522,7 +1522,7 @@ _HTML = """<!doctype html>
       <details class="hint" style="margin-bottom:10px; border:1px solid #333; border-radius:6px; padding:6px 10px;">
         <summary style="cursor:pointer;">ℹ️ What these scores mean — <b>best for <em>this</em> system, not the world</b></summary>
         <div style="margin-top:6px; line-height:1.5;">
-          Mimir ranks models by <b>operational fitness for its own roles on your hardware</b> — not “best model overall.” A winner is the best model <b>for the system as built</b>, under this test battery, on your fleet — never a universal benchmark. Any installed model can compete (model-agnostic). Speed is <b>per-node and shifts with load</b>, so routing re-selects live. Coherence is <b>experimental</b> (a peer-review annotation, not a gate). And a narrow win isn’t a landslide.
+          Mimir ranks models by <b>operational fitness for its own roles on your hardware</b> — not “best model overall.” A winner is the best model <b>for the system as built</b>, under this test battery, on your fleet — never a universal benchmark. Any installed model can compete (model-agnostic). Speed is <b>per-node and shifts with load</b>, so routing re-selects live. And a narrow win isn’t a landslide.
         </div>
       </details>
       <div class="row">
@@ -2707,15 +2707,15 @@ function renderBenchResults(results, header) {
     if (la !== lb) return la ? -1 : 1;   // localhost group first
     return a.localeCompare(b);
   });
-  h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th><th>Epistemics</th><th>Coherence</th><th>Vis</th><th>Speed/turn</th></tr>";
+  h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th><th>Epistemics</th><th>Vis</th><th>Speed/turn</th></tr>";
   order.forEach(node => {
     const rows = groups[node].sort((a, b) => (b.quality || 0) - (a.quality || 0));
-    h += `<tr><td colspan="12" class="nodehdr">${shortNode(node)} · ${rows.length} model(s)</td></tr>`;
+    h += `<tr><td colspan="11" class="nodehdr">${shortNode(node)} · ${rows.length} model(s)</td></tr>`;
     rows.forEach((r, i) => {
       const rank = (best && r.model === best.model) ? "🏆" : _medal(i);
       h += `<tr class="${i === 0 ? "top" : ""}"><td>${rank}</td><td>${r.model}</td>`
         + `<td class="q">${_stars(r.quality)} <span style="color:#8a94a3; font-weight:400;">${(r.quality ?? 0).toFixed(2)}</span></td>`
-        + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td><td>${_emoji(r.epistemics)}</td><td>${_emoji(r.coherence)}</td><td>${_emoji(r.vision)}</td>`
+        + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td><td>${_emoji(r.epistemics)}</td><td>${_emoji(r.vision)}</td>`
         + `<td>${r.return_time != null ? r.return_time.toFixed(1) + "s" : "·"}</td></tr>`;
     });
   });
@@ -2746,7 +2746,7 @@ function renderPlacement(data) {
     const champ = off ? null : models.find(m => m.champion);
     h += `<div style="${off ? "opacity:0.45;" : ""}">`;
     h += `<div class="nodehdr" style="margin-top:14px;"><label style="cursor:pointer;" title="Use this machine in the fleet. Untick to exclude it from qualification + routing."><input type="checkbox" ${off ? "" : "checked"} onchange="toggleNodeFromView('${node}', this.checked)"> ${shortNode(node)}</label> · ${models.length} model(s)${off ? " — <b>disabled</b> (excluded)" : (champ ? ` · winner 🏆 <b>${champ.model}</b> (q${(champ.quality ?? 0).toFixed(2)} · ${champ.return_time != null ? champ.return_time.toFixed(1) + "s" : "·"})` : "")}</div>`;
-    h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Disc</th><th>Epis</th><th>Coh</th><th>Vis</th><th>Speed</th><th>Roles</th></tr>";
+    h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Disc</th><th>Epis</th><th>Vis</th><th>Speed</th><th>Roles</th></tr>";
     models.forEach(m => {
       const flag = (m.champion ? "🏆" : "") + (m.fastest ? "⚡" : "");
       const elig = (m.eligible_roles || []).join(", ");
@@ -2755,7 +2755,7 @@ function renderPlacement(data) {
       const barTitle = barEntries.map(([r, w]) => `${r}: ${w}`).join("; ");
       h += `<tr class="${m.champion ? "top" : ""}" style="${m.enabled ? "" : "opacity:0.5;"}"><td>${flag}</td><td>${m.model}</td>`
         + `<td class="q">${_stars(m.quality)} <span style="color:#8a94a3; font-weight:400;">${(m.quality ?? 0).toFixed(2)}</span></td>`
-        + `<td>${_emoji(m.talk)}</td><td>${_emoji(m.tools)}</td><td>${_emoji(m.code)}</td><td>${_emoji(m.reasoning)}</td><td>${_emoji(m.discipline)}</td><td>${_emoji(m.epistemics)}</td><td>${_emoji(m.coherence)}</td><td>${_emoji(m.vision)}</td>`
+        + `<td>${_emoji(m.talk)}</td><td>${_emoji(m.tools)}</td><td>${_emoji(m.code)}</td><td>${_emoji(m.reasoning)}</td><td>${_emoji(m.discipline)}</td><td>${_emoji(m.epistemics)}</td><td>${_emoji(m.vision)}</td>`
         + `<td>${m.return_time != null ? m.return_time.toFixed(1) + "s" : "·"}</td>`
         + `<td style="font-size:11px;"><span style="color:#7fd17f;">${elig}</span> <span style="color:#e0a0a0;" title="${barTitle}">${bars}</span></td></tr>`;
     });
@@ -2836,10 +2836,10 @@ function tourneyTable(results, showChecks, round) {
   const groups = {};
   results.forEach(r => { (groups[r.node || ""] = groups[r.node || ""] || []).push(r); });
   const order = Object.keys(groups).sort((a, b) => { const la = a.includes("127.0.0.1"), lb = b.includes("127.0.0.1"); if (la !== lb) return la ? -1 : 1; return a.localeCompare(b); });
-  const full = round >= 2;   // triage (round 1) didn't measure epistemics/coherence — hide those columns
-  const span = 10 + (full ? 2 : 0) + (showChecks ? 1 : 0);
+  const full = round >= 2;   // triage (round 1) didn't measure epistemics — hide that column
+  const span = 10 + (full ? 1 : 0) + (showChecks ? 1 : 0);
   let cols = `<th></th>${showChecks ? "<th>Keep</th>" : ""}<th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th>`;
-  if (full) cols += "<th>Epistemics</th><th>Coherence</th>";
+  if (full) cols += "<th>Epistemics</th>";
   cols += "<th>Vis</th><th>Speed/turn</th>";
   let h = `<table><tr>${cols}</tr>`;
   order.forEach(node => {
@@ -2852,7 +2852,7 @@ function tourneyTable(results, showChecks, round) {
       h += `<td>${r.model}</td>`
         + `<td class="q">${_stars(r.quality)} <span style="color:#8a94a3; font-weight:400;">${(r.quality ?? 0).toFixed(2)}</span></td>`
         + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td>`;
-      if (full) h += `<td>${_emoji(r.epistemics)}</td><td>${_emoji(r.coherence)}</td>`;
+      if (full) h += `<td>${_emoji(r.epistemics)}</td>`;
       h += `<td>${_emoji(r.vision)}</td><td>${r.return_time != null ? r.return_time.toFixed(1) + "s" : "·"}</td></tr>`;
     });
   });
@@ -2992,7 +2992,7 @@ async function pollBenchmark() {
           if (s.skipped_too_small) skips.push(`${s.skipped_too_small} too small`);
           if (s.skipped_too_slow) skips.push(`${s.skipped_too_slow} too slow`);
           const skipped = skips.length ? ` (${skips.join(", ")} skipped)` : "";
-          $("fleetMsg").textContent = `Benchmarked ${s.benchmarked || 0} of ${s.eligible || 0} eligible model(s)${skipped}` + (s.judges_ok ? "" : " — coherence judges untrusted") + ".";
+          $("fleetMsg").textContent = `Benchmarked ${s.benchmarked || 0} of ${s.eligible || 0} eligible model(s)${skipped}` + ".";
           const best = (s.results || []).slice().sort((a, b) => (b.quality || 0) - (a.quality || 0))[0];
           renderBenchResults(s.results, `✅ Benchmark complete — ${s.benchmarked || 0} scored${best ? `, top 🏆 ${best.model}` : ""}`);
         }

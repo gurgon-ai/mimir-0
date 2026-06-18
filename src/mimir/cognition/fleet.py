@@ -131,7 +131,6 @@ def _collapse_by_model(
                 "talk": entry.talk,
                 "tools": entry.tools,
                 "code": entry.code,
-                "coherence": entry.coherence,
                 "discipline": entry.discipline,
                 "epistemics": entry.epistemics,
                 "reasoning": entry.reasoning,
@@ -396,7 +395,7 @@ def placement_matrix(
             "model": e.model, "family": e.family, "params_b": e.params_b,
             "quality": e.quality, "talk": e.talk, "tools": e.tools, "code": e.code,
             "discipline": e.discipline, "epistemics": e.epistemics, "reasoning": e.reasoning,
-            "coherence": e.coherence, "return_time": e.return_time,  # THIS node's per-turn latency
+            "vision": e.vision, "return_time": e.return_time,  # THIS node's per-turn latency
             "enabled": e.model not in disabled,
         }
         eligible: list[str] = []
