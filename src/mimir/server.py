@@ -2718,18 +2718,21 @@ async function loadFleet() {
 async function resumeFleetWork() {
   try {
     const ms = await api("GET", "/api/fleet/matrix/status");
-    if (ms.running) pollMatrix();
+    if (ms.running) { pollMatrix(); return; }
     const bs = await api("GET", "/api/fleet/benchmark/status");
     if (bs.running) { _benchBoardClosed = false; pollBenchmark(); return; }
     const ts = await api("GET", "/api/fleet/tournament/status");
-    if (!ts.active) return;
-    // Lock the time trial only mid-tournament (a round running, or a veto pending that FIGHT resumes).
-    // At 'done' the tournament is terminal and the speed-test is the next step → leave it enabled.
-    const midTourney = ts.phase === "running" || ts.phase === "awaiting_veto";
+    // Lock the time trial ONLY mid-tournament (a round running, or a veto pending that FIGHT
+    // resumes). Otherwise — idle, benchmark done, or tournament 'done' — the speed-test is the next
+    // step, so ALWAYS resolve the button to enabled (it used to be left in whatever stuck state it
+    // had, which is why it stayed grey after a run).
+    const midTourney = ts.active && (ts.phase === "running" || ts.phase === "awaiting_veto");
     setMatrixEnabled(!midTourney);
-    _benchBoardClosed = false;
-    if (ts.phase === "running") pollTournament();   // re-attach the live poll
-    else renderTourney(ts);                          // awaiting_veto / done / error → re-show it
+    if (ts.active) {
+      _benchBoardClosed = false;
+      if (ts.phase === "running") pollTournament();   // re-attach the live poll
+      else renderTourney(ts);                          // awaiting_veto / done / error → re-show it
+    }
   } catch (e) { /* fleet endpoints unavailable (no backend) — nothing to resume */ }
 }
 
@@ -3195,6 +3198,9 @@ async function pollMatrix() {
           : (s.timed !== undefined ? `✓ Speed-test complete — timed ${s.timed} (model, node) pairing(s). Per-node times are now filled in.` : "✓ Speed-test done.");
         _setMatrixMsg(msg);
         loadFleet();
+        // Show the result: the per-node placement matrix is the speed-test's whole output, so open
+        // it — otherwise the run leaves no visible trace and you can't tell it happened.
+        showPlacement();
         break;
       }
       _setMatrixMsg(s.total ? `⏱ Speed-testing ${s.i}/${s.total}: ${s.current}… (slow edges can take 30–70s each)` : `⏱ ${s.current || "checking which pairings need timing"}…`);
