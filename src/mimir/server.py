@@ -1573,6 +1573,16 @@ _HTML = """<!doctype html>
         <span class="hint">minutes</span>
       </div>
 
+      <h2 style="margin-top:18px;">Context size</h2>
+      <div class="hint" style="margin-bottom:8px;">How big a window (KV cache) Mimir loads, and how
+        many unique facts it pushes into each prompt — the two move together. Bigger remembers more
+        per turn but uses more VRAM, so pick to fit your hardware. Changing it reloads the models at
+        the new window (and re-benchmarks at that size on the next run).</div>
+      <div class="field" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <select id="setContextSize"></select>
+        <span class="hint" id="setContextHint"></span>
+      </div>
+
       <button id="saveSleep" type="button">Save schedule</button>
       <span id="settingsMsg" class="hint" style="margin-left:10px;"></span>
       <h2 style="margin-top:18px;">Status</h2>
@@ -2631,6 +2641,18 @@ async function loadSleepTab() {
     $("setDeliberate").checked = !!s.deliberation_enabled;
     $("setInnerLife").checked = !!s.inner_life_enabled;
     $("setInnerCadence").value = Math.max(1, Math.round((s.inner_life_cadence_s || 300) / 60));
+    // Context-size slider: build the options from the server's presets, label each with its window.
+    const sizes = s.context_presets || {};
+    const labels = { small: "Small", medium: "Medium", large: "Large", xlarge: "X-Large" };
+    const sel = $("setContextSize"); sel.innerHTML = "";
+    ["small", "medium", "large", "xlarge"].forEach(k => {
+      if (!sizes[k]) return;
+      const o = document.createElement("option");
+      o.value = k;
+      o.textContent = `${labels[k]} — ${sizes[k].num_ctx.toLocaleString()} ctx · ~${sizes[k].budget_tokens.toLocaleString()} tok of facts`;
+      sel.appendChild(o);
+    });
+    sel.value = s.context_size || "medium";
   } catch (e) { $("settingsMsg").textContent = "error: " + e.message; }
   loadSleepStatus();
 }
@@ -2646,6 +2668,7 @@ $("saveSleep").addEventListener("click", async () => {
       deliberation_enabled: $("setDeliberate").checked,
       inner_life_enabled: $("setInnerLife").checked,
       inner_life_cadence_s: Math.max(60, Math.round(Number($("setInnerCadence").value || 5) * 60)),
+      context_size: $("setContextSize").value || "medium",
     }});
     $("settingsMsg").textContent = "Saved.";
     setTimeout(() => $("settingsMsg").textContent = "", 1500);

@@ -169,6 +169,23 @@ def test_settings_reject_bad_values(brain: Mimir) -> None:
         brain.update_settings({"bogus_key": "x"})
 
 
+def test_context_size_preset_applies(brain: Mimir) -> None:
+    # The slider moves the KV-cache window and how much context we push in, together.
+    import pytest
+
+    from mimir.errors import ConfigError
+    assert brain.settings()["context_size"] == "medium"          # default
+    assert brain.config.context_budget_tokens == 4096            # medium budget (applied on init)
+    brain.update_settings({"context_size": "large"})
+    assert brain.config.context_budget_tokens == 8192            # large budget
+    assert brain._model._op_num_ctx == 16384                     # large window injected into calls
+    if brain.config.backend:
+        assert brain.config.backend.benchmark_num_ctx == 16384   # qualify at the size we run
+    assert brain.settings()["context_presets"]["xlarge"]["num_ctx"] == 32768
+    with pytest.raises(ConfigError):
+        brain.update_settings({"context_size": "ginormous"})
+
+
 def test_timezone_setting_persists(brain: Mimir) -> None:
     # "UTC" is always offered (real zoneinfo list or the curated fallback when tzdata is absent),
     # so it is accepted and stored regardless of whether the host has a tz database.

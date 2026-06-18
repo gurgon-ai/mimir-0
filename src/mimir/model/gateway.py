@@ -42,6 +42,10 @@ class ModelGateway:
         # Models the user disabled — excluded from routing: a role pinned/auto'd to a disabled model
         # re-resolves to an enabled one, and disabled models drop out of fallback chains.
         self._disabled_models: set[str] = set()
+        # The operational KV-cache window (num_ctx) injected into EVERY chat call, so all callers of
+        # one warm model agree on the window (a different one forces an expensive reload). Driven by
+        # the brain's context-size setting; None = leave each role's configured num_ctx alone.
+        self._op_num_ctx: int | None = None
         if isinstance(provider, ProviderPool):
             self._pool = provider
         elif isinstance(provider, list):
@@ -139,6 +143,22 @@ class ModelGateway:
         user's pool toggles). A role pointing at one re-resolves to an enabled model."""
         self._disabled_models = set(names)
 
+    def set_operational_num_ctx(self, num_ctx: int | None) -> None:
+        """Set the KV-cache window injected into every chat call (the context-size slider). ``None``
+        leaves each role's configured ``num_ctx`` untouched."""
+        self._op_num_ctx = int(num_ctx) if num_ctx else None
+
+    def _with_op_ctx(self, role_params: dict[str, object],
+                     params: dict[str, object] | None) -> dict[str, object]:
+        """Merge params for a call: role config, then the operational num_ctx (overriding the role's
+        configured one so callers agree on the window), then any explicit per-call params win."""
+        merged: dict[str, object] = dict(role_params)
+        if self._op_num_ctx is not None:
+            merged["num_ctx"] = self._op_num_ctx
+        if params:
+            merged.update(params)   # an explicit per-call value (rare) still wins
+        return merged
+
     def _priority(self, role: str, override: Priority | None) -> Priority:
         if override is not None:
             return override
@@ -158,7 +178,7 @@ class ModelGateway:
         for a cheap draft pass).
         """
         models, role_params = self._ordered_models(role)
-        params = {**role_params, **params} if params else role_params
+        params = self._with_op_ctx(role_params, params)
         prio = self._priority(role, priority)
         node = self._role_nodes.get(role)
         last: ProviderError | None = None
@@ -181,7 +201,8 @@ class ModelGateway:
         Fallover to the next model happens only *before the first token* — once tokens have streamed
         we are committed (restarting would duplicate output), so a failure after that propagates.
         """
-        models, params = self._ordered_models(role)
+        models, role_params = self._ordered_models(role)
+        params = self._with_op_ctx(role_params, None)
         prio = self._priority(role, priority)
         node = self._role_nodes.get(role)
         last: ProviderError | None = None

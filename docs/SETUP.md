@@ -179,7 +179,9 @@ The template is fully commented. The essentials:
 - `[embeddings] mode = "endpoint"` to use the real embedder (or `"bootstrap"` to stay offline).
 - `[roles.chat|bake|reasoning|embed]` — one `model` per role, plus tuned params. **Keep `num_ctx`
   identical across roles that share a warm model**, or Ollama reloads the model (slow) — see
-  `DESIGN.md` §4.
+  `DESIGN.md` §4. (The UI's **Context-size slider** — Small / Medium / Large / X-Large, on the Sleep
+  tab — sets one operational `num_ctx` for *every* call plus how much context is assembled, so they
+  move together and stay consistent; it overrides these per-role `num_ctx` values when set.)
   - **What you must provide:** whatever chat LLM(s) you like for `chat`/`bake`/`reasoning`, **and at
     least one embedding model** for `embed` (when `[embeddings] mode = "endpoint"`). Set
     `model = "auto"` and Mimir **discovers and routes to** what's installed — chat roles pick the
@@ -492,7 +494,8 @@ mode = "bootstrap"              # "bootstrap" | "endpoint" | "degraded"
 dim = 256                       # bootstrap vector size (ignored in endpoint mode)
 
 [context]
-budget_tokens = 4096            # per-turn prompt budget for assembly + accounting
+budget_tokens = 4096            # per-turn prompt budget for assembly + accounting (the headless
+                               # default; the UI's Context-size slider overrides this live)
 
 [self_model]
 refresh_every = 5               # turns between self-model re-synthesis; 0 disables (seed only)
