@@ -128,9 +128,11 @@ from .storage.repo import (
     bump_procedure_uses,
     claims_for_document,
     claims_for_page,
+    delete_by_source,
     delete_forum_post,
     delete_forum_thread,
     delete_library_document,
+    delete_library_page,
     delete_memory,
     disabled_models,
     disabled_nodes,
@@ -1776,7 +1778,7 @@ class Mimir:
         folder = self._docs_folder()
         if folder is None:
             return {"folder": None, "ingested": [], "summarized": 0, "failed": [],
-                    "unsupported": []}
+                    "unsupported": [], "forgotten": []}
         ingested: list[str] = []
         failed: list[dict[str, str]] = []  # {name, error} — surfaced in the UI, not swallowed (§10)
         summarized = 0
@@ -1806,13 +1808,22 @@ class Mimir:
         unsupported = [f.name for f in folder.iterdir() if f.is_file()
                        and not f.name.startswith(".")
                        and f.suffix.lower() not in SUPPORTED_SUFFIXES] if folder.is_dir() else []
+        # Reverse cleanup: a previously-ingested file that's now gone gets fully forgotten (memories
+        # + library + composite + ledger), so deleting a file from the folder self-heals on scan.
+        forgotten: list[str] = []
+        for src in list(self._load_docs_ledger()):
+            if not Path(src).is_file():
+                self.forget_document(src)
+                forgotten.append(Path(src).name)
         if ingested or summarized:
             log.info("documents: ingested %d, summarized %d from %s",
                      len(ingested), summarized, folder)
         if failed:
             log.warning("documents: %d file(s) failed to ingest from %s", len(failed), folder)
+        if forgotten:
+            log.info("documents: forgot %d deleted file(s): %s", len(forgotten), forgotten)
         return {"folder": str(folder), "ingested": ingested, "summarized": summarized,
-                "failed": failed, "unsupported": unsupported}
+                "failed": failed, "unsupported": unsupported, "forgotten": forgotten}
 
     def documents(self) -> list[dict[str, Any]]:
         """The ingested-document 'wiki' for the UI: name, chunks, summary, when — newest first."""
@@ -1878,15 +1889,84 @@ class Mimir:
             if self._compile_composite(doc_id, path.stem):
                 composed += 1
         dropped = 0
-        for path_str in existing:  # a source file that vanished → drop the doc + cascade its claims
+        for path_str in existing:  # a source file that vanished → fully forget it (DB + memories)
             if path_str not in seen:
-                delete_library_document(self._storage, path_str)
+                self.forget_document(path_str)
                 dropped += 1
         if processed or dropped:
             log.info("library: %d doc(s) → %d claim(s), %d composite(s), dropped %d",
                      len(processed), total_claims, composed, dropped)
         return {"folder": str(folder), "documents": processed, "claims": total_claims,
                 "composed": composed, "dropped": dropped}
+
+    def _resolve_source(self, source: str) -> str:
+        """Map a UI identifier (resolved path, or a bare filename) to the canonical source key — the
+        one shared by memories.source / library_documents.path / the ledger. Prefers a known key."""
+        known = {d.path for d in list_library_documents(self._storage)}
+        known |= set(self._load_docs_ledger())
+        if source in known:
+            return source
+        for k in known:  # match by basename (the UI may show only the filename)
+            if Path(k).name == source:
+                return k
+        folder = self._docs_folder()
+        if folder is not None and (folder / source).exists():
+            return str((folder / source).resolve())
+        return str(Path(source).resolve()) if source else source
+
+    def forget_document(self, source: str, *, delete_file: bool = False) -> dict[str, Any]:
+        """Purge a document and everything derived from it: its document-tier memory chunks, its
+        library document + cited claims, any composite page(s) (DB row + Markdown file) left
+        orphaned, and the wiki ledger entry. Keyed by the shared source path. With ``delete_file``
+        the source file is removed too, so an idle scan won't re-ingest it. Idempotent — forgetting
+        an already-gone document is a clean no-op.
+
+        The single primitive behind both cleanup directions: the Library 'delete' button calls it
+        with ``delete_file=True``; the idle scans call it (no file delete) when a file has vanished.
+        """
+        src = self._resolve_source(source)
+        # Composite page(s) derived from this doc — captured before delete cuts the claim links.
+        page_ids: set[int] = set()
+        doc = {d.path: d for d in list_library_documents(self._storage)}.get(src)
+        if doc is not None and doc.id is not None:
+            claim_ids = [c.id for c in claims_for_document(self._storage, doc.id) if c.id]
+            for pids in pages_for_claims(self._storage, claim_ids).values():
+                page_ids.update(pids)
+
+        chunks = delete_by_source(self._storage, src)           # document-tier memory chunks
+        lib_docs = delete_library_document(self._storage, src)  # library doc + claims + page links
+        pages_removed = 0
+        for pid in page_ids:  # delete composites that this removal left with no remaining claims
+            if claims_for_page(self._storage, pid):
+                continue
+            page = get_library_page(self._storage, pid)
+            if page and page.path:
+                try:
+                    Path(page.path).unlink(missing_ok=True)
+                except OSError as exc:
+                    log.warning("forget: could not remove composite %s: %s", page.path, exc)
+            delete_library_page(self._storage, pid)
+            pages_removed += 1
+
+        ledger = self._load_docs_ledger()  # drop the wiki ledger entry (keyed by the source)
+        if src in ledger:
+            del ledger[src]
+            kv_set(self._storage, self._DOCS_LEDGER_KEY, json.dumps(ledger))
+
+        file_deleted = False
+        if delete_file:
+            try:
+                p = Path(src)
+                if p.is_file():
+                    p.unlink()
+                    file_deleted = True
+            except OSError as exc:
+                log.warning("forget: could not delete source file %s: %s", src, exc)
+
+        log.info("forget: %s — %d chunk(s), %d lib doc, %d page(s), file_deleted=%s",
+                 Path(src).name, chunks, lib_docs, pages_removed, file_deleted)
+        return {"source": src, "memory_chunks": chunks, "library_doc": lib_docs,
+                "pages": pages_removed, "file_deleted": file_deleted}
 
     def _compile_composite(self, document_id: int, title: str) -> bool:
         """Synthesize a Markdown composite from a document's claims (the fuzzy understanding) and
@@ -2107,7 +2187,7 @@ class Mimir:
             "source_folder": self.config.documents_folder,
             "compose_folder": self.config.library_folder,
             "documents": [
-                {"id": d.id, "filename": d.filename, "title": d.title,
+                {"id": d.id, "filename": d.filename, "title": d.title, "path": d.path,
                  "size_bytes": d.size_bytes, "claims": counts.get(d.id, 0),
                  "ingested_at": d.ingested_at}
                 for d in docs

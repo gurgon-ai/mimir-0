@@ -178,8 +178,15 @@ writes a short summary per doc — the local "wiki"):
   the type must be supported (`.txt`/`.md` in core; `.pdf`/`.docx` need the `[documents]` extra —
   `pip install 'mimir-0[documents]'`).
 - `POST /api/documents/scan` — ingest any new/changed files dropped into the folder + fill summaries.
-  Returns `{folder, ingested:[name], summarized, failed:[{name,error}], unsupported:[name]}` —
-  per-file failures (e.g. a missing extra) and wrong-type drops are reported, never swallowed.
+  Returns `{folder, ingested:[name], summarized, failed:[{name,error}], unsupported:[name],
+  forgotten:[name]}` — per-file failures (e.g. a missing extra) and wrong-type drops are reported,
+  never swallowed; `forgotten` lists docs whose source file vanished and were auto-cleaned.
+- `POST /api/library/forget` `{"source": "<path or filename>", "delete_file": true}` — purge a
+  document and everything derived from it: its memory chunks, library document + cited claims,
+  composite page (row + Markdown file), and wiki ledger entry; `delete_file` also removes the source
+  file (so an idle scan won't re-ingest it). Idempotent. Returns
+  `{source, memory_chunks, library_doc, pages, file_deleted}`. The inverse also works on its own:
+  delete the file from the folder and the next scan auto-forgets it.
 - `GET /api/documents` — `{folder, folder_abs, folder_exists, documents:[{name, chunks, summary,
   ingested_at, source}]}`. `folder_abs` is the resolved absolute path (relative folders follow the
   server's working directory).

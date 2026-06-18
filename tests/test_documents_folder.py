@@ -59,7 +59,8 @@ def test_idle_scan_ingests_dropped_files_and_summarizes(docbrain: Mimir) -> None
 
 def test_no_folder_configured_is_a_quiet_noop(brain: Mimir) -> None:
     assert brain.ingest_pending_documents() == {
-        "folder": None, "ingested": [], "summarized": 0, "failed": [], "unsupported": []}
+        "folder": None, "ingested": [], "summarized": 0, "failed": [], "unsupported": [],
+        "forgotten": []}
 
 
 def test_unsupported_and_failed_files_are_reported_not_swallowed(docbrain: Mimir) -> None:

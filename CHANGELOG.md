@@ -107,6 +107,14 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **Delete a document and purge everything derived from it (two directions).** The Library tab now
+  lists each source document with a **🗑 delete** button (confirm: "Are you sure?") that calls one
+  `forget_document` primitive — removing the doc's memory chunks, its library document + cited claims,
+  the composite page (DB row + Markdown file), the wiki ledger entry, and the source file. The inverse
+  works on its own too: **just delete the file** from the drop folder and the next idle scan
+  reconciles and forgets it across every layer. Both keyed by the shared source path
+  (`memories.source` == `library_documents.path`); idempotent. (`POST /api/library/forget`; the docs
+  scan now also returns `forgotten:[…]`.)
 - **Chat renders short `**bold**` spans.** Gemma/Qwen lean on Markdown bold heavily; the chat showed
   the literal asterisks. The UI now turns a SHORT `**…**` span (≤10 words, no line break) into real
   bold and drops the asterisks, in both streamed and replayed (history) assistant messages. A long or

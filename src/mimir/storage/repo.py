@@ -1236,6 +1236,16 @@ def delete_library_document(gateway: StorageGateway, path: str) -> int:
     return gateway.submit(_write)
 
 
+def delete_library_page(gateway: StorageGateway, page_id: int) -> int:
+    """Drop a composite page and its claim links (the source claims/documents are untouched)."""
+    def _write(conn: sqlite3.Connection) -> int:
+        conn.execute("DELETE FROM library_page_claims WHERE page_id = ?", (page_id,))
+        cur = conn.execute("DELETE FROM library_pages WHERE id = ?", (page_id,))
+        return cur.rowcount
+
+    return gateway.submit(_write)
+
+
 def _row_to_claim(row: sqlite3.Row) -> LibraryClaim:
     return LibraryClaim(
         id=row["id"], document_id=row["document_id"], text=row["text"], locator=row["locator"],
