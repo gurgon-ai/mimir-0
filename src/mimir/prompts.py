@@ -113,6 +113,14 @@ DOC_SUMMARY_SYSTEM = (
     "the summary only."
 )
 
+# Turning an image into recallable text (the document-vision path): description + verbatim OCR.
+VISION_DESCRIBE_SYSTEM = (
+    "Describe this image so it can be searched and recalled later. State what it shows, then "
+    "TRANSCRIBE every piece of visible text VERBATIM (signs, labels, tables, handwriting) — "
+    "do not summarize or skip text. If it's a document page, reproduce its text in reading order. "
+    "Be factual; invent nothing not visible. Respond with the description only."
+)
+
 
 INNER_LIFE_MARKER = "a brief private reflection"
 INNER_LIFE_SYSTEM = (

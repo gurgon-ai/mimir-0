@@ -299,9 +299,20 @@ pulls a `lxml` binary wheel — no compiler needed.)
 > scan. The scan only ingests **new or changed** files (content-hashed), so an unchanged file already
 > ingested is correctly a no-op.
 >
-> **Text only — no OCR.** Extraction pulls the *typed text*; images, scanned pages, and diagrams are
-> ignored. An image-heavy PDF/DOCX (e.g. a scanned manual) can be megabytes yet yield little text.
-> Recall covers what was extracted, not what's locked in pictures.
+> **Text only — no OCR (for PDF/DOCX).** Text extraction pulls the *typed text*; images, scanned
+> pages, and diagrams inside a PDF/DOCX are ignored, so an image-heavy file can be megabytes yet yield
+> little text. **Standalone image files**, though, *do* ingest — see below.
+
+### Images (vision)
+
+Drop an image (`.png`/`.jpg`/`.jpeg`/`.webp`/`.gif`/`.bmp`) into the folder or upload it with the 📎,
+and the **`vision`-role model describes + transcribes it** (a verbatim-OCR-style read) into recallable
+document-tier text — so the system can answer about photos and scanned single images. This needs a
+**vision-capable model**: run a benchmark (the `vision` dimension determines capability *empirically*
+from a probe image, not advertised metadata), then leave `[roles.vision] = "auto"` to bind the best
+one, or pin a model. With no vision model, an image ingest **fails loud** (the Library tab shows
+whether a vision model is active). Toggle the whole behaviour with `[vision] describe_images`. *(OCR
+of image-only pages **inside** a PDF/DOCX is still TODO — this covers standalone images.)*
 
 The drop folder is **non-recursive** — files must sit directly in the folder, not in subdirectories.
 Relative folder paths resolve against the **server's working directory**; the Library tab shows the

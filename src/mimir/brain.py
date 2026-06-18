@@ -15,6 +15,7 @@ burst before assembling, so the latest note/identity is ready, without making th
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -56,9 +57,12 @@ from .cognition.identity import (
     render_anchors,
 )
 from .cognition.ingest import (
+    IMAGE_SUFFIXES,
     SUPPORTED_SUFFIXES,
     IngestResult,
     ingest_document,
+    ingest_text,
+    is_image,
     list_documents,
 )
 from .cognition.inner_life import (
@@ -109,7 +113,7 @@ from .model.pool import ProviderPool
 from .model.provider import Provider, is_embedding_model
 from .model.providers.mock import MockProvider
 from .model.providers.ollama import OllamaProvider
-from .prompts import DOC_SUMMARY_SYSTEM
+from .prompts import DOC_SUMMARY_SYSTEM, VISION_DESCRIBE_SYSTEM
 from .retrieval.hybrid import retrieve
 from .sanitize import StreamTagStripper, strip_epistemic_tags
 from .storage.gateway import StorageGateway
@@ -1732,19 +1736,61 @@ class Mimir:
         except (ValueError, TypeError):
             return {}
 
+    def _vision_model(self) -> str | None:
+        """The model currently bound to the `vision` role (a real model, not unresolved 'auto'), or
+        ``None`` — so the UI/ingest can tell whether images can be described."""
+        m = self._model.roles_view().get("vision")
+        return m if m and m != AUTO_MODEL else None
+
+    def _vision_available(self) -> bool:
+        """True when images can be ingested: the toggle is on AND a vision-role model is bound."""
+        return self.config.vision_describe_images and self._vision_model() is not None
+
+    def _describe_image(self, path: Path) -> str:
+        """Describe + transcribe an image with the vision-role model → recallable text. Raises
+        ``IngestError`` if no vision model is available or it returns nothing (fail loud, §10)."""
+        if not self._vision_available():
+            why = ("image description is turned off ([vision] describe_images)"
+                   if not self.config.vision_describe_images
+                   else "no vision model assigned (set [roles.vision] / run a benchmark)")
+            raise IngestError(f"cannot ingest image {path.name}: {why}")
+        b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+        try:
+            desc = self._model.chat(
+                "vision",
+                [{"role": "system", "content": VISION_DESCRIBE_SYSTEM,
+                  "images": [b64]}],
+            ).strip()
+        except Exception as exc:
+            raise IngestError(f"vision model failed on {path.name}: {exc}") from exc
+        if not desc:
+            raise IngestError(f"vision model returned no description for {path.name}")
+        return desc
+
     def _record_document(self, path: Path) -> IngestResult:
         """Ingest one document into recallable knowledge and record it in the wiki ledger. A changed
-        file drops its stale summary (regenerated lazily in the idle pass)."""
+        file drops its stale summary (regenerated lazily in the idle pass). An IMAGE is first
+        described + transcribed by the vision-role model, then that text is ingested."""
         start = time.time()
-        result = ingest_document(self._storage, self._embedder, path=path)
+        is_img = is_image(path)
+        if is_img:
+            description = self._describe_image(path)
+            result = ingest_text(self._storage, self._embedder, source=str(path.resolve()),
+                                 name=path.name, text=description, locator="image")
+        else:
+            result = ingest_document(self._storage, self._embedder, path=path)
         ledger = self._load_docs_ledger()
         entry = ledger.get(result.source, {})
         entry.update(
             name=path.name, hash=hashlib.sha256(path.read_bytes()).hexdigest(),
             chunks=result.chunks_written, ingested_at=time.time(),
-            ingest_seconds=round(time.time() - start, 1),  # chunk+embed cost, for the UI
+            ingest_seconds=round(time.time() - start, 1),  # describe/chunk/embed cost, for the UI
         )
-        entry.pop("summary", None)  # content changed → old summary is stale
+        # An image's vision description IS its summary (a re-summary would just re-extract nothing).
+        if is_img:
+            entry["summary"] = description[:300]
+        else:
+            entry.pop("summary", None)  # content changed → old summary is stale
         ledger[result.source] = entry
         kv_set(self._storage, self._DOCS_LEDGER_KEY, json.dumps(ledger))
         return result
@@ -1773,9 +1819,10 @@ class Mimir:
         if folder is None:
             raise ConfigError("no [documents] folder configured")
         safe = Path(filename).name  # strip any path components from the client
-        if not safe or Path(safe).suffix.lower() not in SUPPORTED_SUFFIXES:
+        allowed = SUPPORTED_SUFFIXES | IMAGE_SUFFIXES
+        if not safe or Path(safe).suffix.lower() not in allowed:
             raise IngestError(
-                f"unsupported document {filename!r}; allowed: {sorted(SUPPORTED_SUFFIXES)}"
+                f"unsupported document {filename!r}; allowed: {sorted(allowed)}"
             )
         folder.mkdir(parents=True, exist_ok=True)
         dest = folder / safe
@@ -2327,6 +2374,7 @@ class Mimir:
             "source_folder_abs": str(Path(folder).resolve()) if folder else None,
             "source_folder_exists": bool(folder) and Path(folder).is_dir(),
             "compose_folder": self.config.library_folder,
+            "vision_model": self._vision_model() if self.config.vision_describe_images else None,
             "documents": sorted(by_path.values(), key=lambda r: (r.get("filename") or "").lower()),
             "pages": [
                 {"id": p.id, "title": p.title, "summary": p.summary, "path": p.path,
