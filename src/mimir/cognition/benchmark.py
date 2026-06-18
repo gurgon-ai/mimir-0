@@ -745,6 +745,12 @@ def benchmark_fleet(
                 no_viable.add(model_name)
             return
 
+        if progress is not None:   # the model NOW entering scoring (not one that just finished)
+            with state_lock:
+                d = done_count
+            eta = (time.monotonic() - loop_start) / d * (total - d) if d else None
+            progress(d, total, model_name, eta)
+
         lock = node_locks.get(chosen) if chosen else None
         if lock:
             lock.acquire()
@@ -780,9 +786,6 @@ def benchmark_fleet(
                 if chosen and bench.return_time is not None:
                     update_catalogue_speed(storage, chosen, model_name, bench.return_time)
             results.append(bench)
-            if progress is not None:
-                eta = (time.monotonic() - loop_start) / done_count * (total - done_count)
-                progress(done_count, total, model_name, eta)
             if on_result is not None:
                 on_result(bench, chosen or (nodes_with.get(model_name) or [""])[0])
 
@@ -841,13 +844,15 @@ def complete_speed_matrix(
         nonlocal done
         node, models = item
         for m in models:
+            if progress is not None:   # the pairing NOW being timed (not the one just finished)
+                with state_lock:
+                    d = done
+                progress(d, total, f"{m} @ {node}")
             speed = _measure_node_speed(node, m, timeout_s=timeout_s, warmup=True, num_ctx=num_ctx)
             with state_lock:
                 done += 1
                 if speed is not None:
                     update_catalogue_speed(storage, node, m, speed)   # record even if slow
-                if progress is not None:
-                    progress(done, total, f"{m} @ {node}")
 
     with ThreadPoolExecutor(max_workers=max(1, len(pending)), thread_name_prefix="trial") as ex:
         list(ex.map(_worker, pending.items()))
