@@ -404,14 +404,27 @@ class _NodeUnreliable(BaseException):
 _NODE_FAIL_THRESHOLD = 3   # transport failures on one node → abandon it and fail over to another
 
 
+# Per-node cross-node vision probe budget (model load + a couple of short reads). BOUNDED so a slow
+# or cold node — or one whose Ollama times out on the image — can't turn the best-across-nodes pass
+# into a 10-minute hang. A working vision model reads the tiny probe in seconds once warm.
+_VISION_PROBE_TIMEOUT = 40.0
+
+
 def _node_vision(node: str, model_name: str, num_ctx: int) -> float | None:
     """Empirically probe ONLY vision for a model on one node (direct provider). Vision is per-node:
     a byte-identical model file reads images fine under one Ollama version and mangles them under
     another (a runtime regression), so the same model can score 1.0 on one node and 0.0 on another.
-    Returns the vision score, or None if the node can't be reached / has no probe image."""
+    Bounded by ``_VISION_PROBE_TIMEOUT``: warm the model first (skip the node if it can't load in
+    time), then run the short reads warm. Returns the vision score, or None if the node can't load
+    it in budget / has no probe image — so the caller just moves on, never a 10-minute stall."""
     if not node.startswith("http"):
         return None
-    provider = OllamaProvider(node, timeout=WARMUP_TIMEOUT_S)
+    provider = OllamaProvider(node, timeout=_VISION_PROBE_TIMEOUT)
+    try:   # warm into VRAM first; a node that can't load it in budget contributes nothing → skip
+        provider.chat(model_name, [{"role": "user", "content": "ok"}],
+                      {"num_ctx": num_ctx, "max_tokens": 1})
+    except Exception:
+        return None
 
     def det(messages: list[Message]) -> str:
         return provider.chat(model_name, messages,
@@ -832,12 +845,14 @@ def benchmark_fleet(
                     if node == used or best_vis >= 1.0:
                         continue
                     lock = node_locks.get(node)
-                    if lock:
-                        lock.acquire()
+                    # Best-effort: if the node is busy scoring another model, skip it rather than
+                    # block — vision is informational, and a later run settles it (DESIGN §5/§6).
+                    if lock is not None and not lock.acquire(timeout=10):
+                        continue
                     try:
                         v = _node_vision(node, model_name, num_ctx)
                     finally:
-                        if lock:
+                        if lock is not None:
                             lock.release()
                     if v is not None and v > best_vis:
                         best_vis = v

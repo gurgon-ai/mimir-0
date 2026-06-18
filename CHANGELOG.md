@@ -116,7 +116,10 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   (checked via `/api/show`, which is consistent across versions — the `/api/tags` capabilities the
   catalogue stores are not), the benchmark probes vision on its other nodes and records the **best**
   (stops at full). Text-only models are never probed (the projector check gates it), so it adds no
-  cost to the common case.
+  cost to the common case. The per-node probe is hard-bounded (`_VISION_PROBE_TIMEOUT`, warm-then-
+  read, skip a node that can't load in budget or is busy) so it can't stall — an early build let it
+  cold-load a multimodal model across four nodes at a 120s-per-call timeout, parking a *fast*
+  (3.3s/turn) model for ~10 minutes.
 - **A bad node no longer hangs a model's benchmark for 20 minutes — it fails fast and fails over.**
   A node can pass the quick speed probe yet hang the real battery (intermittent, or it loads a
   1-token warm but stalls on actual generation), so all ~12 scoring calls hit the per-call timeout in
