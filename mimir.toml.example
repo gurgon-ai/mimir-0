@@ -250,3 +250,9 @@ model = "auto"
 # [roles.council]
 # model = "llama3.1:8b"
 # temperature = 0.8
+
+# [roles.vision] is OPTIONAL — the model that reads images (for the image/document-vision path). With
+# "auto" it binds to the best model that PASSES the vision probe (empirically determined by the
+# benchmark, not advertised metadata); a fleet with no vision-capable model simply has no pick.
+[roles.vision]
+model = "auto"
