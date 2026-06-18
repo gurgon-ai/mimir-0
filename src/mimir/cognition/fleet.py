@@ -232,6 +232,23 @@ def recommend_roles(
     return recommendations
 
 
+def recommend_roles_detailed(
+    storage: StorageGateway, *, disabled: set[str] | None = None,
+    disabled_nodes: set[str] | None = None, max_candidates: int = 50,
+) -> dict[str, list[dict[str, Any]]]:
+    """Like ``recommend_roles`` but returns the FULL ranked list of role-eligible candidates per
+    role (best first) — the data behind an interactive per-role picker. The first entry is the
+    recommendation; ``council``'s list is every eligible model (the diverse pool the user staffs
+    adversarial reasoning from). Same gate/ranking as ``recommend_roles``, so the picker can't offer
+    a model the gate would bar."""
+    by_model = _collapse_by_model(storage, disabled or set(), disabled_nodes or set())
+    out: dict[str, list[dict[str, Any]]] = {}
+    for role, (_caps, prefer) in ROLE_NEEDS.items():
+        ranked = _rank_for_role(by_model, role)[:max_candidates]
+        out[role] = [_as_pick(name, data, prefer) for name, data in ranked]
+    return out
+
+
 def roster_for(
     storage: StorageGateway, role: str, *, n: int = 1,
     disabled: set[str] | None = None, disabled_nodes: set[str] | None = None,

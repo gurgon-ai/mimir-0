@@ -45,6 +45,7 @@ from .cognition.fleet import (
     fleet_report,
     placement_matrix,
     recommend_roles,
+    recommend_roles_detailed,
     resolve_auto_model,
     roster_for,
     scan_fleet,
@@ -495,6 +496,18 @@ class Mimir:
             if e.return_time is None or "embed" in e.model.lower():
                 continue
             out.setdefault(e.model, {})[e.node] = e.return_time
+        return out
+
+    def embed_placements(self) -> dict[str, list[dict[str, Any]]]:
+        """Per-(node, model) placements for EMBEDDING models — the embed role's pick list. The chat
+        placement matrix excludes embedders (they aren't chat models), so the embed role had nothing
+        to pick from even with an embedding model installed on every node. ``{model: [{node,
+        return_time}]}`` (return_time is usually None — embedders aren't speed-tested)."""
+        out: dict[str, list[dict[str, Any]]] = {}
+        for e in list_catalogue(self._storage):
+            if "embed" not in e.model.lower():
+                continue
+            out.setdefault(e.model, []).append({"node": e.node, "return_time": e.return_time})
         return out
 
     def node_health(self) -> dict[str, Any]:
@@ -2523,6 +2536,14 @@ class Mimir:
     def fleet_recommendations(self) -> dict[str, Any]:
         """Best model per role from the benchmarked catalogue (recommend-only; DESIGN §4)."""
         return recommend_roles(
+            self._storage, disabled=disabled_models(self._storage),
+            disabled_nodes=disabled_nodes(self._storage),
+        )
+
+    def role_candidates(self) -> dict[str, list[dict[str, Any]]]:
+        """Per-role ranked eligible candidates (best first) for the interactive Finals picker — so a
+        role can be overridden to any eligible model, with the recommendation pre-selected."""
+        return recommend_roles_detailed(
             self._storage, disabled=disabled_models(self._storage),
             disabled_nodes=disabled_nodes(self._storage),
         )
