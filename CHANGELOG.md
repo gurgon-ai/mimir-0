@@ -119,6 +119,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
 
 ### Fixed
+- **The full speed-test is now an automatic, visible phase of the benchmark/tournament — not a
+  skippable manual step.** The recommendation's speed term uses each model's *fastest known* node,
+  but the benchmark only timed the one node it scored each model on — so until every `(model, node)`
+  was timed, "fastest known" could be wrong (a node can be far faster than the one a model was scored
+  on). That timing lived behind a manual "3 · Speed-test" button that was easy to skip and left no
+  visible trace. Now scoring is followed by a **speed-test phase that times every remaining pairing**
+  (shown live as "⏱ Speed-testing every (model, node) pairing — i/total"), so the recommendation is
+  only computed once speeds are complete, and the per-node times then appear in the leaderboard's
+  **Speed** column. (The manual button remains for re-runs, e.g. after re-enabling a node.)
 - **"Apply best" / the tournament finals now survive a restart.** Applying roles changed only the
   in-memory config, so after a reboot the role silently reverted to its default while the
   recommendation still showed it — looked like the apply did nothing. Apply now persists each role as
