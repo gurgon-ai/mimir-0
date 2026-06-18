@@ -1298,7 +1298,7 @@ _HTML = """<!doctype html>
   header { flex:none; padding:12px 20px; border-bottom:1px solid #232a35; display:flex; align-items:center; gap:14px; }
   header h1 { font-size:18px; margin:0; letter-spacing:.5px; }
   header .status { font-size:12px; color:#8a94a3; }
-  main { display:grid; grid-template-columns: 1fr 360px; gap:0; flex:1; min-height:0; }
+  main { display:grid; grid-template-columns: 1fr 480px; gap:0; flex:1; min-height:0; }
   #chat { display:flex; flex-direction:column; border-right:1px solid #232a35; min-height:0; }
   /* The left column's scrolling region (chat log or a takeover view) — header + footer stay put. */
   #log, #benchBoard, #forumView, #graphView { min-height:0; }
@@ -1596,11 +1596,14 @@ _HTML = """<!doctype html>
         <button id="fleetTourneyBtn" type="button" title="The recommended path. A staged knock-out: Round 0 qualifying (fast) → you pick survivors → Round 1 the full framework gauntlet → Round 2 finals. You choose who advances between rounds.">🏆 Run qualifying tournament</button>
       </div>
       <div class="hint" style="margin-top:6px;">The recommended way to qualify your fleet — narrows it in rounds: <b>Round 0 · Qualifying</b> (fast) → <b>🥊 you keep the survivors</b> → <b>Round 1 · Framework gauntlet</b> (the real test) → <b>Round 2 · Finals</b>. (Round 3 · Vision is reserved.) The scoreboard takes over the chat pane.</div>
+      <div class="row" style="margin-top:8px;">
+        <button class="secondary" id="fleetQualifyNewBtn" type="button" title="Score only models you've added since the last run — keeps every existing score (no full re-run).">＋ Qualify new models</button>
+      </div>
+      <div class="hint" style="margin-top:4px;">Already qualified once? After adding a model, this scores <b>only the new ones</b> — every existing score is kept, no hour-long re-run.</div>
       <div class="hint" style="margin-top:14px; opacity:0.8;">— or do it manually, one step at a time —</div>
       <div class="row" style="margin-top:6px;">
         <button class="secondary" id="fleetScanBtn" type="button" title="List what models are installed on each node. Fast — runs no models.">1 · Find models</button>
         <button class="secondary" id="fleetBenchBtn" type="button" title="Run each model through the test battery to score it. Slow — this is the expensive step.">2 · Benchmark</button>
-        <button class="secondary" id="fleetQualifyNewBtn" type="button" title="Score only models you've added since the last run — keeps every existing score (no full re-run). Use after installing a new model.">＋ Qualify new</button>
         <button class="secondary" id="fleetMatrixBtn" type="button" title="The time trial: speed-test each qualified model on every node it's installed on but not yet timed, so we know which edge can run what (the background-worker map). Records even slow results. Disabled while a benchmark/tournament is running.">3 · Speed-test</button>
         <button class="secondary" id="fleetApplyBtn" type="button" title="Point each role at its top-scoring model from the benchmark.">4 · Apply best</button>
       </div>
