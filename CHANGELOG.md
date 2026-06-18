@@ -129,6 +129,11 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   active vision model (or "no vision model — images won't ingest"). New `ingest_text()` shares the
   chunk/embed/store path; `list_documents` now includes images. (Next/limit: still no OCR for
   image-only *pages inside* a PDF/DOCX — standalone images + photos work now.)
+- **Role-assignment dropdown colours models by benchmark status.** Once benchmarked, each model in
+  the Manual Role assignment picker is tinted: **green** if every scored dimension is ≥0.8, **yellow**
+  if any is 0.50–0.79, **red** if any failed (<0.5), and left **white** if not yet benchmarked — so
+  you can see at a glance which models are fully qualified for a role. (Vision is informational, so
+  it's excluded from the status.)
 - **Vision role + self-describing role assignment.** A new optional **`vision`** role (the model that
   reads images, for the upcoming image/document-vision path): `[roles.vision] = "auto"` binds the best
   model that *passes the vision probe* (gated on the `vision` score, ranked by quality) — a non-vision

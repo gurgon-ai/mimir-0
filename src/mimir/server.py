@@ -3134,6 +3134,18 @@ function renderRoleAssign(data) {
   // Models discovered live but not yet in the catalogue still get an "any node" option.
   (data.available || []).forEach(m => { byModel[m] = byModel[m] || []; });
   Object.values(active).forEach(v => { if (v && v !== "auto") byModel[v] = byModel[v] || []; });
+  // Benchmark status → option text colour: all dims ≥0.8 = green, any 0.5–0.79 = yellow, any <0.5 =
+  // red, not-yet-benchmarked = default (white). Vision is informational, so it's excluded here.
+  const statusColor = { green: "#7fd17f", yellow: "#e0c060", red: "#e0604a" };
+  const modelStatus = {};
+  (data.models || []).forEach(m => {
+    if (m.quality == null) return;   // untested → leave undefined → white text
+    const dims = [m.talk, m.tools, m.code, m.reasoning, m.discipline, m.epistemics]
+      .filter(v => v != null);
+    if (!dims.length) return;
+    const lo = Math.min(...dims);
+    modelStatus[m.model] = lo < 0.5 ? "red" : (lo < 0.8 ? "yellow" : "green");
+  });
   const roles = Object.keys(active);
   if (!roles.length) { wrap.innerHTML = '<div class="hint">No roles configured.</div>'; return; }
   const enc = (m, n) => JSON.stringify({ m, n });
@@ -3159,16 +3171,20 @@ function renderRoleAssign(data) {
       // No enabled node has this model → not routable. Hide it, unless it's the current pin (then
       // show it flagged so you can see why the role is failing and switch away).
       if (!nodes.length && m !== curModel) return;
+      const col = statusColor[modelStatus[m]] || "";   // benchmark status → text colour
       const grp = document.createElement("optgroup");
       grp.label = nodes.length ? m : `${m} (no enabled node — re-enable its machine)`;
+      if (col) grp.style.color = col;
       const any = document.createElement("option");
       any.value = enc(m, ""); any.textContent = `${m} · any node`;
+      if (col) any.style.color = col;
       if (!isAuto && m === curModel && !curNode) any.selected = true;
       grp.appendChild(any);
       nodes.slice().sort((a, b) => (a.t ?? 1e9) - (b.t ?? 1e9)).forEach(({ node, t }) => {
         const o = document.createElement("option");
         const ip = ipTag(node); const ts = (t != null) ? ` · ${t}s` : " · untimed";
         o.value = enc(m, node); o.textContent = `${m} · ${ip || node}${ts}`;
+        if (col) o.style.color = col;
         if (!isAuto && m === curModel && node === curNode) o.selected = true;
         grp.appendChild(o);
       });
