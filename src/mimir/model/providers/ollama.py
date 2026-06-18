@@ -32,6 +32,18 @@ class OllamaProvider:
         self._timeout = timeout
 
     def chat(self, model: str, messages: list[Message], params: dict[str, Any]) -> str:
+        return self.chat_timed(model, messages, params)[0]
+
+    def chat_timed(
+        self, model: str, messages: list[Message], params: dict[str, Any]
+    ) -> tuple[str, int, int]:
+        """Like :meth:`chat`, but also returns Ollama's ``eval_count`` (tokens generated) and
+        ``eval_duration`` (ns of *pure generation*, excluding model-load / VRAM-swap). Callers time
+        latency from these instead of wall-clock so a cold load can't masquerade as a slow model — a
+        fast MoE (gemma4:26b, 4B active, ~210 tok/s) caught mid swap was recording a fake ~38s/turn
+        and losing speed-weighted roles (DESIGN §4). Returns ``(content, eval_count,
+        eval_duration_ns)``; counts are 0 when Ollama omits them, so the caller can fall back to a
+        wall-clock estimate."""
         timeout, params = _split_timeout(params)
         think, opts = _split_think(params)
         payload = {
@@ -43,11 +55,12 @@ class OllamaProvider:
         }
         data = self._post("/api/chat", payload, timeout=timeout)
         try:
-            return str(data["message"]["content"])
+            content = str(data["message"]["content"])
         except (KeyError, TypeError) as exc:
             raise ProviderError(
                 f"unexpected /api/chat response shape from Ollama: {data!r}"
             ) from exc
+        return content, int(data.get("eval_count") or 0), int(data.get("eval_duration") or 0)
 
     def _tags(self) -> list[dict[str, Any]]:
         req = urllib.request.Request(f"{self._host}/api/tags", method="GET")

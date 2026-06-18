@@ -296,6 +296,30 @@ def test_failed_latency_probe_is_unmeasured_not_instant() -> None:
     assert _measure_turn_latency(lambda _m: "x" * 400) is not None
 
 
+def test_latency_uses_decode_throughput_not_wallclock() -> None:
+    # The bug: latency timed WALL-CLOCK (load + prompt-eval + decode), so a fast MoE caught mid
+    # VRAM-swap recorded a fake ~38s/turn and lost speed-weighted roles to a slower dense model.
+    # The fix: when Ollama reports eval_count/eval_duration, latency is PURE decode throughput
+    # (256 / TPS), immune to load time — and identical whether the sample was 64 or 600 tokens.
+    from mimir.cognition.benchmark import _measure_turn_latency, _throughput_seconds
+
+    # 200 tokens decoded in 1.0s of generation → 200 TPS → 256/200 = 1.28 s/turn, regardless of
+    # how long the wall-clock call took (cold load is excluded).
+    assert _throughput_seconds(200, 1_000_000_000) == 1.28
+    assert _throughput_seconds(0, 1_000_000_000) is None      # no tokens → unusable → None
+    assert _throughput_seconds(200, 0) is None                # no duration → unusable → None
+
+    # timed_fn supplies (text, eval_count, eval_duration_ns): the result reflects the decode metric,
+    # NOT the (here trivial) wall-clock of the in-process lambda.
+    def timed(_messages: list) -> tuple[str, int, int]:
+        return ("treated water " * 50, 200, 1_000_000_000)
+
+    assert _measure_turn_latency(lambda _m: "ignored", timed) == 1.28
+    # No metrics (eval_count=0, the mock/gateway path) → falls back to a wall-clock estimate, but
+    # still returns a measured number rather than crashing.
+    assert _measure_turn_latency(lambda _m: "x" * 400, lambda _m: ("x" * 400, 0, 0)) is not None
+
+
 def test_placement_matrix_shows_each_model_on_every_node_with_a_winner(db_path: str) -> None:
     # The placement matrix must list a model under EVERY node it runs on (with that node's speed),
     # unlike the results board (one row per model on its test node), and crown each node's winner.
@@ -394,6 +418,64 @@ def test_council_roster_favors_family_diversity_over_raw_ranking(db_path: str) -
         assert {"qwen-b", "qwen-c"} <= bench_models
     finally:
         sg.close()
+
+
+def test_council_admits_yellow_models_above_a_light_reasoning_floor() -> None:
+    # Council is diversity-first (DESIGN §5a): it admits EVERY yellow/green model (quality >= 0.50)
+    # that can reason AT ALL — a LIGHT reasoning floor (0.25), not the full 0.50 the identity roles
+    # use. So a yellow model that reasons weakly (0.33) is IN, one that essentially can't (0.17) is
+    # OUT, and a sub-yellow model is still barred by the quality cap.
+    from mimir.cognition.fleet import _ROLE_FLOORS, ROLE_NEEDS, _bar_reason
+
+    caps, floors = ROLE_NEEDS["council"][0], _ROLE_FLOORS["council"]
+    assert _bar_reason({"quality": 0.66, "reasoning": 0.33}, caps, floors) is None  # in
+    assert _bar_reason({"quality": 0.66, "reasoning": 0.17}, caps, floors) == \
+        "reasoning 0.17 < 0.25"   # can't reason at all → out
+    assert _bar_reason({"quality": 0.40, "reasoning": 1.0}, caps, floors) == \
+        "quality 0.40 < 0.50"     # not yellow → out
+    # The identity roles are unaffected — they keep the full 0.50 reasoning floor.
+    assert _bar_reason({"quality": 0.66, "discipline": 1.0, "epistemics": 1.0, "reasoning": 0.33},
+                       ROLE_NEEDS["chat"][0], _ROLE_FLOORS.get("chat")) == "reasoning 0.33 < 0.50"
+
+
+def test_vision_role_admits_a_model_that_sees_but_cannot_ocr() -> None:
+    # Vision is capability DETECTION, not a quality scale: passing ANY vision case (e.g. counting
+    # the shapes, 0.4) proves sight, so the vision role admits it — a model that sees but can't OCR
+    # the pseudoword must NOT be barred. Only a model that sees nothing (0.0) is barred from vision.
+    from mimir.cognition.fleet import _ROLE_FLOORS, ROLE_NEEDS, _bar_reason
+
+    caps, floors = ROLE_NEEDS["vision"][0], _ROLE_FLOORS["vision"]
+    assert _bar_reason({"quality": 0.7, "vision": 0.4}, caps, floors) is None   # counts → sees
+    assert _bar_reason({"quality": 0.7, "vision": 0.6}, caps, floors) is None   # OCR → sees
+    assert _bar_reason({"quality": 0.7, "vision": 0.0}, caps, floors) == \
+        "vision 0.00 < 0.40"   # sees nothing → barred
+
+
+def test_catalogue_speeds_reports_every_node_a_model_runs_on(brain: Mimir) -> None:
+    # The leaderboard shows a model's speed on EVERY node it's timed on (quality scored once, speed
+    # per node). catalogue_speeds is that map: one model, both nodes' speeds; embed models excluded.
+    from mimir.storage.models import CatalogueEntry
+    from mimir.storage.repo import (
+        replace_catalogue,
+        update_catalogue_scores,
+        update_catalogue_speed,
+    )
+
+    n1, n2 = "http://127.0.0.1:11434", "http://192.168.2.50:11434"
+    replace_catalogue(brain._storage, [
+        CatalogueEntry(node=n1, model="dup:7b", family="qwen", params_b=7.0, scanned_at=1.0),
+        CatalogueEntry(node=n2, model="dup:7b", family="qwen", params_b=7.0, scanned_at=1.0),
+        CatalogueEntry(node=n1, model="nomic-embed-text:v1.5", family="nomic", params_b=0.1,
+                       scanned_at=1.0),
+    ])
+    update_catalogue_scores(brain._storage, "dup:7b", quality=0.8, talk=1.0, tools=1.0, code=1.0,
+                            coherence=None, discipline=1.0, epistemics=1.0, reasoning=1.0)
+    update_catalogue_speed(brain._storage, n1, "dup:7b", 1.2)
+    update_catalogue_speed(brain._storage, n2, "dup:7b", 9.5)
+
+    speeds = brain.catalogue_speeds()
+    assert speeds["dup:7b"] == {n1: 1.2, n2: 9.5}     # one model → BOTH nodes' per-turn speeds
+    assert "nomic-embed-text:v1.5" not in speeds       # embedding models are excluded
 
 
 def test_bar_reason_names_the_failing_floor() -> None:

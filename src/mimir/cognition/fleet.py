@@ -76,11 +76,13 @@ ROLE_NEEDS: dict[str, tuple[tuple[str, ...], str]] = {
     "code": (("code", "reasoning"), "quality"),
     # The second lineup (DESIGN §5a): off-the-record cognition that never speaks AS the assistant,
     # so it is deliberately NOT discipline/epistemics-gated — a capable model that "leaks" the
-    # identity is fine here. A reasoning-competence floor only. `background` staffs off-hot-path
-    # reasoning (one best); `council` staffs adversarial deliberation (a diverse pool, see
-    # `council_roster`). The brain harness queries these via `roster_for` to staff itself.
+    # identity is fine here. `background` staffs off-hot-path reasoning (one best, full reasoning
+    # floor); `council` staffs adversarial deliberation (a diverse pool, see `council_roster`).
+    # Council is diversity-first: it admits EVERY yellow/green model (quality >= floor) that can
+    # reason at all (a LIGHT reasoning floor, `_ROLE_FLOORS` below) — diverse failure modes beat a
+    # narrow strong-only bench. The brain harness queries these via `roster_for` to staff itself.
     "background": (("reasoning",), "quality"),
-    "council": (("reasoning",), "quality"),
+    "council": (("quality", "reasoning"), "quality"),
     # Vision (DESIGN §4 "Round 4"): EMPIRICALLY gated — only models that passed the image probe
     # qualify (vision >= floor); ranked by overall quality (the most capable model that can also
     # SEE). For the image/document-vision path; a non-vision fleet simply has no pick (None).
@@ -90,23 +92,45 @@ ROLE_NEEDS: dict[str, tuple[tuple[str, ...], str]] = {
 # single-best ranking. `roster_for` routes these to the diversity picker.
 _POOL_ROLES = frozenset({"council"})
 _CAPABILITY_FLOOR = 0.5
+# Council is adversarial *reasoning* but diversity-first (DESIGN §5a): rather than the full 0.5
+# reasoning floor (which dropped most yellow models from the pool), it admits every yellow/green
+# model that can reason AT ALL — a light floor that excludes only models which essentially can't
+# (a reasoning score of one solved case in six). More diverse failure modes = a sharper council.
+_COUNCIL_REASONING_FLOOR = 0.25
+# Vision is capability DETECTION, not a quality scale (DESIGN §4 "Round 4"): passing ANY vision case
+# proves sight. The floor = the lightest single case (counting the shapes, 0.4), so a model that
+# sees but can't OCR the pseudoword still qualifies (the board bands it 🟡, not a misleading red). A
+# text model that sees nothing scores 0 and is barred. (The small lucky-count-guess gap is a known
+# fidelity tradeoff — a sharper probe is the future hardening.)
+_VISION_FLOOR = 0.4
+# Per-(role, capability) floor overrides; a capability not listed here uses _CAPABILITY_FLOOR.
+_ROLE_FLOORS: dict[str, dict[str, float]] = {
+    "council": {"reasoning": _COUNCIL_REASONING_FLOOR},
+    "vision": {"vision": _VISION_FLOOR},
+}
 
 
-def _bar_reason(data: dict[str, Any], capabilities: tuple[str, ...]) -> str | None:
+def _bar_reason(
+    data: dict[str, Any], capabilities: tuple[str, ...], floors: dict[str, float] | None = None
+) -> str | None:
     """Why this model is barred from a role, or ``None`` if it clears every required floor.
 
     The SINGLE source of truth for the role gate — both ``recommend_roles`` (who wins) and the
     model-pool board (who's barred, and why) call it, so the leaderboard's explanation can never
-    drift from the actual decision. Returns a human-readable reason naming the first failing
-    capability and the floor it missed (e.g. ``"discipline 0.25 < 0.50"``), or ``"not benchmarked
-    yet"`` when the model hasn't been scored. Never a silent drop (DESIGN §10).
+    drift from the actual decision. ``floors`` overrides the per-capability floor for a role (e.g.
+    council's lighter reasoning floor); anything unlisted uses ``_CAPABILITY_FLOOR``. Returns a
+    human-readable reason naming the first failing capability and the floor it missed (e.g.
+    ``"discipline 0.25 < 0.50"``), or ``"not benchmarked yet"`` when unscored. Never a silent drop
+    (DESIGN §10).
     """
     if data.get("quality") is None:
         return "not benchmarked yet"
+    floors = floors or {}
     for cap in capabilities:
+        floor = floors.get(cap, _CAPABILITY_FLOOR)
         val = data.get(cap) or 0.0
-        if val < _CAPABILITY_FLOOR:
-            return f"{cap} {val:.2f} < {_CAPABILITY_FLOOR:.2f}"
+        if val < floor:
+            return f"{cap} {val:.2f} < {floor:.2f}"
     return None
 
 
@@ -165,7 +189,7 @@ def _rank_for_role(
     candidates = [
         (name, data)
         for name, data in by_model.items()
-        if _bar_reason(data, capabilities) is None
+        if _bar_reason(data, capabilities, _ROLE_FLOORS.get(role)) is None
     ]
     if prefer == "fast":
         candidates.sort(key=lambda c: c[1]["return_time"] or 1e9)
@@ -355,7 +379,7 @@ def fleet_model_pool(
         eligible_roles: list[str] = []
         barred: dict[str, str] = {}
         for role, (capabilities, _prefer) in ROLE_NEEDS.items():
-            reason = _bar_reason(slot, capabilities)
+            reason = _bar_reason(slot, capabilities, _ROLE_FLOORS.get(role))
             if reason is None:
                 eligible_roles.append(role)
             else:
@@ -401,7 +425,7 @@ def placement_matrix(
         eligible: list[str] = []
         barred: dict[str, str] = {}
         for role, (caps, _prefer) in ROLE_NEEDS.items():
-            reason = _bar_reason(slot, caps)
+            reason = _bar_reason(slot, caps, _ROLE_FLOORS.get(role))
             if reason is None:
                 eligible.append(role)
             else:
@@ -461,7 +485,7 @@ def council_roster(
         # Membership = the shared `council` role gate (a reasoning floor, NOT discipline-gated), so
         # the seated roster can't disagree with the eligibility the board shows (DESIGN §10).
         gateable = {"quality": e.quality, "reasoning": e.reasoning}
-        if _bar_reason(gateable, ROLE_NEEDS["council"][0]):
+        if _bar_reason(gateable, ROLE_NEEDS["council"][0], _ROLE_FLOORS.get("council")):
             continue
         slot = by_model.setdefault(e.model, {
             "model": e.model, "family": e.family or "?", "quality": e.quality,
