@@ -78,6 +78,23 @@ class OllamaProvider:
         """Discover installed model names via Ollama's /api/tags (council auto-discovery)."""
         return [str(m["name"]) for m in self._tags()]
 
+    def has_vision(self, model: str) -> bool:
+        """Does this model carry a vision projector? Read from ``/api/show`` (its ``capabilities`` +
+        the ``model_info`` clip/vision tensor keys), which — unlike the ``/api/tags`` capabilities
+        the catalogue stores — is consistent across Ollama versions. Used only to decide whether a
+        model is *worth* empirically probing for vision per node (whether it actually SEES on a node
+        is a separate, version-dependent probe). False on any error (no claim → don't probe)."""
+        try:
+            data = self._post("/api/show", {"model": model}, timeout=self._timeout)
+        except (ProviderError, OSError, ValueError) as exc:
+            log.warning("ollama: /api/show failed for %s (vision unknown): %s", model, exc)
+            return False
+        caps = [str(c).lower() for c in (data.get("capabilities") or [])]
+        if "vision" in caps:
+            return True
+        info = data.get("model_info") or {}
+        return any("vision" in str(k).lower() or "clip" in str(k).lower() for k in info)
+
     def model_details(self) -> list[ModelInfo]:
         """Rich model metadata for the fleet catalogue (family, weight, quant, capabilities)."""
         out: list[ModelInfo] = []

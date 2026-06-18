@@ -472,6 +472,15 @@ def test_vision_role_admits_a_model_that_sees_but_cannot_ocr() -> None:
         "vision 0.00 < 0.40"   # sees nothing → barred
 
 
+def test_node_vision_skips_non_http_nodes() -> None:
+    # Vision is per-node (an identical model file reads images under one Ollama version but mangles
+    # them under another — a runtime regression), so the benchmark probes vision per node and takes
+    # best. A non-URL node (mock/single-local) has nothing to probe → None, never a false 0.
+    from mimir.cognition.benchmark import _node_vision
+
+    assert _node_vision("mock-node", "anything:7b", 8192) is None
+
+
 def test_catalogue_speeds_reports_every_node_a_model_runs_on(brain: Mimir) -> None:
     # The leaderboard shows a model's speed on EVERY node it's timed on (quality scored once, speed
     # per node). catalogue_speeds is that map: one model, both nodes' speeds; embed models excluded.

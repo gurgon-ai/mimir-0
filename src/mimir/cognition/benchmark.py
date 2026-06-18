@@ -404,6 +404,27 @@ class _NodeUnreliable(BaseException):
 _NODE_FAIL_THRESHOLD = 3   # transport failures on one node → abandon it and fail over to another
 
 
+def _node_vision(node: str, model_name: str, num_ctx: int) -> float | None:
+    """Empirically probe ONLY vision for a model on one node (direct provider). Vision is per-node:
+    a byte-identical model file reads images fine under one Ollama version and mangles them under
+    another (a runtime regression), so the same model can score 1.0 on one node and 0.0 on another.
+    Returns the vision score, or None if the node can't be reached / has no probe image."""
+    if not node.startswith("http"):
+        return None
+    provider = OllamaProvider(node, timeout=WARMUP_TIMEOUT_S)
+
+    def det(messages: list[Message]) -> str:
+        return provider.chat(model_name, messages,
+                             {"num_ctx": num_ctx, "temperature": 0.0, "max_tokens": 48})
+
+    try:
+        return score_vision(det)
+    except Exception as exc:
+        log.warning("benchmark: cross-node vision probe failed for %s on %s: %s",
+                    model_name, node, exc)
+        return None
+
+
 def benchmark_model(
     model: ModelGateway, model_name: str, *, num_ctx: int = 8192,
     framework: bool = True, call_timeout_s: float = 60.0, node: str | None = None,
@@ -796,6 +817,33 @@ def benchmark_fleet(
                 finally:
                     if lock:
                         lock.release()
+
+            # Best-across-nodes vision: vision is per-node (a runtime-version regression makes an
+            # identical model file read images on one node, mangle them on another), so a multimodal
+            # model that was scored on a node whose Ollama breaks its vision shouldn't read red when
+            # it sees perfectly on another node. Only for a model that actually carries a vision
+            # projector (reliable /api/show check, NOT the flaky tags caps) — so text models aren't
+            # probed everywhere — and only when the test-node score is short of full.
+            if (bench is not None and persist and used and used.startswith("http")
+                    and bench.vision is not None and bench.vision < 1.0
+                    and OllamaProvider(used).has_vision(model_name)):
+                best_vis = bench.vision
+                for node in cands:
+                    if node == used or best_vis >= 1.0:
+                        continue
+                    lock = node_locks.get(node)
+                    if lock:
+                        lock.acquire()
+                    try:
+                        v = _node_vision(node, model_name, num_ctx)
+                    finally:
+                        if lock:
+                            lock.release()
+                    if v is not None and v > best_vis:
+                        best_vis = v
+                        log.info("benchmark: %s vision %.1f on %s (best across nodes)",
+                                 model_name, v, node)
+                bench.vision = round(best_vis, 3)
 
             with state_lock:
                 done_count += 1

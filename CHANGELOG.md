@@ -101,6 +101,16 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
 
 ### Fixed
+- **Vision is scored best-across-nodes — a model isn't marked blind because it was tested on a node
+  whose Ollama mangles its vision.** Vision turned out to be *per-node*, not model-wide: a
+  byte-identical model file (same digest, same vision projector) reads the probe image perfectly
+  under Ollama 0.20/0.22 but returns garbage under 0.30.7 — a runtime regression, not GPU/quant/pull.
+  So the same model scored 1.0 on one node and 0.0 on another, and which node it happened to be
+  benchmarked on decided red-vs-green. Now, for a model that actually carries a vision projector
+  (checked via `/api/show`, which is consistent across versions — the `/api/tags` capabilities the
+  catalogue stores are not), the benchmark probes vision on its other nodes and records the **best**
+  (stops at full). Text-only models are never probed (the projector check gates it), so it adds no
+  cost to the common case.
 - **A bad node no longer hangs a model's benchmark for 20 minutes — it fails fast and fails over.**
   A node can pass the quick speed probe yet hang the real battery (intermittent, or it loads a
   1-token warm but stalls on actual generation), so all ~12 scoring calls hit the per-call timeout in
