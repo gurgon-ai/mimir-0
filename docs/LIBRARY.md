@@ -68,6 +68,12 @@ library_page_claims(page_id, claim_id)                                          
   doc the surfaced claims came from — deterministic, no second pass), or the **Phase-2 model fetch**
   (the model opens a page itself; opt-in). Full pages count as grounding for the uncertainty gate.
 - **On demand (verbatim):** the exact source line/page via a claim's `locator` — for quoting/checking.
+- **Per-document + per-layer context toggles:** each document has an **include-in-context** toggle
+  (Library tab, compact list — name + checkbox, click to expand details/index-time/delete); a disabled
+  doc's chunks + claims are excluded from recall **at the SQL load layer**, so an unselected book costs
+  nothing to scan (the speed lever at scale). Chat also has per-turn **layer** toggles — memory /
+  documents / wiki — to include or exclude a whole layer. Disabling keeps the data; it just isn't
+  consulted. (`set_document_enabled`, `turn(include_*=…)`.)
 - **Forget a document (two directions, one primitive — `forget_document`):** the Library tab's
   per-document **🗑 delete** (with an "Are you sure?" confirm) purges everything derived from a doc —
   its memory chunks, library document + cited claims, composite page (DB row + Markdown file), wiki

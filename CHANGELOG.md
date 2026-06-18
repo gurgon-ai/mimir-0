@@ -107,6 +107,16 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **Context-layer + per-document toggles — choose what's in context (and get recall speed back).**
+  Chat now has a row above the bar to toggle whole **layers** per turn — *memory*, *documents*, *wiki*
+  (and *deep read*) — for "what am I doing right now." The Library tab lists each document **compactly**
+  (an *include-in-context* checkbox + the name; click the name to expand size, index time, and delete),
+  so an unselected book is excluded from recall — and crucially **at the SQL load layer** (its chunks
+  and claims aren't even loaded), which is the speed lever once a library gets large. `turn(...,
+  include_memory=/include_library=/include_wiki=)`, `POST /api/library/enable`; toggles persist.
+- **Per-document index time** is recorded and shown (answers "how long per doc"): the documents pass
+  stores `ingest_seconds`, the library pass `index_seconds` (the claim-extraction cost), surfaced in
+  the Library tab's expanded doc detail.
 - **Delete a document and purge everything derived from it (two directions).** The Library tab now
   lists each source document with a **🗑 delete** button (confirm: "Are you sure?") that calls one
   `forget_document` primitive — removing the doc's memory chunks, its library document + cited claims,

@@ -335,6 +335,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._scan_library(body))
             elif route == "/api/library/forget":
                 self._send_json(self._forget_document(body))
+            elif route == "/api/library/enable":
+                self._send_json(self._set_document_enabled(body))
             elif route == "/api/sleep":
                 self._send_json(self._sleep())
             elif route == "/api/deliberate/run":
@@ -408,10 +410,11 @@ class _Handler(BaseHTTPRequestHandler):
         speaker_kind = str(body.get("speaker_kind") or body.get("kind") or "human")
         loaded = _int_list(body.get("library_pages"))
         deep_read = bool(body.get("deep_read"))
+        layers = _layer_flags(body)
         with self.server.brain_lock:
             result = self.server.brain.turn(
                 text, user=user, speaker_kind=speaker_kind, loaded_pages=loaded,
-                deep_read=deep_read)
+                deep_read=deep_read, **layers)
         # Return as soon as the reply is generated. The post-turn burst (sentinel/self-model/working
         # memory) runs OFF the hot path and the next turn settles it (DESIGN §5a) — blocking the HTTP
         # response on it would add several model calls of latency (minutes on a small edge node).
@@ -560,6 +563,14 @@ class _Handler(BaseHTTPRequestHandler):
         with self.server.brain_lock:
             return self.server.brain.forget_document(source, delete_file=bool(body.get("delete_file")))
 
+    def _set_document_enabled(self, body: dict[str, Any]) -> dict[str, Any]:
+        # Library "include in context" toggle: a disabled doc's chunks + claims drop out of recall.
+        source = str(body.get("source") or body.get("path") or body.get("filename") or "").strip()
+        if not source:
+            raise ValueError("'source' (a document path or filename) is required")
+        with self.server.brain_lock:
+            return self.server.brain.set_document_enabled(source, bool(body.get("enabled")))
+
     def _turn_stream(self) -> None:
         """Server-Sent-Events stream of a turn: token events, then a done event with introspect.
 
@@ -576,6 +587,7 @@ class _Handler(BaseHTTPRequestHandler):
             speaker_kind = str(body.get("speaker_kind") or body.get("kind") or "human")
             loaded = _int_list(body.get("library_pages"))
             deep_read = bool(body.get("deep_read"))
+            layers = _layer_flags(body)
             normalize_speaker_kind(speaker_kind)  # reject a bad kind before the stream opens (400)
         except (json.JSONDecodeError, ValueError) as exc:
             self._send_json({"error": str(exc)}, status=400)
@@ -600,7 +612,7 @@ class _Handler(BaseHTTPRequestHandler):
             with self.server.brain_lock:
                 stream = self.server.brain.turn_stream(
                     text, user=user, speaker_kind=speaker_kind, loaded_pages=loaded,
-                    deep_read=deep_read)
+                    deep_read=deep_read, **layers)
                 while True:
                     try:
                         token = next(stream)
@@ -1083,6 +1095,15 @@ def _int_list(value: Any) -> list[int]:
     return out
 
 
+def _layer_flags(body: dict[str, Any]) -> dict[str, bool]:
+    """The per-turn context-layer toggles from the chat UI (each defaults ON if absent)."""
+    return {
+        "include_memory": body.get("include_memory", True) is not False,
+        "include_library": body.get("include_library", True) is not False,
+        "include_wiki": body.get("include_wiki", True) is not False,
+    }
+
+
 def _memory_to_dict(mem: Memory) -> dict[str, Any]:
     """Serialize a memory for the browser (provenance and epistemics on display)."""
     return {
@@ -1336,10 +1357,13 @@ _HTML = """<!doctype html>
       <input type="text" id="text" placeholder="Say something to Mimir…" autocomplete="off"/>
       <button type="submit" id="send">Send</button>
     </form>
-    <label class="hint" id="deepReadWrap" style="flex:none; padding:0 12px 6px; display:flex; align-items:center; gap:6px;"
-           title="Inject the FULL composite page(s) of the most relevant document(s), not just the short cited claims — deeper but uses more of the context window.">
-      <input type="checkbox" id="deepRead"/> Deep read (pull full library pages, not just cited claims)
-    </label>
+    <div id="ctxToggles" style="flex:none; padding:4px 12px 6px; display:flex; flex-wrap:wrap; gap:14px; font-size:12px; color:#8a94a3;">
+      <span style="color:#6f7a8a;">in context:</span>
+      <label title="Recall your personal + learned memories."><input type="checkbox" id="incMemory" checked/> memory</label>
+      <label title="Recall the document library (cited claims + chunks). Turn off, or toggle individual docs in the Library tab."><input type="checkbox" id="incLibrary" checked/> documents</label>
+      <label title="Use the offline encyclopedia (Kiwix/ZIM), if configured."><input type="checkbox" id="incWiki" checked/> wiki</label>
+      <label title="Inject the FULL composite page(s) of the most relevant document(s), not just the short cited claims — deeper, uses more of the window."><input type="checkbox" id="deepRead"/> deep read</label>
+    </div>
     <div id="uploadMsg" class="hint" style="flex:none; padding:0 12px 8px;"></div>
     <div id="libTray" class="hint" style="flex:none; padding:0 12px 8px; display:none;"></div>
   </div>
@@ -1633,8 +1657,11 @@ async function streamTurn(text) {
   body.classList.add("thinking"); body.textContent = "thinking…";
   let started = false;
   const begin = () => { if (!started) { started = true; body.classList.remove("thinking"); body.textContent = ""; } };
-  const deepRead = !!($("deepRead") && $("deepRead").checked);
-  const resp = await fetch("/api/turn/stream", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ text, user: "operator", library_pages: [...activeSources], deep_read: deepRead }) });
+  const chk = (id, dflt) => { const el = $(id); return el ? el.checked : dflt; };
+  const reqBody = { text, user: "operator", library_pages: [...activeSources],
+    deep_read: chk("deepRead", false), include_memory: chk("incMemory", true),
+    include_library: chk("incLibrary", true), include_wiki: chk("incWiki", true) };
+  const resp = await fetch("/api/turn/stream", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(reqBody) });
   if (resp.status === 401) { promptForToken(); body.classList.remove("thinking"); body.textContent = "API token required."; return; }
   if (!resp.ok) { body.classList.remove("thinking"); const e = await resp.json().catch(() => ({ error: "HTTP " + resp.status })); throw new Error(e.error); }
   const reader = resp.body.getReader(); const dec = new TextDecoder();
@@ -2228,16 +2255,32 @@ async function loadLibrary() {
     `<div class="meta"><a href="#" data-page="${p.id}">view</a> · ` +
     `<a href="#" data-pin="${p.id}">${activeSources.has(p.id) ? "pinned ✓" : "pin to chat"}</a></div></div>`
   ).join("") : '<div class="hint">No composite pages yet — drop documents and let it run (or Scan).</div>';
-  docsEl.innerHTML = docs.length ? docs.map(d =>
-    `<div class="mem"><div class="text">${escapeHtml(d.filename)} <span class="hint">· ${d.claims} claim(s) · ${(d.size_bytes/1024).toFixed(1)} KB</span>` +
-    ` <a href="#" data-forget="${escapeHtml(d.path || d.filename)}" data-name="${escapeHtml(d.filename)}" style="float:right; color:#e0604a;">🗑 delete</a></div></div>`
-  ).join("") : '<div class="hint">No source documents indexed yet.</div>';
+  // Compact list: an include-in-context checkbox + the name; click the name to expand details.
+  docsEl.innerHTML = docs.length ? docs.map((d, i) => {
+    const src = escapeHtml(d.path || d.filename);
+    const idx = d.index_seconds != null ? `${d.index_seconds}s to index` : "index time n/a";
+    return `<div class="mem" style="padding:6px 8px;"><div class="text" style="display:flex; align-items:center; gap:8px;">` +
+      `<input type="checkbox" data-enable="${src}" ${d.enabled ? "checked" : ""} title="Include this document in context"/>` +
+      `<a href="#" data-expand="${i}" style="flex:1; ${d.enabled ? "" : "opacity:.5;"}">${escapeHtml(d.filename)}</a>` +
+      `<span class="hint">${d.claims} claim(s)</span></div>` +
+      `<div id="docDetail${i}" style="display:none; margin-top:6px; color:#9fb3c8; font-size:12px;">` +
+      `${(d.size_bytes/1024).toFixed(1)} KB · ${idx} · ${d.enabled ? "in context" : "excluded from recall"}` +
+      ` <a href="#" data-forget="${src}" data-name="${escapeHtml(d.filename)}" style="float:right; color:#e0604a;">🗑 delete</a></div></div>`;
+  }).join("") : '<div class="hint">No source documents indexed yet.</div>';
   pagesEl.querySelectorAll("[data-page]").forEach(a => a.addEventListener("click", (e) => {
     e.preventDefault(); openLibraryPage(parseInt(a.dataset.page)); }));
   pagesEl.querySelectorAll("[data-pin]").forEach(a => a.addEventListener("click", (e) => {
     e.preventDefault(); const id = parseInt(a.dataset.pin);
     activeSources.has(id) ? activeSources.delete(id) : activeSources.add(id);
     renderLibTray(); loadLibrary();
+  }));
+  docsEl.querySelectorAll("[data-expand]").forEach(a => a.addEventListener("click", (e) => {
+    e.preventDefault(); const el = $("docDetail" + a.dataset.expand);
+    if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+  }));
+  docsEl.querySelectorAll("[data-enable]").forEach(cb => cb.addEventListener("change", async () => {
+    try { await api("POST", "/api/library/enable", { source: cb.dataset.enable, enabled: cb.checked });
+      loadLibrary(); } catch (err) { $("libScanMsg").textContent = "Toggle failed: " + err.message; }
   }));
   docsEl.querySelectorAll("[data-forget]").forEach(a => a.addEventListener("click", forgetDocument));
 }
