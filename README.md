@@ -89,6 +89,11 @@ On top of that:
   **ZIM** (Wikipedia nopic, a medical wiki, top-50k, …) and the model gets a live, attributed
   reference layer — **zero Python dependency** (stdlib HTTP, like talking to Ollama), nothing to
   ingest, fail-open.
+- **Draft-RAG (optional, two-pass recall)** — a per-turn chat toggle: the model writes a short
+  *draft* answer first, memory is re-retrieved against that draft (it names what the reply is *about*,
+  which the user's wording alone can miss), and the new hits fold into the prompt the real answer is
+  generated from. It does **two LLM calls per turn, so replies are slower** — off by default, with a
+  one-click warning. (`[draft_rag] enabled` for library callers; `turn(draft_rag=True)`.)
 - **Entity graph** — subject–relation–object triples with 1–2 hop traversal.
 - **Working memory & self-model** — rolling salient context (folds the oldest exchanges into a
   short summary, keeps the most recent verbatim), and an evolving generic identity seeded by the

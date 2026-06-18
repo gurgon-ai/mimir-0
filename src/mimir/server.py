@@ -1095,13 +1095,17 @@ def _int_list(value: Any) -> list[int]:
     return out
 
 
-def _layer_flags(body: dict[str, Any]) -> dict[str, bool]:
-    """The per-turn context-layer toggles from the chat UI (each defaults ON if absent)."""
-    return {
+def _layer_flags(body: dict[str, Any]) -> dict[str, Any]:
+    """The per-turn context controls from the chat UI: layer toggles (default ON) + output-RAG
+    (only forwarded when the client sends it, so the config default still applies otherwise)."""
+    flags: dict[str, Any] = {
         "include_memory": body.get("include_memory", True) is not False,
         "include_library": body.get("include_library", True) is not False,
         "include_wiki": body.get("include_wiki", True) is not False,
     }
+    if "draft_rag" in body:
+        flags["draft_rag"] = bool(body.get("draft_rag"))
+    return flags
 
 
 def _memory_to_dict(mem: Memory) -> dict[str, Any]:
@@ -1363,6 +1367,7 @@ _HTML = """<!doctype html>
       <label title="Recall the document library (cited claims + chunks). Turn off, or toggle individual docs in the Library tab."><input type="checkbox" id="incLibrary" checked/> documents</label>
       <label title="Use the offline encyclopedia (Kiwix/ZIM), if configured."><input type="checkbox" id="incWiki" checked/> wiki</label>
       <label title="Inject the FULL composite page(s) of the most relevant document(s), not just the short cited claims — deeper, uses more of the window."><input type="checkbox" id="deepRead"/> deep read</label>
+      <label title="Two-pass RAG: draft a short answer first, retrieve memory against it, then answer for real. Surfaces relevant memories your wording alone misses — but does TWO LLM calls, so replies are slower."><input type="checkbox" id="draftRag"/> draft-RAG (2-pass)</label>
     </div>
     <div id="uploadMsg" class="hint" style="flex:none; padding:0 12px 8px;"></div>
     <div id="libTray" class="hint" style="flex:none; padding:0 12px 8px; display:none;"></div>
@@ -1653,7 +1658,8 @@ async function streamTurn(text) {
   const chk = (id, dflt) => { const el = $(id); return el ? el.checked : dflt; };
   const reqBody = { text, user: "operator", library_pages: [...activeSources],
     deep_read: chk("deepRead", false), include_memory: chk("incMemory", true),
-    include_library: chk("incLibrary", true), include_wiki: chk("incWiki", true) };
+    include_library: chk("incLibrary", true), include_wiki: chk("incWiki", true),
+    draft_rag: chk("draftRag", false) };
   const resp = await fetch("/api/turn/stream", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(reqBody) });
   if (resp.status === 401) { promptForToken(); body.classList.remove("thinking"); body.textContent = "API token required."; return; }
   if (!resp.ok) { body.classList.remove("thinking"); const e = await resp.json().catch(() => ({ error: "HTTP " + resp.status })); throw new Error(e.error); }
@@ -2308,6 +2314,15 @@ $("libScan").addEventListener("click", async () => {
     $("libScanMsg").innerHTML = html;
     loadLibrary();
   } catch (e) { $("libScanMsg").textContent = "Error: " + e.message; }
+});
+
+// Draft-RAG is heavier (two LLM calls) — warn when it's switched on; cancel un-checks it.
+$("draftRag").addEventListener("change", (e) => {
+  if (!e.target.checked) return;
+  const ok = confirm("Draft-RAG does TWO model calls per reply: a short draft, then the real " +
+    "answer. The draft surfaces relevant memories your wording alone would miss — but replies will " +
+    "be noticeably slower. Turn it on?");
+  if (!ok) e.target.checked = false;
 });
 
 // 📎 upload: read the file as base64 and POST it; the server saves it to the drop folder + ingests.

@@ -145,7 +145,8 @@ class ModelGateway:
         return DEFAULT_ROLE_PRIORITY.get(role, Priority.USER_ADJACENT)
 
     def chat(
-        self, role: str, messages: list[Message], *, priority: Priority | None = None
+        self, role: str, messages: list[Message], *, priority: Priority | None = None,
+        params: dict[str, object] | None = None,
     ) -> str:
         """Route a chat completion for ``role``, walking its fallback chain (DESIGN §4/§5).
 
@@ -153,8 +154,11 @@ class ModelGateway:
         over across that model's nodes). If a model is exhausted with a *transient* failure (every
         node for it is down/saturated), routing falls to the next acceptable model — so a fleet
         where no single model is everywhere still serves the role. A permanent error fails fast.
+        ``params`` merges over the role's config params for this call (e.g. a short ``max_tokens``
+        for a cheap draft pass).
         """
-        models, params = self._ordered_models(role)
+        models, role_params = self._ordered_models(role)
+        params = {**role_params, **params} if params else role_params
         prio = self._priority(role, priority)
         node = self._role_nodes.get(role)
         last: ProviderError | None = None

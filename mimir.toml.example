@@ -84,6 +84,15 @@ every = 0
 enabled = true
 top_k = 3
 
+[draft_rag]
+# Synchronous two-pass recall: draft a short answer first, re-retrieve memory against that draft
+# (it names what the reply is about, which your wording alone can miss), then generate the real
+# answer from the enriched prompt. TWO LLM calls per turn → slower. Off by default; the chat UI has
+# a per-turn toggle. `draft_tokens` caps the draft length; `top_k` is how many extra memories it adds.
+# enabled = false
+# top_k = 4
+# draft_tokens = 160
+
 [deliberation]
 # During the sleep cycle, the system surfaces its OWN conflicts — graph tensions (a subject with two
 # values under a non-functional relation) and divergent near-duplicate memories — and submits the few

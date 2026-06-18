@@ -146,6 +146,13 @@ class Config:
     # model itself opened gets grounded, not just what the user asked. False = off.
     output_rag_enabled: bool = True
     output_rag_top_k: int = 3
+    # Draft-RAG (synchronous two-pass recall): a cheap short DRAFT answer is generated first, memory
+    # is re-retrieved against that draft (it surfaces what the reply is *about*, which the user's
+    # wording alone may miss), and the new hits fold into the prompt the real answer is generated
+    # from. Two LLM calls per turn → slower; opt-in (per-turn UI toggle, or this default).
+    draft_rag_enabled: bool = False
+    draft_rag_top_k: int = 4
+    draft_rag_tokens: int = 160
     # The live inner life (DESIGN §5a): a low-frequency idle loop that thinks between turns. On a
     # long cadence it reflects on one universal stimulus (a recent error, an un-deliberated
     # conflict, a salient memory, the working-memory thread) with a cheap background model, and
@@ -379,6 +386,9 @@ def load_config(path: str | Path) -> Config:
         ),
         output_rag_enabled=bool(raw.get("output_rag", {}).get("enabled", True)),
         output_rag_top_k=int(raw.get("output_rag", {}).get("top_k", 3)),
+        draft_rag_enabled=bool(raw.get("draft_rag", {}).get("enabled", False)),
+        draft_rag_top_k=int(raw.get("draft_rag", {}).get("top_k", 4)),
+        draft_rag_tokens=int(raw.get("draft_rag", {}).get("draft_tokens", 160)),
         inner_life_enabled=bool(raw.get("inner_life", {}).get("enabled", False)),
         inner_life_cadence_s=float(raw.get("inner_life", {}).get("cadence_s", 300.0)),
         inner_life_idle_floor_s=float(raw.get("inner_life", {}).get("idle_floor_s", 30.0)),

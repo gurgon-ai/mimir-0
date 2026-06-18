@@ -107,6 +107,14 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **Draft-RAG — opt-in two-pass recall (a chat toggle).** The model generates a short *draft* answer
+  first (capped via `max_tokens`), memory is re-retrieved against that draft — it surfaces what the
+  reply is *about*, which the user's literal wording can miss — and the new hits fold into the prompt
+  the real answer is generated from. Two LLM calls per turn, so **replies are slower**: off by
+  default, a checkbox in the chat toggle row with a one-time confirm warning. Distinct from the
+  existing burst-worker output-RAG (which reuses the reply you already made for the *next* turn);
+  draft-RAG spends an extra call to help *this* turn. `[draft_rag] enabled/top_k/draft_tokens`;
+  `turn(draft_rag=…)`; `gateway.chat(params=…)` now allows a per-call param override.
 - **Docs + Library tabs consolidated into one Library tab.** They managed the same source documents
   through two pipelines (chunks+wiki-summary vs cited-claims+composites) with duplicate lists and two
   scan buttons. Now a single tab: one unified document list (each row joins chunks + claims + summary
