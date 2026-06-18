@@ -672,7 +672,7 @@ class _Handler(BaseHTTPRequestHandler):
                 srv.bench_state.setdefault("results", []).append({
                     "model": b.model, "quality": b.quality, "talk": b.talk, "tools": b.tools,
                     "code": b.code, "discipline": b.discipline, "epistemics": b.epistemics,
-                    "reasoning": b.reasoning, "coherence": b.coherence,
+                    "reasoning": b.reasoning, "coherence": b.coherence, "vision": b.vision,
                     "return_time": b.return_time, "node": node,
                 })
 
@@ -856,7 +856,7 @@ class _Handler(BaseHTTPRequestHandler):
                 srv.tourney_state.setdefault("results", []).append({
                     "model": b.model, "quality": b.quality, "talk": b.talk, "tools": b.tools,
                     "code": b.code, "discipline": b.discipline, "epistemics": b.epistemics,
-                    "reasoning": b.reasoning, "coherence": b.coherence,
+                    "reasoning": b.reasoning, "coherence": b.coherence, "vision": b.vision,
                     "return_time": b.return_time, "node": node,
                 })
 
@@ -2704,15 +2704,15 @@ function renderBenchResults(results, header) {
     if (la !== lb) return la ? -1 : 1;   // localhost group first
     return a.localeCompare(b);
   });
-  h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th><th>Epistemics</th><th>Coherence</th><th>Speed/turn</th></tr>";
+  h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th><th>Epistemics</th><th>Coherence</th><th>Vis</th><th>Speed/turn</th></tr>";
   order.forEach(node => {
     const rows = groups[node].sort((a, b) => (b.quality || 0) - (a.quality || 0));
-    h += `<tr><td colspan="11" class="nodehdr">${shortNode(node)} · ${rows.length} model(s)</td></tr>`;
+    h += `<tr><td colspan="12" class="nodehdr">${shortNode(node)} · ${rows.length} model(s)</td></tr>`;
     rows.forEach((r, i) => {
       const rank = (best && r.model === best.model) ? "🏆" : _medal(i);
       h += `<tr class="${i === 0 ? "top" : ""}"><td>${rank}</td><td>${r.model}</td>`
         + `<td class="q">${_stars(r.quality)} <span style="color:#8a94a3; font-weight:400;">${(r.quality ?? 0).toFixed(2)}</span></td>`
-        + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td><td>${_emoji(r.epistemics)}</td><td>${_emoji(r.coherence)}</td>`
+        + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td><td>${_emoji(r.epistemics)}</td><td>${_emoji(r.coherence)}</td><td>${_emoji(r.vision)}</td>`
         + `<td>${r.return_time != null ? r.return_time.toFixed(1) + "s" : "·"}</td></tr>`;
     });
   });
@@ -2743,7 +2743,7 @@ function renderPlacement(data) {
     const champ = off ? null : models.find(m => m.champion);
     h += `<div style="${off ? "opacity:0.45;" : ""}">`;
     h += `<div class="nodehdr" style="margin-top:14px;"><label style="cursor:pointer;" title="Use this machine in the fleet. Untick to exclude it from qualification + routing."><input type="checkbox" ${off ? "" : "checked"} onchange="toggleNodeFromView('${node}', this.checked)"> ${shortNode(node)}</label> · ${models.length} model(s)${off ? " — <b>disabled</b> (excluded)" : (champ ? ` · winner 🏆 <b>${champ.model}</b> (q${(champ.quality ?? 0).toFixed(2)} · ${champ.return_time != null ? champ.return_time.toFixed(1) + "s" : "·"})` : "")}</div>`;
-    h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Disc</th><th>Epis</th><th>Coh</th><th>Speed</th><th>Roles</th></tr>";
+    h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Disc</th><th>Epis</th><th>Coh</th><th>Vis</th><th>Speed</th><th>Roles</th></tr>";
     models.forEach(m => {
       const flag = (m.champion ? "🏆" : "") + (m.fastest ? "⚡" : "");
       const elig = (m.eligible_roles || []).join(", ");
@@ -2752,7 +2752,7 @@ function renderPlacement(data) {
       const barTitle = barEntries.map(([r, w]) => `${r}: ${w}`).join("; ");
       h += `<tr class="${m.champion ? "top" : ""}" style="${m.enabled ? "" : "opacity:0.5;"}"><td>${flag}</td><td>${m.model}</td>`
         + `<td class="q">${_stars(m.quality)} <span style="color:#8a94a3; font-weight:400;">${(m.quality ?? 0).toFixed(2)}</span></td>`
-        + `<td>${_emoji(m.talk)}</td><td>${_emoji(m.tools)}</td><td>${_emoji(m.code)}</td><td>${_emoji(m.reasoning)}</td><td>${_emoji(m.discipline)}</td><td>${_emoji(m.epistemics)}</td><td>${_emoji(m.coherence)}</td>`
+        + `<td>${_emoji(m.talk)}</td><td>${_emoji(m.tools)}</td><td>${_emoji(m.code)}</td><td>${_emoji(m.reasoning)}</td><td>${_emoji(m.discipline)}</td><td>${_emoji(m.epistemics)}</td><td>${_emoji(m.coherence)}</td><td>${_emoji(m.vision)}</td>`
         + `<td>${m.return_time != null ? m.return_time.toFixed(1) + "s" : "·"}</td>`
         + `<td style="font-size:11px;"><span style="color:#7fd17f;">${elig}</span> <span style="color:#e0a0a0;" title="${barTitle}">${bars}</span></td></tr>`;
     });
@@ -2834,10 +2834,10 @@ function tourneyTable(results, showChecks, round) {
   results.forEach(r => { (groups[r.node || ""] = groups[r.node || ""] || []).push(r); });
   const order = Object.keys(groups).sort((a, b) => { const la = a.includes("127.0.0.1"), lb = b.includes("127.0.0.1"); if (la !== lb) return la ? -1 : 1; return a.localeCompare(b); });
   const full = round >= 2;   // triage (round 1) didn't measure epistemics/coherence — hide those columns
-  const span = 9 + (full ? 2 : 0) + (showChecks ? 1 : 0);
+  const span = 10 + (full ? 2 : 0) + (showChecks ? 1 : 0);
   let cols = `<th></th>${showChecks ? "<th>Keep</th>" : ""}<th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th>`;
   if (full) cols += "<th>Epistemics</th><th>Coherence</th>";
-  cols += "<th>Speed/turn</th>";
+  cols += "<th>Vis</th><th>Speed/turn</th>";
   let h = `<table><tr>${cols}</tr>`;
   order.forEach(node => {
     const rows = groups[node].sort((a, b) => (b.quality || 0) - (a.quality || 0));
@@ -2850,7 +2850,7 @@ function tourneyTable(results, showChecks, round) {
         + `<td class="q">${_stars(r.quality)} <span style="color:#8a94a3; font-weight:400;">${(r.quality ?? 0).toFixed(2)}</span></td>`
         + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td>`;
       if (full) h += `<td>${_emoji(r.epistemics)}</td><td>${_emoji(r.coherence)}</td>`;
-      h += `<td>${r.return_time != null ? r.return_time.toFixed(1) + "s" : "·"}</td></tr>`;
+      h += `<td>${_emoji(r.vision)}</td><td>${r.return_time != null ? r.return_time.toFixed(1) + "s" : "·"}</td></tr>`;
     });
   });
   return h + "</table>";
@@ -3206,6 +3206,7 @@ async function loadModels() {
       if (m.quality != null) bits.push(`q${m.quality}`);
       if (m.reasoning != null) bits.push(`reason ${m.reasoning}`);
       if (m.discipline != null) bits.push(`disc ${m.discipline}`);
+      if (m.vision != null) bits.push(`vision ${m.vision}`);
       if (m.return_time != null) bits.push(`${m.return_time}s/turn`);
       bits.push(`${(m.nodes || []).length} node(s)`);
       if (m.approved) bits.push("approved");

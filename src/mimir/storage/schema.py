@@ -370,6 +370,17 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "CREATE INDEX idx_library_page_claims_claim ON library_page_claims(claim_id)",
         ],
     ),
+    (
+        22,
+        [
+            # The 'vision' dimension (DESIGN §4 "Round 4"): vision capability is EMPIRICAL, not
+            # taken from advertised model metadata — the benchmark sends a fixed probe image
+            # (assets/vision_probe.png: the word GLYPHON + three red circles) and scores whether the
+            # model reads the word and counts the shapes. A text-only model fails the probe, scoring
+            # ~0; that failure IS the determination. Informational like coherence (not role-gating).
+            "ALTER TABLE model_catalogue ADD COLUMN vision REAL",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -436,6 +447,7 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
         "discipline",
         "epistemics",
         "reasoning",
+        "vision",
     },
     "model_prefs": {"model", "enabled", "updated_at"},
     "node_prefs": {"node", "enabled", "updated_at"},

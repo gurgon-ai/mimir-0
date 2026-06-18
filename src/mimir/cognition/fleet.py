@@ -131,6 +131,7 @@ def _collapse_by_model(
                 "discipline": entry.discipline,
                 "epistemics": entry.epistemics,
                 "reasoning": entry.reasoning,
+                "vision": entry.vision,
                 "return_time": entry.return_time,
                 "node": entry.node,  # the fastest node for this model (speed is per-node)
                 "nodes": [],
@@ -326,6 +327,7 @@ def fleet_model_pool(
                 "discipline": e.discipline,
                 "epistemics": e.epistemics,
                 "reasoning": e.reasoning,
+                "vision": e.vision,
                 "return_time": e.return_time,
                 "node": e.node,  # the node giving the best (lowest) return_time — for the picker
                 "approved": is_approved(e.family),

@@ -107,6 +107,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   every embed degraded to keyword-only with no automatic recovery (it won't silently switch vector
   spaces). Documented the safer alternative (pin the exact tag) and shipped `--reembed` as the clean
   recovery path; `mimir.toml.example` and SETUP now spell both out.
+- **Vision benchmark dimension — capability determined empirically (DESIGN §4 "Round 4").** A model's
+  vision is *tested*, not read from advertised metadata: the benchmark sends a fixed probe image
+  (`assets/vision_probe.png` — the word GLYPHON + three red circles) and scores reading the word (OCR)
+  + counting the shapes. A text-only model can't read GLYPHON or see the circles, so it scores ~0 —
+  that failure IS the determination. Informational like coherence (kept out of `quality`, never
+  role-gating). Stored as a new catalogue column (`vision`, schema → v22) and shown in the fleet
+  leaderboard / placement / tournament tables. (No provider change needed — Ollama already forwards a
+  per-message `images` field.) Next: vision in documents + image upload, gated on a vision-capable
+  model existing.
 - **Draft-RAG — opt-in two-pass recall (a chat toggle).** The model generates a short *draft* answer
   first (capped via `max_tokens`), memory is re-retrieved against that draft — it surfaces what the
   reply is *about*, which the user's literal wording can miss — and the new hits fold into the prompt

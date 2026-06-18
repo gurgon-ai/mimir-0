@@ -215,6 +215,7 @@ class CatalogueEntry:
     discipline: float | None = None
     epistemics: float | None = None
     reasoning: float | None = None
+    vision: float | None = None
     scanned_at: float = 0.0
 
 

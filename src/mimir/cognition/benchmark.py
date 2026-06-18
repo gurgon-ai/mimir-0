@@ -17,6 +17,7 @@ gets benchmarked, the scores just speak for themselves.
 from __future__ import annotations
 
 import ast
+import base64
 import json
 import logging
 import re
@@ -25,6 +26,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..model.gateway import ModelGateway
 from ..model.provider import Message
@@ -285,6 +287,47 @@ CAPABILITY_TESTS: dict[str, list[tuple[str, Callable[[str], bool]]]] = {
 }
 
 
+# -- vision (empirical: the probe IS the determination, not advertised metadata) --------
+
+# The fixed probe image (the word GLYPHON + three red circles on white), from the repo root.
+# Absent → vision is 'not tested' (None), never a false zero. See assets/vision_probe.README.md.
+_VISION_PROBE = Path(__file__).resolve().parents[3] / "assets" / "vision_probe.png"
+_VISION_CASES = [
+    ("What single word is written in this image? Reply with just the word.",
+     lambda out: "glyphon" in out.lower()),
+    ("How many red circles are in this image? Reply with only the number.",
+     lambda out: bool(re.search(r"\b(3|three)\b", out.lower()))),
+]
+
+
+def _probe_image_b64() -> str | None:
+    try:
+        return base64.b64encode(_VISION_PROBE.read_bytes()).decode("ascii")
+    except OSError:
+        return None
+
+
+def score_vision(chat_fn: ChatFn) -> float | None:
+    """Empirically determine vision capability: send the fixed probe image with each question and
+    score reading the word (OCR) + counting the shapes. A text-only model can't read GLYPHON or see
+    the circles, so it scores ~0 — that failure IS the determination. ``None`` if the probe image is
+    missing (not tested) rather than a misleading zero."""
+    b64 = _probe_image_b64()
+    if b64 is None:
+        log.warning("benchmark: vision probe image missing at %s — skipping vision", _VISION_PROBE)
+        return None
+    passed = 0
+    for prompt, check in _VISION_CASES:
+        try:
+            out = chat_fn([{"role": "user", "content": prompt, "images": [b64]}])
+        except Exception as exc:  # a non-vision model may error on an image — a 0 for that case
+            log.warning("benchmark: vision call failed: %s", exc)
+            out = ""
+        if check(out):
+            passed += 1
+    return passed / len(_VISION_CASES)
+
+
 def score_capability(chat_fn: ChatFn, capability: str) -> float:
     """Fraction of a capability's checkable cases that the model passes."""
     cases = CAPABILITY_TESTS[capability]
@@ -361,6 +404,7 @@ class ModelBenchmark:
     epistemics: float
     reasoning: float
     coherence: float | None
+    vision: float | None        # empirical image-probe score; None = not tested (no probe image)
     return_time: float | None   # None = probe failed/unmeasured (NOT fast — see measurement)
     quality: float
 
@@ -456,6 +500,10 @@ def benchmark_model(
         except Exception as exc:
             log.warning("benchmark: coherence pass failed for %s: %s", model_name, exc)
 
+    # Vision: empirical image-probe capability. Informational (like coherence) — kept OUT of quality
+    # so a text-only model scoring ~0 isn't penalized on a dimension it never claimed.
+    vision = score_vision(chat_fn)
+
     scores = [talk, tools, code, discipline, reasoning]
     if framework:
         scores.append(epistemics)
@@ -471,6 +519,7 @@ def benchmark_model(
         epistemics=round(epistemics, 3),
         reasoning=round(reasoning, 3),
         coherence=coherence,
+        vision=round(vision, 3) if vision is not None else None,
         return_time=round(return_time, 3) if return_time is not None else None,
         quality=round(quality, 3),
     )
@@ -720,7 +769,7 @@ def benchmark_fleet(
                     storage, model_name, quality=bench.quality,
                     talk=bench.talk, tools=bench.tools, code=bench.code, coherence=bench.coherence,
                     discipline=bench.discipline, epistemics=bench.epistemics,
-                    reasoning=bench.reasoning,
+                    reasoning=bench.reasoning, vision=bench.vision,
                 )
                 # The chosen node's real battery latency — per-node only. A failed probe (None) is
                 # left unwritten so the node row stays untimed and the speed-matrix re-probes it,
