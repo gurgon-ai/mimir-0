@@ -8,7 +8,7 @@ it's assembled into the prompt with an explicit epistemic structure. You tell it
 later it recalls that fact, cites where it came from, and tells you when it's reasoning from
 thin evidence instead of confabulating.
 
-> **Status: pre-alpha — feature-rich, actively evolving (snapshot 2026-06-15; subject to
+> **Status: pre-alpha — feature-rich, actively evolving (snapshot 2026-06-19; subject to
 > change).** The whole architecture in [`DESIGN.md`](DESIGN.md) is implemented and verified
 > end-to-end against a live multi-node LAN: the acceptance loop, every typed knowledge layer, the
 > async cognition, and the distributed model fleet. On top of the spine, the **highest-leverage
@@ -146,9 +146,12 @@ On top of that:
   epistemic-framework gauntlet — tier-deference under noise, context grounding, long-context recall
   that scales with your deployment window). Run it as a staged, human-veto **tournament** that
   narrows the fleet round by round. Qualification is **distributed and concurrent** (one worker per
-  node), and it qualifies at your **operational context window**, not a toy one. Then:
+  node), and it qualifies at your **operational context window**, not a toy one — a **Context-size
+  slider** (Small → X-Large) sets that window *and* how much memory you recall, together. Then:
   - a **per-node placement matrix** — every model on every node it runs on, that node's measured
-    speed, and each node's **winner** (best quality, speed breaking ties) and ⚡ fastest;
+    speed, and each node's **winner** (best quality, speed breaking ties) and ⚡ fastest. The
+    tournament board groups results **by machine** and shows *every machine tested* — including the
+    ones where a model failed or timed out (a failed test is still a result), so no node is hidden;
   - a **diversity-first "second lineup"** — an adversarial council roster that favours a *spread of
     model families* over raw ranking (different families fail differently), graded with the
     user-facing size/latency caps **off** so the big, slow, brilliant models a chat cap excludes
