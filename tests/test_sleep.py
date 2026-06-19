@@ -9,11 +9,15 @@ from mimir.cognition.graph import store_triples
 from mimir.cognition.sleep import SleepReport, consolidate
 from mimir.storage.models import EvidenceTier, Memory, MemoryKind
 from mimir.storage.repo import (
+    add_forum_post,
     browse_memories,
     browse_triples,
     count_memories,
+    create_forum_thread,
     get_memory,
+    list_forum_threads,
     list_memories,
+    prune_forum_threads,
     save_memory,
 )
 
@@ -35,6 +39,30 @@ def test_near_duplicates_merge(brain: Mimir) -> None:
     save_memory(brain._storage, Memory(text="beta two", embedding=[1.0, 0.0, 0.0], user="g"))
     consolidate(brain._storage)
     assert count_memories(brain._storage, kind=MemoryKind.MEMORY) == 1  # cosine 1.0 → merged
+
+
+def test_forum_threads_are_recency_bounded(brain: Mimir) -> None:
+    # The forum is a browsable history; each verdict is also a memory, so it can be capped like any
+    # other aux store. Keep the newest 2 of 5 — older deliberations (and their posts) are trimmed.
+    ids = []
+    for i in range(5):
+        tid = create_forum_thread(brain._storage, question=f"Q{i}?", source="council", verdict="v")
+        add_forum_post(brain._storage, thread_id=tid, author="s", kind="position", content="p")
+        ids.append(tid)
+    removed = prune_forum_threads(brain._storage, 2)
+    assert removed == 3
+    kept = {t["id"] for t in list_forum_threads(brain._storage)}
+    assert kept == {ids[3], ids[4]}  # the two newest survive
+    # posts of pruned threads are gone too (no orphans)
+    assert brain.forum_thread(ids[0]) is None
+
+
+def test_consolidate_reports_forum_pruning(brain: Mimir) -> None:
+    # Under the keep cap nothing is pruned, but the pass runs and reports the field.
+    create_forum_thread(brain._storage, question="only one?", source="council", verdict="v")
+    report = consolidate(brain._storage)
+    assert report.forum_pruned == 0
+    assert len(list_forum_threads(brain._storage)) == 1
 
 
 def test_salience_decays_with_disuse(brain: Mimir) -> None:

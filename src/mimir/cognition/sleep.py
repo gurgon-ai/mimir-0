@@ -38,6 +38,7 @@ from ..storage.repo import (
     delete_memories,
     delete_triples,
     list_memories,
+    prune_forum_threads,
     prune_kind,
 )
 
@@ -67,11 +68,12 @@ class SleepReport:
     archived: int = 0
     contradictions_resolved: int = 0
     pruned: int = 0  # stale single-latest-wins rows (working-memory/self-model versions) tidied
+    forum_pruned: int = 0  # old council deliberations trimmed from the browsable forum
 
     @property
     def total_changes(self) -> int:
         return (self.deduped + self.decayed + self.archived
-                + self.contradictions_resolved + self.pruned)
+                + self.contradictions_resolved + self.pruned + self.forum_pruned)
 
 
 # Working-memory, self-model, and sentinel-note rows accumulate one-per-turn/synthesis but only the
@@ -80,6 +82,9 @@ class SleepReport:
 WORKING_MEMORY_KEEP = 2
 SELF_MODEL_KEEP = 3
 SENTINEL_NOTE_KEEP = 10  # the "reflections" view shows recent ones; older are unused dead weight
+# The council forum is a browsable history of deliberations; each verdict is also a recallable
+# memory, so the forum can be recency-bounded like every other aux store without losing knowledge.
+FORUM_THREAD_KEEP = 200
 
 
 def _norm(text: str) -> str:
@@ -105,14 +110,16 @@ def consolidate(storage: StorageGateway, *, now: float | None = None) -> SleepRe
         + prune_kind(storage, MemoryKind.SELF_MODEL, SELF_MODEL_KEEP)
         + prune_kind(storage, MemoryKind.SENTINEL_NOTE, SENTINEL_NOTE_KEEP)
     )
+    report.forum_pruned = prune_forum_threads(storage, FORUM_THREAD_KEEP)
 
     log.info(
-        "sleep: deduped=%d decayed=%d archived=%d contradictions=%d pruned=%d",
+        "sleep: deduped=%d decayed=%d archived=%d contradictions=%d pruned=%d forum_pruned=%d",
         report.deduped,
         report.decayed,
         report.archived,
         report.contradictions_resolved,
         report.pruned,
+        report.forum_pruned,
     )
     return report
 

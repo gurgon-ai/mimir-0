@@ -24,6 +24,7 @@ from ...prompts import (
     DOC_SUMMARY_MARKER,
     LIBRARY_COMPOSE_MARKER,
     NARRATIVE_MARKER,
+    OUTPUT_CHECK_MARKER,
     RECALL_CLOSE,
     RECALL_OPEN,
     SELF_MODEL_MARKER,
@@ -55,6 +56,8 @@ class MockProvider:
             return self._council_synth(user)
         if COUNCIL_PERSONA_MARKER in system:
             return self._council_persona(system, user)
+        if OUTPUT_CHECK_MARKER in system:
+            return self._output_check()
         if WORKING_MEMORY_MARKER in system:
             return self._working_memory(user)
         if SELF_MODEL_MARKER in system:
@@ -127,6 +130,12 @@ class MockProvider:
             "DISSENT_BY: skeptic\n"
             "CONSENSUS: 0.7"
         )
+
+    @staticmethod
+    def _output_check() -> str:
+        """The deterministic mock can't judge contradiction, so it answers the safe, silent way: no
+        conflict. The self-correction path is exercised by monkeypatching a verdict in tests."""
+        return "CONTRADICTS: none\nNOTE: none"
 
     @staticmethod
     def _working_memory(brief: str) -> str:
