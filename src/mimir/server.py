@@ -1709,11 +1709,11 @@ _HTML = """<!doctype html>
       </div>
       <div class="hint" style="margin-top:4px;">Already qualified once? After adding a model, this scores <b>only the new ones</b> — every existing score is kept, no hour-long re-run.</div>
       <div class="hint" style="margin-top:14px; opacity:0.8;">— or do it manually, one step at a time —</div>
-      <div class="row" style="margin-top:6px;">
-        <button class="secondary" id="fleetScanBtn" type="button" title="List what models are installed on each node. Fast — runs no models.">1 · Find models</button>
-        <button class="secondary" id="fleetBenchBtn" type="button" title="Run each model through the test battery to score it. Slow — this is the expensive step.">2 · Benchmark</button>
-        <button class="secondary" id="fleetMatrixBtn" type="button" title="The time trial: speed-test each qualified model on every node it's installed on but not yet timed, so we know which edge can run what (the background-worker map). Records even slow results. Disabled while a benchmark/tournament is running.">3 · Speed-test</button>
-        <button class="secondary" id="fleetApplyBtn" type="button" title="Point each role at its top-scoring model from the benchmark.">4 · Apply best</button>
+      <div class="row" style="margin-top:6px; flex-wrap:nowrap; gap:6px;">
+        <button class="secondary" id="fleetScanBtn" type="button" style="font-size:0.82em; padding:5px 8px; white-space:nowrap;" title="List what models are installed on each node. Fast — runs no models.">1 · Find models</button>
+        <button class="secondary" id="fleetBenchBtn" type="button" style="font-size:0.82em; padding:5px 8px; white-space:nowrap;" title="Run each model through the test battery to score it. Slow — this is the expensive step.">2 · Benchmark</button>
+        <button class="secondary" id="fleetMatrixBtn" type="button" style="font-size:0.82em; padding:5px 8px; white-space:nowrap;" title="The time trial: speed-test each qualified model on every node it's installed on but not yet timed, so we know which edge can run what (the background-worker map). Records even slow results. Disabled while a benchmark/tournament is running.">3 · Speed-test</button>
+        <button class="secondary" id="fleetApplyBtn" type="button" style="font-size:0.82em; padding:5px 8px; white-space:nowrap;" title="Point each role at its top-scoring model from the benchmark.">4 · Apply best</button>
       </div>
       <div class="hint" style="margin-top:6px;"><b>Find</b> lists installed models (fast, no scoring) → <b>Benchmark</b> scores them all <b>and then speed-tests every (model, node) pairing automatically</b> (so each model's true fastest node is known — a node can be far faster than the one it was scored on) → <b>Apply</b> routes each role to the best. <b>Speed-test</b> is a manual re-run (e.g. after re-enabling a node); the benchmark already does it.</div>
       <div class="row" style="margin-top:8px; align-items:center; gap:14px; flex-wrap:wrap;">
