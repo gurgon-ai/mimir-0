@@ -1467,7 +1467,7 @@ _HTML = """<!doctype html>
   #benchBoard td { padding:7px 10px; border-bottom:1px solid #1a2029; white-space:nowrap; }
   #benchBoard tr.top td { background:#13241a; }
   #benchBoard td.q { font-weight:700; color:#d7dde5; }
-  #benchBoard .legend { font-size:12px; color:#6f7a8a; }
+  #benchBoard .legend { font-size:12px; color:#9aa6b4; }
   .tag.tier { background:#16324a; color:#9fd0ff; }
   .searchrow { display:flex; gap:6px; margin-bottom:10px; }
   .searchrow input { flex:1; }
