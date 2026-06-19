@@ -449,6 +449,7 @@ def _node_vision(node: str, model_name: str, num_ctx: int) -> float | None:
 def benchmark_model(
     model: ModelGateway, model_name: str, *, num_ctx: int = 8192,
     framework: bool = True, call_timeout_s: float = 60.0, node: str | None = None,
+    on_step: Callable[[int, int, str], None] | None = None,
 ) -> ModelBenchmark:
     """Run the battery against one model.
 
@@ -541,28 +542,45 @@ def benchmark_model(
     chat_fn = _guard(make_chat(None))  # role/default temp — variance IS the signal
     det = _guard(make_chat(0.0))       # greedy — verifiable single-answer dims, so luck can't flip
 
+    # Per-model sub-progress (the gauntlet's "test X/N" bar): announce each dimension as it starts,
+    # so a UI can show how many of a model's tests remain, not just a spinning timer.
+    _dims = ["talk", "tools", "code", "discipline", "reasoning", "latency"]
+    if framework:
+        _dims.append("epistemics")
+    _dims.append("vision")
+    _total_steps = len(_dims)
+
+    def _step(label: str) -> None:
+        if on_step is not None:
+            on_step(_dims.index(label) + 1, _total_steps, label)
+
+    _step("talk")
     talk = score_capability(det, "talk")
+    _step("tools")
     tools = score_capability(det, "tools")
+    _step("code")
     code = score_capability(det, "code")
-    discipline = score_capability(chat_fn, "discipline")  # sampled at temp: catches stochastic leak
-    # Reasoning: can it actually solve problems with verifiable answers (not just follow a format)?
-    # This is what keeps quality from saturating near 1.0 for any fluent model (DESIGN §4).
+    _step("discipline")   # sampled at temp — catches a stochastic tag leak
+    discipline = score_capability(chat_fn, "discipline")
+    # Reasoning: can it actually solve verifiable problems (not just follow a format)? Keeps quality
+    # from saturating near 1.0 for any fluent model (DESIGN §4).
+    _step("reasoning")
     reasoning = score_capability(det, "reasoning")
-    # Representative latency from one real-length generation (NOT the battery average): the battery
-    # calls emit only a few tokens, so their round-trip is dominated by overhead and can't tell a
-    # slow remote 12B from a snappy local 3B — which lets a big model look 'instant' and sweep even
-    # the speed-weighted roles it should lose. A real turn generates hundreds of tokens, throughput
-    # is what the user feels (DESIGN §4: latency must reflect an actual turn).
+    # Representative latency from one real-length generation (throughput is what the user feels).
+    _step("latency")
     return_time = _measure_turn_latency(chat_fn, timed_latency)
 
-    # The expensive identity-qualification dimensions — only in the FULL benchmark (not at triage).
-    # Epistemics: does the model exploit Mimir's tiered/provenance/gated context (DESIGN §3)? The
-    # structured-arm competence (layered gauntlet + grounding + long-context) — the chat qualifier.
-    epistemics = (score_epistemic_competence(chat_fn, samples=2, num_ctx=num_ctx)
-                  if framework else 0.0)
+    # The expensive identity-qualification dimension — only in the FULL benchmark (not at triage).
+    # Epistemics: does the model exploit Mimir's tiered/provenance/gated context (DESIGN §3)?
+    if framework:
+        _step("epistemics")
+        epistemics = score_epistemic_competence(chat_fn, samples=2, num_ctx=num_ctx)
+    else:
+        epistemics = 0.0
 
-    # Vision: empirical image-probe capability (greedy — a fixed-answer probe). Informational — kept
-    # OUT of quality so a text-only model scoring ~0 isn't penalized for a dim it never claimed.
+    # Vision: empirical image-probe capability (greedy). Informational — kept OUT of quality so a
+    # text-only model scoring ~0 isn't penalized for a dim it never claimed.
+    _step("vision")
     vision = score_vision(det)
 
     scores = [talk, tools, code, discipline, reasoning]
@@ -698,6 +716,7 @@ def benchmark_fleet(
     progress: Callable[[int, int, str, float | None], None] | None = None,
     on_result: Callable[[ModelBenchmark, str], None] | None = None,
     on_done: Callable[[str], None] | None = None,
+    on_step: Callable[[str, int, int, str], None] | None = None,
 ) -> FleetBenchmarkResult:
     """Benchmark the distinct models in the catalogue and write their scores back.
 
@@ -826,8 +845,12 @@ def benchmark_fleet(
                 if lock:
                     lock.acquire()
                 try:
-                    bench = benchmark_model(model, model_name, num_ctx=num_ctx, framework=framework,
-                                            call_timeout_s=call_timeout, node=node)
+                    bench = benchmark_model(
+                        model, model_name, num_ctx=num_ctx, framework=framework,
+                        call_timeout_s=call_timeout, node=node,
+                        on_step=((lambda d, t, lbl: on_step(model_name, d, t, lbl))
+                                 if on_step else None),
+                    )
                     used = node
                     break
                 except _NodeUnreliable as exc:

@@ -688,6 +688,12 @@ class _Handler(BaseHTTPRequestHandler):
         def _on_done(model: str) -> None:   # fires for EVERY model (scored, failed over, or skipped)
             with srv.bench_lock:
                 srv.bench_state.get("inflight", {}).pop(model, None)
+                srv.bench_state.get("steps", {}).pop(model, None)
+
+        def _on_step(model: str, done: int, total: int, label: str) -> None:
+            with srv.bench_lock:   # per-model sub-progress: which test it's on (the gauntlet's X/N)
+                srv.bench_state.setdefault("steps", {})[model] = {
+                    "done": done, "total": total, "label": label}
 
         def _speed_progress(i: int, total: int, model: str) -> None:
             with srv.bench_lock:
@@ -697,7 +703,7 @@ class _Handler(BaseHTTPRequestHandler):
         def _run() -> None:
             try:
                 with srv.brain_lock:
-                    result = run(_progress, _on_result, _on_done)
+                    result = run(_progress, _on_result, _on_done, _on_step)
                     # Phase 3 — speed-test EVERY remaining (model, node) pairing, so each model's
                     # TRUE fastest node is known: a node can be far faster than the one a model's
                     # capability was scored on, and the recommendation's speed term (+ the per-node
@@ -733,9 +739,9 @@ class _Handler(BaseHTTPRequestHandler):
         cap = float(body["max_model_size_b"]) if body.get("max_model_size_b") not in (None, "") else None
         floor = float(body["min_model_size_b"]) if body.get("min_model_size_b") not in (None, "") else None
         latency = float(body["max_latency_s"]) if body.get("max_latency_s") not in (None, "") else None
-        return self._run_benchmark_bg(lambda p, r, d: self.server.brain.benchmark_fleet(
+        return self._run_benchmark_bg(lambda p, r, d, st: self.server.brain.benchmark_fleet(
             max_params_b=cap, min_params_b=floor, latency_budget_s=latency,
-            progress=p, on_result=r, on_done=d,
+            progress=p, on_result=r, on_done=d, on_step=st,
         ))
 
     def _qualify_new(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -745,9 +751,9 @@ class _Handler(BaseHTTPRequestHandler):
         floor = float(body["min_model_size_b"]) if body.get("min_model_size_b") not in (None, "") else None
         latency = float(body["max_latency_s"]) if body.get("max_latency_s") not in (None, "") else None
         return self._run_benchmark_bg(
-            lambda p, r, d: self.server.brain.qualify_new_models(
+            lambda p, r, d, st: self.server.brain.qualify_new_models(
                 max_params_b=cap, min_params_b=floor, latency_budget_s=latency,
-                progress=p, on_result=r, on_done=d,
+                progress=p, on_result=r, on_done=d, on_step=st,
             ),
             scanning="finding newly-installed models…",
         )
@@ -756,8 +762,8 @@ class _Handler(BaseHTTPRequestHandler):
         """Grade the council pool — the big models above the chat cap, caps off — in place (no
         rescan, so the main pool's scores survive). Then they enter the council roster."""
         return self._run_benchmark_bg(
-            lambda p, r, d: self.server.brain.benchmark_council_pool(
-                progress=p, on_result=r, on_done=d),
+            lambda p, r, d, st: self.server.brain.benchmark_council_pool(
+                progress=p, on_result=r, on_done=d, on_step=st),
             scanning="grading the council pool (big models, caps off)…",
         )
 
@@ -779,7 +785,10 @@ class _Handler(BaseHTTPRequestHandler):
         with self.server.bench_lock:
             state = dict(self.server.bench_state)
             inflight = dict(state.get("inflight", {}))
+            steps = dict(state.get("steps", {}))
         state.update(self._inflight_view(inflight))
+        state["current_step"] = steps.get(state.get("current"))   # the current model's test X/N
+        state.pop("steps", None)
         # Per-(model, node) speeds so the board can show a model on EVERY node it runs on (quality
         # scored once, speed per node) — the speed-test's output the one-row-per-model run never had.
         state["speeds"] = self.server.brain.catalogue_speeds()
@@ -791,7 +800,10 @@ class _Handler(BaseHTTPRequestHandler):
         with self.server.tourney_lock:
             state = dict(self.server.tourney_state)
             inflight = dict(state.get("inflight", {}))
+            steps = dict(state.get("steps", {}))
         state.update(self._inflight_view(inflight))
+        state["current_step"] = steps.get(state.get("current"))   # the current model's test X/N
+        state.pop("steps", None)
         # Per-(model, node) speeds so the tournament table shows each model on EVERY node it's timed
         # on (the speed-test's output), not just the one node it was scored on.
         state["speeds"] = self.server.brain.catalogue_speeds()
@@ -938,6 +950,12 @@ class _Handler(BaseHTTPRequestHandler):
         def _on_done(model: str) -> None:   # fires for EVERY model (scored, failed over, or skipped)
             with srv.tourney_lock:
                 srv.tourney_state.get("inflight", {}).pop(model, None)
+                srv.tourney_state.get("steps", {}).pop(model, None)
+
+        def _on_step(model: str, done: int, total: int, label: str) -> None:
+            with srv.tourney_lock:   # the gauntlet's per-model "test X/N" bar
+                srv.tourney_state.setdefault("steps", {})[model] = {
+                    "done": done, "total": total, "label": label}
 
         def _speed_progress(i: int, total: int, model: str) -> None:
             with srv.tourney_lock:
@@ -957,6 +975,7 @@ class _Handler(BaseHTTPRequestHandler):
                         latency_budget_s=scope.get("max_latency_s"),
                         only_models=keep, framework=not triage, persist=not triage,
                         progress=_progress, on_result=_on_result, on_done=_on_done,
+                        on_step=_on_step,
                     )
                     # After the REAL (persisting) round, speed-test every (model, node) pairing so
                     # the finals are computed with each model's true fastest node — not the one node
@@ -2795,11 +2814,12 @@ async function resumeFleetWork() {
     // resumes). Otherwise — idle, benchmark done, or tournament 'done' — the speed-test is the next
     // step, so ALWAYS resolve the button to enabled (it used to be left in whatever stuck state it
     // had, which is why it stayed grey after a run).
-    const midTourney = ts.active && (ts.phase === "running" || ts.phase === "awaiting_veto");
-    setMatrixEnabled(!midTourney);
+    const live = ts.active && (ts.phase === "running" || ts.phase === "speed"
+                              || ts.phase === "awaiting_veto");
+    setMatrixEnabled(!live);
     if (ts.active) {
       _benchBoardClosed = false;
-      if (ts.phase === "running") pollTournament();   // re-attach the live poll
+      if (ts.phase === "running" || ts.phase === "speed") pollTournament();  // re-attach live poll
       else renderTourney(ts);                          // awaiting_veto / done / error → re-show it
     }
   } catch (e) { /* fleet endpoints unavailable (no backend) — nothing to resume */ }
@@ -2838,6 +2858,16 @@ const VIS_TH = `<th style="${VIS_SEP}" title="Vision is a capability check — i
 const VIS_TD = ` style="${VIS_SEP}"`;
 // Per-role benchmark band → text colour (green all-strong, yellow eligible, red weak/barred).
 const BAND_COLOR = { green: "#7fd17f", yellow: "#e0c060", red: "#e0604a" };
+// The current model's per-model sub-progress in the battery (the gauntlet's "test X/N" bar): which
+// of its dimensions is running and how many remain, so it's not just a spinning timer.
+function stepBar(cs) {
+  if (!cs || !cs.total) return "";
+  const pct = Math.round((cs.done / cs.total) * 100);
+  return `<div style="margin:3px 0 8px;"><div class="hint">test ${cs.done}/${cs.total}`
+    + `${cs.label ? " · scoring " + cs.label + "…" : ""} (${cs.total - cs.done} left)</div>`
+    + `<div style="background:#2b333f; height:7px; border-radius:4px; max-width:340px;">`
+    + `<div style="background:#2d8; height:7px; border-radius:4px; width:${pct}%;"></div></div></div>`;
+}
 function _medal(i) { return i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : (i + 1) + "."; }
 function _stars(q) { const n = Math.max(0, Math.min(5, Math.round((q || 0) * 5))); return "★".repeat(n) + "☆".repeat(5 - n); }
 
@@ -2866,8 +2896,14 @@ function _bestSpeed(model, fallback, speeds) {
   const per = speeds[model], v = per ? Object.values(per) : [];
   return v.length ? Math.min(...v) : (fallback != null ? fallback : 1e9);
 }
+// One neat number for a model-centric row: its FASTEST node's time (no IP — the per-machine
+// breakdown lives in 📊 Per-node placement, grouped by machine).
+function fastestCell(model, fallback, speeds) {
+  const b = _bestSpeed(model, fallback, speeds);
+  return b < 1e9 ? b.toFixed(1) + "s" : "·";
+}
 
-function renderBenchResults(results, header, speeds) {
+function renderBenchResults(results, header, speeds, currentStep) {
   if (_benchBoardClosed) return;
   benchShow(true);
   speeds = speeds || {};
@@ -2880,14 +2916,15 @@ function renderBenchResults(results, header, speeds) {
   const all = [...byModel.values()].sort((a, b) => (b.quality || 0) - (a.quality || 0)
     || _bestSpeed(a.model, a.return_time, speeds) - _bestSpeed(b.model, b.return_time, speeds));
   let h = `<h2>${header || "🏁 Benchmarking…"} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="showPlacement()">📊 Per-node placement</button> <button class="secondary" style="padding:4px 10px;" onclick="showCouncil()">🏟️ Council</button> <button class="secondary" style="padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
-  h += '<div class="legend">✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; ★ = quality &nbsp;|&nbsp; one row per model; Speed = each node it runs on (🖥️ local · 🌐 LAN), fastest first &nbsp;|&nbsp; <b>Vision</b> is a capability check (❌ none · 🟡 sees · ✅ full) — it does <b>not</b> affect the score</div>';
+  h += '<div class="legend">✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; ★ = quality &nbsp;|&nbsp; one row per model; Speed = its fastest node (per-machine breakdown in 📊 Per-node placement) &nbsp;|&nbsp; <b>Vision</b> is a capability check (❌ none · 🟡 sees · ✅ full) — it does <b>not</b> affect the score</div>';
+  h += stepBar(currentStep);   // current model's per-model "test X/N" sub-progress
   if (!all.length) { $("benchBoard").innerHTML = h + '<div class="hint" style="margin-top:12px;">Warming up the first model…</div>'; return; }
-  h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th><th>Epistemics</th><th>Speed/turn (per node)</th>" + VIS_TH + "</tr>";
+  h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th><th>Epistemics</th><th>Speed/turn</th>" + VIS_TH + "</tr>";
   all.forEach((r, i) => {
     h += `<tr class="${i === 0 ? "top" : ""}"><td>${_medal(i)}</td><td>${r.model}</td>`
       + `<td class="q">${_stars(r.quality)} <span style="color:#8a94a3; font-weight:400;">${(r.quality ?? 0).toFixed(2)}</span></td>`
       + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td><td>${_emoji(r.epistemics)}</td>`
-      + `<td>${speedCell(r.model, r.return_time, speeds)}</td>`
+      + `<td>${fastestCell(r.model, r.return_time, speeds)}</td>`
       + `<td${VIS_TD}>${_visionEmoji(r.vision)}</td></tr>`;
   });
   $("benchBoard").innerHTML = h + "</table>";
@@ -3072,7 +3109,7 @@ function tourneyTable(results, showChecks, round, speeds) {
   const span = 10 + (full ? 1 : 0) + (showChecks ? 1 : 0);
   let cols = `<th></th>${showChecks ? "<th>Keep</th>" : ""}<th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th>`;
   if (full) cols += "<th>Epistemics</th>";
-  cols += "<th>Speed/turn (per node)</th>" + VIS_TH;
+  cols += "<th>Speed/turn</th>" + VIS_TH;
   let h = `<table><tr>${cols}</tr>`;
   order.forEach(node => {
     const rows = groups[node].sort((a, b) => (b.quality || 0) - (a.quality || 0));
@@ -3085,7 +3122,7 @@ function tourneyTable(results, showChecks, round, speeds) {
         + `<td class="q">${_stars(r.quality)} <span style="color:#8a94a3; font-weight:400;">${(r.quality ?? 0).toFixed(2)}</span></td>`
         + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td>`;
       if (full) h += `<td>${_emoji(r.epistemics)}</td>`;
-      h += `<td>${speedCell(r.model, r.return_time, speeds)}</td><td${VIS_TD}>${_visionEmoji(r.vision)}</td></tr>`;
+      h += `<td>${r.return_time != null ? r.return_time.toFixed(1) + "s" : "·"}</td><td${VIS_TD}>${_visionEmoji(r.vision)}</td></tr>`;
     });
   });
   return h + "</table>";
@@ -3107,6 +3144,7 @@ function renderTourney(s) {
     const slow = (s.current && secs != null && secs > 90) ? " ⏳ (slow — a latency cap would skip models like this)" : "";
     const eta = (s.eta != null) ? ` · ~${fmtDuration(s.eta)} left` : "";
     h += `<div class="hint" style="margin:6px 0;">${s.total ? `Scoring ${s.current}…${more} · ${s.i}/${s.total} done${onModel}${eta}${slow}` : (s.current || "Preparing…")}</div>`;
+    h += stepBar(s.current_step);   // the gauntlet's per-model "test X/N" bar
   } else if (phase === "speed") {
     h += `<div class="hint" style="margin:6px 0;">⏱ Speed-testing every (model, node) pairing — ${s.i || 0}/${s.total || 0}: ${s.current || ""} <span style="opacity:.7;">(so each model's true fastest node is known before the finals)</span></div>`;
   }
@@ -3251,7 +3289,7 @@ async function pollBenchmark() {
       $("fleetMsg").textContent = speedPhase ? `${s.current}` : (s.total ? `Benchmarking ${s.i}/${s.total}: ${s.current}${more}…${eta}` : `${s.current || "Preparing…"}`);
       const header = speedPhase ? `⏱ Speed-testing every (model, node) pairing — ${s.i}/${s.total}`
         : (s.total ? `🏁 Benchmarking ${s.i}/${s.total}${eta}` : `🔎 ${s.current || "Preparing…"}`);
-      renderBenchResults(s.results, header, s.speeds);   // live scoreboard takes over the chat pane
+      renderBenchResults(s.results, header, s.speeds, s.current_step);   // live scoreboard + step bar
       await new Promise(r => setTimeout(r, 1500));
     }
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
