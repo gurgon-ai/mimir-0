@@ -1,16 +1,13 @@
 # The benchmark scheduler — concurrent, distributed qualification
 
-**Status: design [proposed].** The build that makes fleet qualification parallel. Grounded in what
-we learned shipping the sequential version (`cognition/benchmark.py`) and the live testing that
-shaped it. Companion to `INFERENCE_ENGINE.md` §6/§6a; this is the detailed scheduler spec.
+**Status: mostly built.** The design behind fleet qualification running in parallel across the LAN.
+The work-stealing scheduler (one worker per node), the automatic per-`(model, node)` speed matrix,
+the placement matrix, and the diversity "second lineup" are shipped; remaining pieces are flagged
+inline. Companion to `INFERENCE_ENGINE.md` §6/§6a; this is the detailed scheduler spec.
 
-> **Note (superseded in part):** the **coherence / peer-review judging** discussed below (§4-ish, the
-> `judges_trustworthy` canary, the panel-voted coherence pass) was **removed** — it scored every
-> model the same middling yellow and discriminated nothing. Its de-saturation job is now done
-> deterministically by an **empirically-chosen harder reasoning battery** (cases probed across the
-> fleet, kept only if they separate strong models from weak), and ranking is a transparent **points**
-> total (quality + speed + size). Concurrency is built; the benchmark also **speed-tests every
-> `(model, node)` pairing** as an automatic final phase. Read the judging sections as history.
+Ranking is a transparent **points** total (quality + speed + size) over an empirically-chosen,
+de-saturating battery (reasoning cases probed across the fleet, kept only if they separate strong
+models from weak). There is no judge-based coherence dimension.
 
 ---
 
@@ -223,51 +220,6 @@ main pool's scores survive (the `complete_speed_matrix` discipline). Surfaced as
 node's speed and the node's winner. Still open: explicit background/council *roles* in `ROLE_NEEDS`
 (loose, non-discipline-gated) so role assignment can query the roster directly.
 
-### Coherence is a post-qualification peer-review pass, not a qualification gate [next]
-
-Coherence is the one **judge-based** dimension — a panel of *other* models rates a candidate's answer
-for faithfulness. Running it *inside* the qualification battery (as today) has a chicken-and-egg flaw:
-a trustworthy judge panel requires **qualified** models, but during qualification none exist yet, so
-the judges are "first-3-available" (weak ones included) → conservative, noisy, run-to-run-unstable
-scores that drag the ranking around for no signal. (Observed live: capable 24–27B models all landing
-~0.65 coherence — that's the panel, not the candidates. And the rubric rewards *terseness*: the only
-model to score green was a 2B, because it answered with the bare facts while the bigger, more helpful
-models got dinged for "invented details" — i.e. for elaborating. Coherence-as-judged penalizes
-exactly the helpfulness you want.)
-
-The fix mirrors the parent's nightly **peer-review** phase: **defer coherence out of the deterministic
-qualification entirely.** The deterministic dimensions decide who qualifies; then a **post-
-qualification peer-review pass** runs coherence on the survivors only, judged by the **top qualified
-models** (a real trusted panel — never a model judging itself). Three wins: faster (survivors only),
-better-calibrated (qualified judges), and the qualification ranking stops carrying judge noise. This
-is capacity-bound, latency-irrelevant work — a natural fit for the finals or for idle/nightly time.
-
-**The scoring redesign — a criteria rubric, not a vibe number [decided 2026-06-13].** Relocating the
-pass isn't enough; the *scoring* is the deeper bug. Observed live: **every** model lands yellow
-(~0.65). That's not the models — it's three compounding measurement faults: (1) **LLM central
-tendency** — asked to "rate faithfulness 0.0–1.0," judges cluster at 0.6–0.8 almost regardless of
-input; (2) **mean-of-N compresses** further toward the center; (3) the **probe is trivial** (one
-simple fact every model gets right), so there's no real spread and the only variance left *is* judge
-noise. The tell that it's the judge: the `judges_trustworthy` canary **passes** (good ranked above
-garbled) while real answers all compress to ~0.65 — judges separate extremes but flatten the
-realistic middle. So the redesign:
-
-- **Stop asking for a number — ask for discrete checks.** The judge returns a small structured
-  verdict (JSON), e.g. `{"used_required_facts": bool, "invented_detail": bool, "contradicted": bool}`.
-  Score = fraction of criteria passed. Discrete groundedness checks escape vibe-compression, and
-  parsing the JSON sidesteps the `_parse_score` first-number bug ("on a scale of 0 to 1 …" → `0`).
-- **A probe with room to fail.** A short context with **≥2 facts that must be used**, a **trap**
-  (a plausible-but-absent detail a sloppy model invents), and something that **must be grounded**.
-  Now answers genuinely differ, so the dimension can discriminate.
-- **Fixes the terseness bias for free.** Criteria grade *groundedness* (used the facts, invented
-  nothing, contradicted nothing) — a model that elaborates with *grounded* detail isn't penalized;
-  only invented/contradictory detail counts against it. (Today's "free of invented details" rubric
-  dinged the helpful 24–27B models and crowned a terse 2B.)
-- **Qualified judges, self excluded** (per the peer-review relocation above).
-
-One structured criteria verdict thus fixes central tendency, the parse bug, and the terseness bias in
-a single move — and gives a *checkable* sub-score instead of a number pulled from the judge's vibe.
-
 ## 8. Failure modes (fail-loud)
 
 - **Node dies mid-battery** → the attempt raises → that (model, node) is marked tried and the model
@@ -307,7 +259,7 @@ the live board fills in as nodes finish — and the per-model elapsed timer alre
 ## 12. Build order
 
 1. **Pin a battery to a node** — `benchmark_model(node=…)`: a model's whole battery runs on one warm,
-   direct provider (no pool thrash). Coherence judges still use the gateway pool.
+   direct provider (no pool thrash).
 2. **The scheduler** (§4) wrapping the quality rounds — worker-per-node, claim/probe/test/requeue,
    termination. Tests: termination on a mock multi-node fleet; a too-slow node requeues to a fast
    one; capability never scored from a timed-out attempt; one-beast converges on the beast.

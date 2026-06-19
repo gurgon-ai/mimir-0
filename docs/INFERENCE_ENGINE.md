@@ -253,7 +253,7 @@ models, new hardware, a model update), preserving overrides unless changed.
 The battery (`DESIGN.md` §4) scores **six deterministic dimensions** — **talk, tools, code,
 reasoning, discipline, epistemics** (plus an informational **vision** check), outside-in ordered and
 size/latency-bounded; the **reasoning** cases are chosen empirically so strong models separate from
-weak. (An earlier judged **coherence** pass was removed — it discriminated nothing.) **[built]**
+weak. **[built]**
 
 What the non-obvious dimensions actually test **[built]**:
 

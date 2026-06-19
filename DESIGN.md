@@ -281,10 +281,8 @@ different minds. Diversity is emergent from the hardware, not a config chore.
 2. **Rank by points** (over the gate's survivors): the recommendation is a transparent points total
    — quality for the role (dominant) + speed (a strong, *universal* term: a slow model is bad for
    chat *and* background) + a faint size prior to break near-ties — so a saturated quality score
-   can't crown the wrong model on a coin-flip. (This replaced an earlier *judged coherence* pass: it
-   scored every model the same middling yellow and discriminated nothing, and a judge can't catch an
-   error it would also make. The harder, empirically-chosen reasoning battery in filter 1 does the
-   de-saturating job instead — deterministically, no judge call.)
+   can't crown the wrong model on a coin-flip. The harder, empirically-chosen reasoning battery in
+   filter 1 does the de-saturating job deterministically (no judge call).
 3. **Continuous governance** *(forward-looking)*: usage signal (correction rate, engagement) as a
    coherence proxy; a **golden set that self-expands** — when a human corrects the running system,
    that correction becomes a new golden case. Re-qualify after a runtime/model update.
