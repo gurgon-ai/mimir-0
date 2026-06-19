@@ -521,6 +521,7 @@ every = 0                       # legacy turn-cadence path (superseded by the wi
 [output_rag]                    # bidirectional RAG: ground the next turn in memory about the LAST reply
 enabled = true                  # after a reply, retrieve memory relevant to the model's own words
 top_k = 3                       # how many related memories to surface into the next turn
+self_check = true               # if the reply contradicts an outranking fact, surface a correction
 
 [deliberation]                  # during sleep, argue the system's own conflicts via the inner council
 enabled = true                  # also toggle live in the Sleep tab; "Deliberate now" triggers it manually

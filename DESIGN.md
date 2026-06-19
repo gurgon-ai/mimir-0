@@ -436,7 +436,14 @@ classes, pent-up priority, interruptible, surfaces. Post-response cognition (sen
 working memory) routes through it, as does **output-side bidirectional RAG [landed]** — after the
 model replies, a burst task retrieves memory relevant to *its own reply* and surfaces it into the
 next turn's prompt, so a thread the model itself opened gets grounded, not just the user's input (it
-excludes the facts just baked from that reply, so it's not an echo; `Mimir._output_rag`). All of it
+excludes the facts just baked from that reply, so it's not an echo; `Mimir._output_rag`). **Output
+self-correction is also [landed]:** when that retrieval surfaces a fact that *outranks* the reply (a
+primary-user/trusted/document fact), a cheap **background** check (`Mimir._output_check`,
+`cognition/output_rag.py`) asks whether the reply contradicts it; if so, a tentative correction
+surfaces next turn instead of the grounding note — the system catching its own drift from what it
+knows ("edge-awareness is the human part"). The parse is tolerant (a formatting slip reads as "no
+conflict" — a false self-correction is worse than a missed one), and it's gated by
+`[output_rag] self_check`. The richer jobs (prefetch, commitment-baking) remain open. All of it
 composes with the inference engine, which is *built* to be distributed-and-idle-aware rather than
 single-shot.
 
@@ -497,7 +504,10 @@ argued it — the fleet fan-out, visible), the verdict, and user comments (`foru
 schema v20). A `🏛 Forum` view toggles over the chat panel (like the memory graph) with full-admin
 housekeeping — comment, close/reopen, delete a post or a whole thread — and an "Ask the council" box.
 Comments are annotations, not inputs to the reasoning. This makes the system's adversarial reasoning
-something the operator can *read and curate*, not a black box.
+something the operator can *read and curate*, not a black box. The forum is **recency-bounded** like
+every other aux store — consolidation keeps the newest `FORUM_THREAD_KEEP` threads
+(`prune_forum_threads`); since each verdict is *also* stored as a recallable memory, trimming old
+threads bounds the browsable history without losing the understanding.
 
 > A concrete **build sketch** mapping the *rest* of §5a onto Mimir-0's parts (the bidirectional-RAG
 > tasks, idle takeover, the phased plan B1–B4) is parked in
@@ -553,9 +563,10 @@ needs.
   "wiki" (`Mimir.upload_document`/`ingest_pending_documents`/`documents`; `/api/documents/*`). EPUB and
   fuller *LLM compilation of documents into integrated, contradiction-resolved knowledge* remain later
   layers — the per-doc summary is the first step of that, not the whole of it. The **Library layer**
-  ("books I've read": gist in SQLite, detail in Markdown, progressive disclosure, with a Phase-2
-  model-driven fetch tool) is specced and staged in [`docs/LIBRARY.md`](docs/LIBRARY.md) — planned,
-  not built. (Distinct from the read-only Kiwix `[wiki]` reference source.)
+  ("books I've read": gist in SQLite, detail in Markdown, progressive disclosure) is **built** —
+  Phase 1 (UI Load button) and Phase 2 (the model-driven in-band `<FETCH id=N>` fetch, opt-in
+  `library_model_fetch`, streaming + non-streaming) — see [`docs/LIBRARY.md`](docs/LIBRARY.md).
+  (Distinct from the read-only Kiwix `[wiki]` reference source.)
 - **v0.1+ — cognition layers:** ~~working memory~~ _(landed: rolling cross-session salient
   context — a capped recency log of recent exchanges plus a periodically compressed summary,
   injected always-on just before the sentinel note)_, ~~self-model~~ _(landed: an evolving, generic

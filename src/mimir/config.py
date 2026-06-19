@@ -146,6 +146,10 @@ class Config:
     # model itself opened gets grounded, not just what the user asked. False = off.
     output_rag_enabled: bool = True
     output_rag_top_k: int = 3
+    # Self-correction pass: when the reply's retrieved context includes a fact that OUTRANKS the
+    # model's own generation (a primary-user/trusted/document fact), a cheap background check asks
+    # whether the reply contradicts it; if so, a tentative correction surfaces next turn. False=off.
+    output_rag_self_check: bool = True
     # Draft-RAG (synchronous two-pass recall): a cheap short DRAFT answer is generated first, memory
     # is re-retrieved against that draft (it surfaces what the reply is *about*, which the user's
     # wording alone may miss), and the new hits fold into the prompt the real answer is generated
@@ -390,6 +394,7 @@ def load_config(path: str | Path) -> Config:
         ),
         output_rag_enabled=bool(raw.get("output_rag", {}).get("enabled", True)),
         output_rag_top_k=int(raw.get("output_rag", {}).get("top_k", 3)),
+        output_rag_self_check=bool(raw.get("output_rag", {}).get("self_check", True)),
         draft_rag_enabled=bool(raw.get("draft_rag", {}).get("enabled", False)),
         draft_rag_top_k=int(raw.get("draft_rag", {}).get("top_k", 4)),
         draft_rag_tokens=int(raw.get("draft_rag", {}).get("draft_tokens", 160)),

@@ -89,6 +89,19 @@ COUNCIL_SYNTH_SYSTEM = (
 )
 
 
+# Output-RAG self-correction (DESIGN §5a): does the model's own reply contradict a fact that
+# outranks it? Run in the burst window, off the hot path.
+OUTPUT_CHECK_MARKER = "check the assistant reply against the established facts"
+OUTPUT_CHECK_SYSTEM = (
+    f"You {OUTPUT_CHECK_MARKER} below. Decide whether the reply ASSERTS something that contradicts "
+    "any fact — states its opposite or an incompatible value. Mere elaboration, a new topic, or a "
+    "question is NOT a contradiction; only a genuine conflict counts. Reply in exactly this "
+    "format, one field per line:\n"
+    "CONTRADICTS: <the number of the single most clearly contradicted fact, or 'none'>\n"
+    "NOTE: <one short sentence naming the conflict, or 'none'>"
+)
+
+
 WORKING_MEMORY_MARKER = "Update the working memory"
 WORKING_MEMORY_SYSTEM = (
     f"{WORKING_MEMORY_MARKER} — a compact ROLLING summary of the conversation so far that carries "

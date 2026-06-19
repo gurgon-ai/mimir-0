@@ -80,6 +80,13 @@ from .cognition.onboarding import (
     pending_onboarding,
     record_answer,
 )
+from .cognition.output_rag import (
+    OutputCheck,
+    authority_beliefs,
+    correction_surface,
+    parse_output_check,
+    relevance_surface,
+)
 from .cognition.procedural import learn_procedure, render_procedures, retrieve_procedures
 from .cognition.self_model import synthesize_self_model
 from .cognition.sentinel import run_sentinel
@@ -114,7 +121,7 @@ from .model.pool import ProviderPool
 from .model.provider import Provider, is_embedding_model
 from .model.providers.mock import MockProvider
 from .model.providers.ollama import OllamaProvider
-from .prompts import DOC_SUMMARY_SYSTEM, VISION_DESCRIBE_SYSTEM
+from .prompts import DOC_SUMMARY_SYSTEM, OUTPUT_CHECK_SYSTEM, VISION_DESCRIBE_SYSTEM
 from .retrieval.hybrid import retrieve
 from .sanitize import StreamTagStripper, strip_epistemic_tags
 from .storage.gateway import StorageGateway
@@ -1103,7 +1110,12 @@ class Mimir:
         """Bidirectional RAG (DESIGN §5a): retrieve memory relevant to the model's OWN reply, to
         surface into the next turn — so a thread the model itself opened gets grounded. Excludes the
         facts just baked from this very reply (they'd be a redundant echo). Returns a surface, or
-        ``None``. Off the hot path (burst); a failure must never break the turn."""
+        ``None``. Off the hot path (burst); a failure must never break the turn.
+
+        Self-correction: when the retrieved context includes a fact that *outranks* a generated
+        reply (a primary-user/trusted/document fact), a cheap background check asks whether the
+        reply contradicts it; if so, a tentative correction surfaces instead of the grounding note —
+        the system catching its own drift from what it knows."""
         text = (reply or "").strip()
         if len(text.split()) < 4:
             return None  # a trivial reply — nothing worth a retrieval pass
@@ -1116,8 +1128,27 @@ class Mimir:
         scored = retrieve(text, query_vec, candidates, top_k=max(1, self.config.output_rag_top_k))
         if not scored:
             return None
-        lines = "\n".join(f"- {s.memory.text}" for s in scored)
-        return f"Possibly relevant from memory, on what you last said:\n{lines}"
+        if self.config.output_rag_self_check:
+            beliefs = authority_beliefs(scored)
+            if beliefs:
+                check = self._output_check(text, beliefs)
+                if check is not None:
+                    return correction_surface(beliefs[check.index - 1], check.note)
+        return relevance_surface(scored)
+
+    def _output_check(self, reply: str, beliefs: list[Memory]) -> OutputCheck | None:
+        """Ask a cheap background model whether ``reply`` contradicts any of ``beliefs`` (higher
+        tier facts). Returns a contradiction or ``None`` — the parse is tolerant, so a formatting
+        slip reads as 'no conflict' (a false self-correction is worse than a missed one)."""
+        listing = "\n".join(f"{i + 1}. {b.text}" for i, b in enumerate(beliefs))
+        raw = self._background_chat(
+            [
+                {"role": "system", "content": OUTPUT_CHECK_SYSTEM},
+                {"role": "user",
+                 "content": f"Assistant reply:\n{reply}\n\nEstablished facts:\n{listing}"},
+            ]
+        )
+        return parse_output_check(raw, len(beliefs))
 
     def _output_rag_task(self, ctx: ResponseContext) -> Callable[[], BurstResult]:
         def run() -> BurstResult:
@@ -1421,10 +1452,10 @@ class Mimir:
         except Exception:  # health is best-effort; assume OK rather than block forever (§10)
             return False
 
-    def _inner_life_chat(self, messages: list[dict[str, str]]) -> str:
-        """Route an inner-life reflection OFF the chat model: the loose ``background`` model if the
-        fleet has qualified one, else the reasoning role. Never the warm chat model (keeps turns
-        fast and avoids an expensive reload of the identity-bearing model)."""
+    def _background_chat(self, messages: list[dict[str, str]]) -> str:
+        """Route off-chat 'idle window' work (inner-life reflection, output-RAG self-check) off the
+        chat model: the loose ``background`` model if the fleet has one, else the reasoning role.
+        Never the warm chat model (keeps turns fast, avoids reloading the identity model)."""
         name = self.background_model()
         if name:
             return self._model.chat_with_model(name, messages)
@@ -1475,7 +1506,7 @@ class Mimir:
         if allow_escalation and stim.kind == "conflict" \
                 and self._should_escalate_to_council(stim, now):
             return self._escalate_to_council(stim, now)
-        thought = compose_thought(self._inner_life_chat, stim)
+        thought = compose_thought(self._background_chat, stim)
         if not thought:
             return {"ran": False, "reason": "empty thought"}
         vec = self._embedder.embed(thought)

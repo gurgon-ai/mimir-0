@@ -249,6 +249,28 @@ def delete_forum_post(gateway: StorageGateway, post_id: int) -> None:
     gateway.submit(_write)
 
 
+def prune_forum_threads(gateway: StorageGateway, keep: int) -> int:
+    """Keep only the most recent ``keep`` forum threads; delete older ones and their posts.
+    Returns threads removed. Each deliberation's verdict is *also* stored as a memory, so trimming
+    old threads bounds the browsable forum — it does not lose the recalled understanding."""
+
+    def _write(conn: sqlite3.Connection) -> int:
+        stale = [
+            r[0] for r in conn.execute(
+                "SELECT id FROM forum_threads ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET ?",
+                (max(0, keep),),
+            ).fetchall()
+        ]
+        if not stale:
+            return 0
+        marks = ",".join("?" * len(stale))
+        conn.execute(f"DELETE FROM forum_posts WHERE thread_id IN ({marks})", stale)
+        conn.execute(f"DELETE FROM forum_threads WHERE id IN ({marks})", stale)
+        return len(stale)
+
+    return gateway.submit(_write)
+
+
 def list_forum_threads(gateway: StorageGateway) -> list[dict[str, Any]]:
     """All threads, newest first, each with its post count (for the forum list)."""
     def _read(conn: sqlite3.Connection) -> list[dict[str, Any]]:
