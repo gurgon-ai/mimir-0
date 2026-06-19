@@ -345,6 +345,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._deliberate_now())
             elif route == "/api/inner_life/run":
                 self._send_json(self._inner_life_now())
+            elif route == "/api/inner_life/deep":
+                self._send_json(self._deep_idle_now())
             elif route == "/api/forum":
                 self._send_json(self._forum_action(body))
             elif route == "/api/settings":
@@ -1153,6 +1155,11 @@ class _Handler(BaseHTTPRequestHandler):
         with self.server.brain_lock:
             return self.server.brain.run_inner_life_tick(force=True)
 
+    def _deep_idle_now(self) -> dict[str, Any]:
+        # Manual "deep think now": one two-voice dialogue, bypassing the long-idle/cooldown gates.
+        with self.server.brain_lock:
+            return self.server.brain.run_deep_idle_tick(force=True)
+
     def _forum_thread(self, params: dict[str, list[str]]) -> dict[str, Any]:
         thread_id = int((params.get("id") or ["0"])[0])
         thread = self.server.brain.forum_thread(thread_id)
@@ -1628,6 +1635,10 @@ _HTML = """<!doctype html>
         <input type="number" id="setInnerCadence" min="1" max="1440" step="1" style="width:72px;"/>
         <span class="hint">minutes</span>
       </div>
+      <label style="font-weight:normal; display:block; margin:8px 0;">
+        <input type="checkbox" id="setDeepIdle"/> …and when the quiet runs long, occasionally hold a
+        deeper two-voice dialogue with myself (rarer, a few calls — needs idle-thinking on)
+      </label>
 
       <h2 style="margin-top:18px;">Context size</h2>
       <div class="hint" style="margin-bottom:8px;">How big a window (KV cache) Mimir loads, and how
@@ -1646,6 +1657,7 @@ _HTML = """<!doctype html>
       <button class="secondary" id="sleepBtn" type="button">Run sleep now</button>
       <button class="secondary" id="delibBtn" type="button">Deliberate now</button>
       <button class="secondary" id="innerBtn" type="button">Think now</button>
+      <button class="secondary" id="deepBtn" type="button">Deep think now</button>
       <div id="sleepResult" class="hint"></div>
       <div id="delibResult" style="margin-top:8px;"></div>
       <div id="innerResult" class="hint" style="margin-top:8px;"></div>
@@ -2571,7 +2583,8 @@ async function loadMind() {
       const d = document.createElement("div"); d.className = "mem";
       const tx = document.createElement("div"); tx.className = "text"; tx.textContent = t.text;
       const meta = document.createElement("div"); meta.className = "meta";
-      meta.textContent = forumWhen(t.created_at) + (t.archived ? " · archived" : "");
+      meta.textContent = (t.deep ? "🗩 deep dialogue · " : "") + forumWhen(t.created_at) +
+        (t.archived ? " · archived" : "");
       d.appendChild(tx); d.appendChild(meta); th.appendChild(d);
     });
     if (!(m.recent_thoughts||[]).length) th.innerHTML =
@@ -2699,6 +2712,7 @@ async function loadSleepTab() {
     $("setDeliberate").checked = !!s.deliberation_enabled;
     $("setInnerLife").checked = !!s.inner_life_enabled;
     $("setInnerCadence").value = Math.max(1, Math.round((s.inner_life_cadence_s || 300) / 60));
+    $("setDeepIdle").checked = !!s.deep_idle_enabled;
     // Context-size slider: build the options from the server's presets, label each with its window.
     const sizes = s.context_presets || {};
     const labels = { small: "Small", medium: "Medium", large: "Large", xlarge: "X-Large" };
@@ -2726,6 +2740,7 @@ $("saveSleep").addEventListener("click", async () => {
       deliberation_enabled: $("setDeliberate").checked,
       inner_life_enabled: $("setInnerLife").checked,
       inner_life_cadence_s: Math.max(60, Math.round(Number($("setInnerCadence").value || 5) * 60)),
+      deep_idle_enabled: $("setDeepIdle").checked,
       context_size: $("setContextSize").value || "medium",
     }});
     $("settingsMsg").textContent = "Saved.";
@@ -2768,6 +2783,17 @@ $("innerBtn").addEventListener("click", async () => {
     const r = await api("POST", "/api/inner_life/run");
     $("innerResult").textContent = r.ran
       ? `Mused on ${r.kind}: ${r.thought}`
+      : `Skipped (${r.reason}).`;
+    refreshState();
+  } catch (e) { $("innerResult").textContent = "Error: " + e.message; }
+});
+
+$("deepBtn").addEventListener("click", async () => {
+  $("innerResult").textContent = "Holding a dialogue with myself…";
+  try {
+    const r = await api("POST", "/api/inner_life/deep");
+    $("innerResult").textContent = r.ran
+      ? `Deep reflection on ${r.kind}${r.converged ? " (reconverged)" : ""}: ${r.insight}`
       : `Skipped (${r.reason}).`;
     refreshState();
   } catch (e) { $("innerResult").textContent = "Error: " + e.message; }
