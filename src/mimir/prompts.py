@@ -59,10 +59,33 @@ def council_persona_system(name: str, stance: str) -> str:
     )
 
 
+# Round two: each voice sees the floor and answers it. The marker (present in the user brief, not
+# the system prompt) lets the mock tell a rebuttal apart from an opening position.
+COUNCIL_REBUTTAL_MARKER = "opening positions of the other voices"
+
+
+def council_rebuttal_user(question: str, own: str, others: list[tuple[str, str]]) -> str:
+    """Round-two brief: a persona reads the other openings and rebuts, defends, or concedes."""
+    floor = "\n".join(f"[{name}] {text}" for name, text in others)
+    return (
+        f"The question under deliberation: {question}\n\n"
+        f"Your opening position was:\n{own}\n\n"
+        f"Here are the {COUNCIL_REBUTTAL_MARKER}:\n{floor}\n\n"
+        "Rebut the positions you find weakest and defend or sharpen your own; concede any point "
+        "that genuinely lands. Two to four sentences, in character, and don't hedge."
+    )
+
+
 COUNCIL_SYNTH_SYSTEM = (
-    f"{COUNCIL_SYNTH_MARKER} positions below into a balanced verdict on the question. Note where "
-    "the voices agree and where they genuinely conflict, then give your synthesized conclusion in "
-    "a short paragraph. Respond with the verdict only."
+    f"{COUNCIL_SYNTH_MARKER} positions below into a verdict on the question. Weigh where the "
+    "voices agree and where they genuinely conflict. Do NOT flatten the debate into false "
+    "agreement — the "
+    "most valuable output of an adversarial deliberation is the strongest objection that SURVIVES. "
+    "Reply in exactly this format, one field per line:\n"
+    "VERDICT: <your synthesized conclusion, a short paragraph>\n"
+    "DISSENT: <the single strongest unresolved objection, or 'none' if the voices truly agree>\n"
+    "DISSENT_BY: <which voice raised it, or 'none'>\n"
+    "CONSENSUS: <a number from 0.0 (deep conflict) to 1.0 (full agreement)>"
 )
 
 

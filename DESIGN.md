@@ -247,6 +247,27 @@ installed, filters to eligible models, and assigns personas across them. **1 eli
 single-model council, persona diversity via distinct system prompts. **N models** → N genuinely
 different minds. Diversity is emergent from the hardware, not a config chore.
 
+**The council debates in two rounds, not one shot.** Each voice first takes an opening position;
+then, in a **rebuttal round**, every voice sees the others' openings and answers them — defending,
+sharpening, or conceding. Both rounds fan across the fleet in parallel (the rebuttal round adds a
+second pass, so wall-clock is ~2× a single round, not 5×), and both are persisted to the forum
+(openings → rebuttals → verdict) so the debate reads in order. The synthesizer weighs the whole
+exchange, so the verdict reflects arguments that *survived contact with their counter-arguments*,
+not just five voices talking past each other.
+
+**The verdict preserves dissent — it does not flatten the debate.** The synthesizer returns a
+*structured* verdict, not a single agreeable paragraph: the conclusion, the **single strongest
+objection that survived** the deliberation (with which voice raised it), and a **consensus** score
+for how strongly the voices converged. The surviving objection rides into the stored memory
+(`On '<q>': <conclusion>\nSurviving objection (<voice>): <dissent>`), so a later turn draws on the
+*conclusion of its own disagreement* — counter-argument and all, not an unexamined gist. The
+stored understanding's confidence is **derived from consensus** (a unanimous verdict is worth more
+than a 3–2 split; a 50/50 split lands on the old flat default, and it never escapes the modest
+INFERRED band). The objection persists as its own attributed forum post. Parsing is tolerant — a
+model that ignores the format degrades to the whole reply as the conclusion, so a verdict is never
+lost to a formatting slip (§10). _(Ported from the home-AI moderator's rule: the most valuable
+output of an adversarial debate is the strongest objection that survives.)_
+
 ### The qualification battery — gate, rank, then watch
 "Could model X do the job as well as Y?" — don't guess; measure deterministically, rank, then watch.
 

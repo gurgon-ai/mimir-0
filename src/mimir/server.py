@@ -2302,7 +2302,9 @@ async function openForumThread(id) {
     const isVerdict = p.kind === "verdict";
     const style = isVerdict
       ? 'border-left:3px solid #7fa8d1; background:#1a2230;'
-      : (p.kind === "comment" ? 'border-left:3px solid #6f7a8a;' : '');
+      : (p.kind === "dissent" ? 'border-left:3px solid #d1a87f; background:#241f1a;'
+      : (p.kind === "rebuttal" ? 'border-left:3px solid #5a6b80;'
+      : (p.kind === "comment" ? 'border-left:3px solid #6f7a8a;' : '')));
     return `<div class="mem" style="${style}">` +
       `<div class="meta"><b>${escapeHtml(p.author)}</b> · ${escapeHtml(p.kind)}${where} · ${forumWhen(p.created_at)} ` +
       `<a href="#" class="forum-delpost" data-id="${p.id}" style="color:#c98; margin-left:6px;">delete</a></div>` +
