@@ -2944,25 +2944,36 @@ function fastestCell(model, fallback, speeds) {
   return b < 1e9 ? b.toFixed(1) + "s" : "·";
 }
 
-// Augment the live results with EVERY (node, model) the catalogue knows — so machines and models
-// that never scored (timed out, errored, not yet reached) still appear under their machine heading,
-// with that machine's time. Quality is model-wide, so a model scored anywhere shows its score on
-// every machine it runs on; one that scored nowhere shows blank. SAME row shape the table already
-// renders — this only fills the gaps; it doesn't change how anything looks.
-function withAllMachines(results, placement) {
+// Add the TEST RESULTS the scored-only `results` list leaves out — models that were tested on a
+// machine and FAILED / timed out, and the machines that vanished entirely because every model on
+// them did. A failed test is still a test result. The extra rows come from the catalogue, but ONLY
+// for pairings the run actually TESTED on that machine (a recorded score OR time — a timed-out probe
+// records its slow time, so it counts), and ONLY within the run's filters (size band, enabled
+// machines). Nothing shows on a machine until it's been tested there; the whole catalogue is NOT
+// dumped in. SAME row shape the table already renders — a failed pairing is just a blank-quality row.
+function withAllMachines(results, placement, scope) {
+  const out = (results || []).slice();                  // what scored this run — always shown
   const byNode = (placement && placement.by_node) || {};
-  if (!Object.keys(byNode).length) return (results || []).slice();   // no catalogue yet → as-is
+  if (!Object.keys(byNode).length) return out;          // no catalogue yet → just the live results
+  const have = new Set(out.map(r => (r.node || "") + "\x00" + r.model));
+  const disabled = new Set((placement && placement.disabled_nodes) || []);
+  const minB = parseFloat(scope && scope.min_model_size_b) || 0;
+  const maxRaw = parseFloat(scope && scope.max_model_size_b);
+  const maxB = isNaN(maxRaw) ? Infinity : maxRaw;
   const live = new Map();
   (results || []).forEach(r => { if (r.quality != null) live.set(r.model, r); });   // model-wide
-  const out = [];
   Object.keys(byNode).forEach(node => {
+    if (disabled.has(node)) return;                     // disabled machine — excluded from the run
     byNode[node].forEach(m => {
-      const lv = live.get(m.model), src = lv || m;     // live scores override the catalogue
-      let rt = m.return_time;                          // this machine's measured time…
-      if (rt == null && lv && lv.node === node) rt = lv.return_time;   // …or the live scored node
+      if (m.enabled === false) return;                  // disabled model
+      const pb = m.params_b;
+      if (pb != null && (pb < minB || pb > maxB)) return;        // outside the size filter
+      if (m.quality == null && m.return_time == null) return;    // not tested on this machine yet
+      if (have.has(node + "\x00" + m.model)) return;             // already shown (its scored row)
+      const lv = live.get(m.model), src = lv || m;     // model-wide quality from the live run
       out.push({model: m.model, node: node, quality: src.quality, talk: src.talk, tools: src.tools,
                 code: src.code, discipline: src.discipline, epistemics: src.epistemics,
-                reasoning: src.reasoning, vision: src.vision, return_time: rt});
+                reasoning: src.reasoning, vision: src.vision, return_time: m.return_time});
     });
   });
   return out;
@@ -3223,9 +3234,9 @@ function renderTourney(s) {
     const sc = s.scope || {};
     h += `<div class="hint" style="margin:10px 0; color:#ff8a8a;">No models qualified this round. Your scope may exclude everything — size band min <b>${sc.min_model_size_b ?? 0}</b>B / max <b>${sc.max_model_size_b ?? "∞"}</b>B (an inverted band excludes all). Widen the size fields and re-run.</div>`;
   }
-  // Feed the table the FULL roster (every machine + every model, including the ones that timed out),
-  // not just the scored results — same table, no machine hidden (DESIGN §5a).
-  h += tourneyTable(withAllMachines(s.results, s.placement), phase === "awaiting_veto", round, s.speeds);
+  // Feed the table the scored results PLUS the failed/timed-out test results (so no tested machine is
+  // hidden) — same table, gated to what the run actually tested, within its filters (DESIGN §5a).
+  h += tourneyTable(withAllMachines(s.results, s.placement, s.scope), phase === "awaiting_veto", round, s.speeds);
   if (phase === "awaiting_veto") {
     const next = round === 1 ? "🥊 FIGHT → Round 1 (gauntlet)" : "🏁 Compute finals (Round 2)";
     h += `<div class="row" style="margin-top:12px; gap:10px; align-items:center;"><button id="tourneyAdvanceBtn" type="button" onclick="advanceTourney()">${next}</button><span class="hint">Untick any model you don't want to advance, then ${round === 1 ? "fight" : "finalize"}.</span></div>`;

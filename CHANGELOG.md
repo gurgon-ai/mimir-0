@@ -144,15 +144,17 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
 
 ### Fixed
-- **The tournament board now shows EVERY machine tested — not just the ones with a passing model.**
-  The board grouped the live `results` by machine (already the right layout), but `results` only
-  holds models that *scored*, so a node whose models all fail or time out vanished entirely —
-  misleading after telling the user every machine is being tested. Fix is data-only: the same table
-  is now fed the full roster (`withAllMachines()` merges the catalogue's `placement_matrix` — every
-  installed `(node, model)`, dead nodes included — over the live scores, quality being model-wide).
-  Machines/models that never scored simply render blank in the existing style; no machine is hidden.
-  (Backend: `placement` added to the tournament status; the per-round veto keeps one keep-checkbox
-  per scored model.) `_docx_table_lines` de-duped merged
+- **The tournament board now shows the FAILED test results too — every machine the run tested, not
+  just the ones with a passing model.** The board grouped the live `results` by machine (already the
+  right layout), but `results` only holds models that *scored*, so a model that timed out — or a
+  machine where every model did — vanished entirely. A failed test is still a test result, and the
+  gap made it look like the speed round never ran. Fix is data-only (`withAllMachines()`): the same
+  table is fed the scored results **plus** the pairings the run actually tested on each machine — a
+  recorded score *or* time, a timed-out probe counting as a (slow) time — gated to the run's filters
+  (size band, enabled machines). Failed pairings render as blank-quality rows in the existing style;
+  nothing shows on a machine until it's been tested there, and the full catalogue (untested,
+  oversized, disabled) is never dumped in. (Backend: `placement` added to the tournament status; the
+  per-round veto keeps one keep-checkbox per scored model.) `_docx_table_lines` de-duped merged
   cells by `id(cell._tc)`, but that proxy is a temporary — once CPython GC'd it, the same address
   could be handed to a *later* cell's proxy, so a fresh cell collided with a stale id and was silently
   dropped. (It only surfaced in the full test run, where memory/GC timing differs — a table cell would
