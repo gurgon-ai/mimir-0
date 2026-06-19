@@ -141,20 +141,24 @@ def _docx_block_items(parent: object) -> list[object]:
     return items
 
 
-def _docx_table_lines(table: object, seen: set[int]) -> list[str]:
+def _docx_table_lines(table: object, seen: set) -> list[str]:
     """Render a table as readable rows — non-empty cells joined by ' | ', one line per row. Merged
     cells (which python-docx repeats per grid position) are de-duped via ``seen``; nested tables in
-    a cell are recursed into."""
+    a cell are recursed into.
+
+    ``seen`` holds the cell **elements themselves**, not ``id(...)``: a temporary proxy's id can be
+    reused by CPython after it's GC'd, which would make a fresh cell collide with a stale id and be
+    dropped. Holding the element dedupes by identity and keeps it alive so its id can't recur."""
     from docx.table import Table
 
     lines: list[str] = []
     for row in table.rows:  # type: ignore[attr-defined]
         cells: list[str] = []
         for cell in row.cells:
-            tc_id = id(cell._tc)
-            if tc_id in seen:  # a merged cell already emitted (horizontal or vertical span)
+            tc = cell._tc
+            if tc in seen:  # a merged cell already emitted (horizontal or vertical span)
                 continue
-            seen.add(tc_id)
+            seen.add(tc)
             parts = [(cell.text or "").strip()]
             for block in _docx_block_items(cell):
                 if isinstance(block, Table):
