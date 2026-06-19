@@ -134,6 +134,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
 
 ### Fixed
+- **Cleaner qualification board: per-model "test X/N" progress, one time per machine.** Each model
+  runs the whole battery (talk, tools, code, discipline, reasoning, latency, epistemics, vision), so
+  the gauntlet now shows a per-model sub-bar — *test X/8 · scoring reasoning… (3 left)* — under the
+  round progress (`benchmark_model` reports each dimension via `on_step`; threaded to the bench +
+  tournament status as `current_step`). And the Speed column shows just **that machine's** time in
+  seconds (a node-grouped table was wrongly listing *other* machines' times under one machine's
+  heading); the model-centric leaderboard shows its single fastest node. The full per-machine
+  breakdown (every model on each node, all stats) stays in 📊 Per-node placement. The Speed-test
+  button also resolves correctly after a reload during the auto speed-test phase.
 - **The full speed-test is now an automatic, visible phase of the benchmark/tournament — not a
   skippable manual step.** The recommendation's speed term uses each model's *fastest known* node,
   but the benchmark only timed the one node it scored each model on — so until every `(model, node)`

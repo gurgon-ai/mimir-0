@@ -2794,6 +2794,7 @@ class Mimir:
         progress: Callable[[int, int, str, float | None], None] | None = None,
         on_result: Callable[[ModelBenchmark, str], None] | None = None,
         on_done: Callable[[str], None] | None = None,
+        on_step: Callable[[str, int, int, str], None] | None = None,
     ) -> FleetBenchmarkResult:
         """Scan + benchmark the fleet's models (speed + capability dimensions) (DESIGN §4).
 
@@ -2832,6 +2833,7 @@ class Mimir:
             progress=progress,
             on_result=on_result,
             on_done=on_done,
+            on_step=on_step,
         )
 
     def qualify_new_models(
@@ -2843,6 +2845,7 @@ class Mimir:
         progress: Callable[[int, int, str, float | None], None] | None = None,
         on_result: Callable[[ModelBenchmark, str], None] | None = None,
         on_done: Callable[[str], None] | None = None,
+        on_step: Callable[[str, int, int, str], None] | None = None,
     ) -> FleetBenchmarkResult:
         """Benchmark ONLY models not yet ranked — so adding a model doesn't mean re-running the
         whole fleet (an hour to re-learn what you already know). A **merge-scan** discovers
@@ -2863,7 +2866,7 @@ class Mimir:
             only_approved=False,   # the user installed it on purpose — don't gate on family
             max_params_b=max_params_b, min_params_b=min_params_b, latency_budget_s=latency_budget_s,
             only_models=unscored, rescan=False,   # merge-scan already ran; don't wipe scores
-            progress=progress, on_result=on_result, on_done=on_done,
+            progress=progress, on_result=on_result, on_done=on_done, on_step=on_step,
         )
 
     def complete_speed_matrix(
@@ -2885,6 +2888,7 @@ class Mimir:
         progress: Callable[[int, int, str, float | None], None] | None = None,
         on_result: Callable[[ModelBenchmark, str], None] | None = None,
         on_done: Callable[[str], None] | None = None,
+        on_step: Callable[[str, int, int, str], None] | None = None,
     ) -> FleetBenchmarkResult:
         """Grade the COUNCIL pool: the models **above** the chat size cap, with the user-facing caps
         OFF (no upper size limit, no latency gate) — so the big/slow models a chat cap excludes get
@@ -2912,6 +2916,7 @@ class Mimir:
             progress=progress,
             on_result=on_result,
             on_done=on_done,
+            on_step=on_step,
         )
 
     def evaluate_epistemics(
