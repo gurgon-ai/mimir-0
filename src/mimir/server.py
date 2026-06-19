@@ -792,6 +792,9 @@ class _Handler(BaseHTTPRequestHandler):
             state = dict(self.server.tourney_state)
             inflight = dict(state.get("inflight", {}))
         state.update(self._inflight_view(inflight))
+        # Per-(model, node) speeds so the tournament table shows each model on EVERY node it's timed
+        # on (the speed-test's output), not just the one node it was scored on.
+        state["speeds"] = self.server.brain.catalogue_speeds()
         return state
 
     def _matrix_start(self) -> dict[str, Any]:
@@ -3058,7 +3061,8 @@ async function toggleCouncilMember(model, included) {
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
 }
 
-function tourneyTable(results, showChecks, round) {
+function tourneyTable(results, showChecks, round, speeds) {
+  speeds = speeds || {};
   if (!results.length) return '<div class="hint" style="margin-top:12px;">Warming up the first model…</div>';
   const best = results.slice().sort((a, b) => (b.quality || 0) - (a.quality || 0))[0];
   const groups = {};
@@ -3068,7 +3072,7 @@ function tourneyTable(results, showChecks, round) {
   const span = 10 + (full ? 1 : 0) + (showChecks ? 1 : 0);
   let cols = `<th></th>${showChecks ? "<th>Keep</th>" : ""}<th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th>`;
   if (full) cols += "<th>Epistemics</th>";
-  cols += "<th>Speed/turn</th>" + VIS_TH;
+  cols += "<th>Speed/turn (per node)</th>" + VIS_TH;
   let h = `<table><tr>${cols}</tr>`;
   order.forEach(node => {
     const rows = groups[node].sort((a, b) => (b.quality || 0) - (a.quality || 0));
@@ -3081,7 +3085,7 @@ function tourneyTable(results, showChecks, round) {
         + `<td class="q">${_stars(r.quality)} <span style="color:#8a94a3; font-weight:400;">${(r.quality ?? 0).toFixed(2)}</span></td>`
         + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td>`;
       if (full) h += `<td>${_emoji(r.epistemics)}</td>`;
-      h += `<td>${r.return_time != null ? r.return_time.toFixed(1) + "s" : "·"}</td><td${VIS_TD}>${_visionEmoji(r.vision)}</td></tr>`;
+      h += `<td>${speedCell(r.model, r.return_time, speeds)}</td><td${VIS_TD}>${_visionEmoji(r.vision)}</td></tr>`;
     });
   });
   return h + "</table>";
@@ -3112,7 +3116,7 @@ function renderTourney(s) {
     const sc = s.scope || {};
     h += `<div class="hint" style="margin:10px 0; color:#ff8a8a;">No models qualified this round. Your scope may exclude everything — size band min <b>${sc.min_model_size_b ?? 0}</b>B / max <b>${sc.max_model_size_b ?? "∞"}</b>B (an inverted band excludes all). Widen the size fields and re-run.</div>`;
   }
-  h += tourneyTable((s.results || []).slice(), phase === "awaiting_veto", round);
+  h += tourneyTable((s.results || []).slice(), phase === "awaiting_veto", round, s.speeds);
   if (phase === "awaiting_veto") {
     const next = round === 1 ? "🥊 FIGHT → Round 1 (gauntlet)" : "🏁 Compute finals (Round 2)";
     h += `<div class="row" style="margin-top:12px; gap:10px; align-items:center;"><button id="tourneyAdvanceBtn" type="button" onclick="advanceTourney()">${next}</button><span class="hint">Untick any model you don't want to advance, then ${round === 1 ? "fight" : "finalize"}.</span></div>`;
