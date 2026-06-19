@@ -35,6 +35,11 @@ from .cognition.benchmark import complete_speed_matrix as _complete_speed_matrix
 from .cognition.burst import BurstResult, BurstWorker, ResponseContext
 from .cognition.citations import citation_warning, unverified_citations
 from .cognition.council import CouncilResult, deliberate
+from .cognition.deep_idle import (
+    DeepInsight,
+    extract_insight,
+    run_dialogue,
+)
 from .cognition.deliberation import curate, surface_conflicts
 from .cognition.epistemics import EpistemicResult, run_epistemics
 from .cognition.fleet import (
@@ -321,6 +326,7 @@ class Mimir:
         self._last_thought_at = 0.0   # wall-clock of last inner-life thought (the cadence gate)
         self._last_thought_kind: str | None = None
         self._last_escalation_at = 0.0  # wall-clock of last inner-life→council escalation
+        self._last_deep_idle_at = 0.0   # wall-clock of last deep-idle dialogue (its own cooldown)
         self._stop_inner = threading.Event()
         self._inner_life: threading.Thread | None = None
         self._start_inner_life()
@@ -1210,6 +1216,7 @@ class Mimir:
             "deliberation_enabled": self.config.deliberation_enabled,
             "inner_life_enabled": self.config.inner_life_enabled,
             "inner_life_cadence_s": self.config.inner_life_cadence_s,
+            "deep_idle_enabled": self.config.deep_idle_enabled,
             "context_size": "medium",   # KV-cache window + how many facts we push in (the slider)
         }
 
@@ -1268,7 +1275,8 @@ class Mimir:
                         f"unknown timezone: {val!r} (install the optional `tzdata` package "
                         f"for full IANA support)"
                     )
-            elif key in ("sleep_enabled", "deliberation_enabled", "inner_life_enabled"):
+            elif key in ("sleep_enabled", "deliberation_enabled", "inner_life_enabled",
+                         "deep_idle_enabled"):
                 val = bool(val)
             elif key == "inner_life_cadence_s":
                 val = max(30.0, float(val))  # floor at 30s so a typo can't hammer the fleet
@@ -1435,8 +1443,16 @@ class Mimir:
 
     # -- the live inner life: low-frequency idle thinking (DESIGN §5a) -----------------
 
+    # Provenances that mark a stored row as the system's own idle reflection (a framed musing, not
+    # a fact): the solo musing and the deeper dialogue's insight. Both are split out of knowledge
+    # recall and surfaced only tentatively, and both share the near-duplicate guard.
+    _IDLE_PROVENANCES = frozenset({"inner life", "deep idle"})
+
     def _inner_life_enabled(self) -> bool:
         return bool(self._overrides().get("inner_life_enabled", self.config.inner_life_enabled))
+
+    def _deep_idle_enabled(self) -> bool:
+        return bool(self._overrides().get("deep_idle_enabled", self.config.deep_idle_enabled))
 
     def _inner_life_cadence(self) -> float:
         val = self._overrides().get("inner_life_cadence_s", self.config.inner_life_cadence_s)
@@ -1506,6 +1522,10 @@ class Mimir:
         if allow_escalation and stim.kind == "conflict" \
                 and self._should_escalate_to_council(stim, now):
             return self._escalate_to_council(stim, now)
+        # When the quiet has run long, occasionally hold a full two-voice dialogue (Slice 3) instead
+        # of a solo musing — the deeper, rarer reflection. Gated to a trickle by its own cooldown.
+        if allow_escalation and self._should_deep_idle(now):
+            return self._run_deep_idle(stim, now)
         thought = compose_thought(self._background_chat, stim)
         if not thought:
             return {"ran": False, "reason": "empty thought"}
@@ -1569,6 +1589,111 @@ class Mimir:
         return {"ran": True, "kind": "conflict", "escalated": True,
                 "thread_id": result.thread_id, "verdict": result.verdict}
 
+    # -- deep-idle dialogue (inner-life Slice 3, DESIGN §5a) --------------------------------
+    _DEEP_IDLE_CONF_SINGLE = 0.4      # a first-pass dialogue insight — a notch above a solo musing
+    _DEEP_IDLE_CONF_CONVERGED = 0.6   # ceiling once the same insight re-derives independently
+    _DEEP_IDLE_SALIENCE = 0.3
+    _DEEP_IDLE_CONVERGE_COSINE = 0.85
+
+    def _should_deep_idle(self, now: float) -> bool:
+        """Whether this idle cycle should hold a full dialogue instead of a solo musing: deep-idle
+        enabled, a healthy fleet, the quiet has run long, and past the per-dialogue cooldown."""
+        if not self._deep_idle_enabled() or self._pool_degraded():
+            return False
+        if self._last_turn_at and now - self._last_turn_at < self.config.deep_idle_after_s:
+            return False
+        return now - self._last_deep_idle_at >= self.config.deep_idle_cooldown_s
+
+    def run_deep_idle_tick(self, *, force: bool = False) -> dict[str, Any]:
+        """One deep-idle cycle: gate → pick a stimulus → hold a dialogue → store/reinforce an
+        insight. The autonomous path routes here from the inner-life tick once the quiet has run
+        long; ``force`` ('deep think now') bypasses the enable/idle/cooldown gates but still yields
+        to a live turn and a down fleet. Returns a small report; never raises (§10)."""
+        now = time.time()
+        if self._turn_active:
+            return {"ran": False, "reason": "turn in flight"}
+        if force:
+            if self._pool_degraded():
+                return {"ran": False, "reason": "fleet degraded"}
+        elif not self._should_deep_idle(now):
+            return {"ran": False, "reason": "not idle enough"}
+        try:
+            errors = [str(r.get("message", "")) for r in self.recent_errors(limit=1)]
+            wm = current_working_memory(self._storage) or ""
+            stimuli = gather_stimuli(self._storage, embedder=self._embedder,
+                                     recent_errors=errors, working_memory_text=wm)
+            stim = pick_stimulus(stimuli, avoid_kind=self._last_thought_kind)
+            if stim is None:
+                return {"ran": False, "reason": "no stimulus"}
+            return self._run_deep_idle(stim, now)
+        except BaseException as exc:  # a dialogue must never destabilise the process (§10)
+            log.error("deep idle: tick failed: %s", exc, exc_info=True)
+            return {"ran": False, "reason": f"error: {exc}"}
+
+    def _run_deep_idle(self, stim: Stimulus, now: float) -> dict[str, Any]:
+        """Hold a short two-voice dialogue on ``stim`` (reflective sees the recent context, the
+        skeptic does not — the asymmetry that forces grounding), distil one insight, and store it —
+        or, if it re-derives a recent insight, reinforce that one (convergence-as-validation). The
+        turn cap bounds the cost. Sets the cooldown the moment the dialogue runs (cost is spent)."""
+        recent_context = current_working_memory(self._storage) or ""
+        turns = run_dialogue(
+            self._background_chat, stim.prompt, recent_context,
+            max_turns=max(2, self.config.deep_idle_max_turns),
+        )
+        insight = extract_insight(self._background_chat, stim.prompt, turns)
+        self._last_deep_idle_at = now
+        self._last_thought_at = now
+        self._last_thought_kind = stim.kind
+        if insight is None or not insight.text:
+            return {"ran": False, "reason": "no insight"}
+        vec = self._embedder.embed(insight.text)
+        if vec is None:  # can't store an un-embeddable insight; the cooldown already backed off
+            return {"ran": False, "reason": "embeddings unavailable"}
+        outcome = self._converge_or_store_insight(insight, vec)
+        log.info("deep idle: dialogue on %s → %s (mem %s)", stim.kind,
+                 "converged" if outcome["converged"] else "stored", outcome["memory_id"])
+        return {"ran": True, "deep": True, "kind": stim.kind, "insight": insight.text,
+                "type": insight.kind, "converged": outcome["converged"],
+                "memory_id": outcome["memory_id"], "transcript": [t.as_dict() for t in turns]}
+
+    def _converge_or_store_insight(self, insight: DeepInsight, vec: list[float]) -> dict[str, Any]:
+        """Convergence-as-validation: if this insight re-derives one the system already reached
+        (a near-duplicate of a recent deep-idle insight), reinforce THAT one — nudge confidence
+        toward the converged ceiling + bump salience — instead of piling up a copy. Otherwise store
+        a new insight at the modest single-pass ceiling."""
+        prior = self._matching_deep_insight(insight.text, vec)
+        if prior is not None and prior.id is not None:
+            new_conf = min(self._DEEP_IDLE_CONF_CONVERGED, round(prior.confidence + 0.1, 4))
+            update_memory(self._storage, prior.id, confidence=new_conf,
+                          salience=min(1.0, prior.salience + 0.1))
+            return {"converged": True, "memory_id": prior.id}
+        conf = min(self._DEEP_IDLE_CONF_SINGLE, insight.confidence)
+        mem = Memory(
+            text=insight.text, kind=MemoryKind.MEMORY, evidence_tier=EvidenceTier.INFERRED,
+            confidence=conf, salience=self._DEEP_IDLE_SALIENCE, embedding=vec,
+            provenance="deep idle", meta={"deep_idle_type": insight.kind},
+        )
+        save_memory(self._storage, mem)
+        return {"converged": False, "memory_id": mem.id}
+
+    def _matching_deep_insight(self, text: str, vec: list[float]) -> Memory | None:
+        """A recent deep-idle insight that ``text`` re-derives (exact lexical match, or cosine in
+        semantic mode), or ``None`` — the convergence signal. Scoped to deep-idle insights only."""
+        norm = " ".join(text.lower().split())
+        recent = [
+            m for m in list_memories(self._storage, user=None, kind=MemoryKind.MEMORY)
+            if (m.provenance or "") == "deep idle"
+        ]
+        recent.sort(key=lambda m: m.created_at, reverse=True)
+        semantic = self._embedder.mode.is_semantic
+        for m in recent[:30]:
+            if " ".join((m.text or "").lower().split()) == norm:
+                return m
+            if semantic and m.embedding \
+                    and cosine(vec, m.embedding) >= self._DEEP_IDLE_CONVERGE_COSINE:
+                return m
+        return None
+
     _MUSING_DUP_COSINE = 0.95
 
     def _is_duplicate_musing(self, text: str, vec: list[float] | None) -> bool:
@@ -1578,7 +1703,7 @@ class Mimir:
         norm = " ".join(text.lower().split())
         recent = [
             m for m in list_memories(self._storage, user=None, kind=MemoryKind.MEMORY)
-            if (m.provenance or "") == "inner life"
+            if (m.provenance or "") in self._IDLE_PROVENANCES
         ]
         recent.sort(key=lambda m: m.created_at, reverse=True)
         semantic = vec is not None and self._embedder.mode.is_semantic
@@ -1599,10 +1724,10 @@ class Mimir:
         the bar this turn, return it as a single tentative background note — it 'earns its way in',
         framed as the system's own idle thought, never force-injected and never as fact.
         Returns ``(knowledge_candidates, note_or_None)``."""
-        musings = [m for m in candidates if (m.provenance or "") == "inner life"]
+        musings = [m for m in candidates if (m.provenance or "") in self._IDLE_PROVENANCES]
         if not musings:
             return candidates, None
-        knowledge = [m for m in candidates if (m.provenance or "") != "inner life"]
+        knowledge = [m for m in candidates if (m.provenance or "") not in self._IDLE_PROVENANCES]
         top = retrieve(query, query_vec, musings, top_k=1)
         if top and top[0].score >= self._INNER_LIFE_SURFACE_MIN_RELEVANCE:
             return knowledge, (
@@ -1612,16 +1737,18 @@ class Mimir:
         return knowledge, None
 
     def recent_thoughts(self, *, limit: int = 12) -> list[dict[str, Any]]:
-        """Recent inner-life musings (provenance ``"inner life"``), newest first — for the UI's
-        Mind tab. These don't sit in the knowledge recall; this is the window onto them."""
+        """Recent idle reflections (solo musings + deep-idle insights), newest first — for the UI's
+        Mind tab. These don't sit in the knowledge recall; this is the window onto them. ``deep``
+        flags a dialogue insight so the UI can mark it apart from a one-shot musing."""
         thoughts = [
             m for m in list_memories(self._storage, user=None, kind=MemoryKind.MEMORY)
-            if (m.provenance or "") == "inner life"
+            if (m.provenance or "") in self._IDLE_PROVENANCES
         ]
         thoughts.sort(key=lambda m: m.created_at, reverse=True)
         return [
             {"text": m.text, "created_at": m.created_at,
-             "salience": round(m.salience, 3), "archived": bool(m.archived)}
+             "salience": round(m.salience, 3), "archived": bool(m.archived),
+             "deep": (m.provenance or "") == "deep idle"}
             for m in thoughts[: max(1, limit)]
         ]
 

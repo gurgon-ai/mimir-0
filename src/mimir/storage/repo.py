@@ -123,9 +123,10 @@ def delete_memory(gateway: StorageGateway, memory_id: int) -> None:
 
 def update_memory(
     gateway: StorageGateway, memory_id: int, *,
-    text: str | None = None, salience: float | None = None,
+    text: str | None = None, salience: float | None = None, confidence: float | None = None,
 ) -> None:
-    """Edit a memory's text and/or salience in place (user-governed review, e.g. the graph editor).
+    """Edit a memory's text, salience, and/or confidence in place (user-governed review e.g. the
+    graph editor; or the deep-idle convergence boost — a re-derived insight earns belief).
 
     Only the provided fields change. ``embedding`` is left as-is; a re-embed on text change is a
     later refinement (recall still works on the old vector + keyword overlap)."""
@@ -136,6 +137,9 @@ def update_memory(
     if salience is not None:
         sets.append("salience = ?")
         params.append(salience)
+    if confidence is not None:
+        sets.append("confidence = ?")
+        params.append(confidence)
     if not sets:
         return
     params.append(memory_id)

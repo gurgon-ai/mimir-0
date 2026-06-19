@@ -467,8 +467,25 @@ the forum:** when the idle loop lands on a genuine, *fresh* conflict it occasion
 **council** on it (a forum thread + verdict) instead of musing solo — gated to a daytime trickle (the
 self-directed council enabled, a healthy fleet, an hourly cooldown) and sharing the sleep
 deliberation's seen-set so the two never re-argue each other. So the council runs nightly in batch
-*and* stirs during the day on whatever the system's own attention surfaces. Still **[proposed]**: the
-deep-idle two-voice dialogue (propose→critique with memory grounding).
+*and* stirs during the day on whatever the system's own attention surfaces.
+
+**Deep-idle dialogue — the system reflects *with itself* when the quiet runs long. [landed]** Slice 3
+(`cognition/deep_idle.py`): once idle has run long (default ~30 min), the inner-life tick occasionally
+holds a short **two-voice dialogue** on one stimulus instead of a solo musing — a *reflective* voice
+proposes, a *skeptical* voice presses, the reflective voice grounds or concedes — capped at a few
+turns, then one insight is distilled and stored as a low-confidence `INFERRED` memory
+(`provenance="deep idle"`). The load-bearing mechanism (ported generic from the home AI's
+inner-dialogue) is **information asymmetry**: the reflective voice sees the recent context, the
+skeptic does *not*, so it cannot take a claim about "what I just said/did" on trust and must demand it
+be grounded in stored memory — which forces the reflective voice to cite what it actually holds or
+admit it's reconstructing (a one-shot musing skips this accountability). A second mechanism is
+**convergence-as-validation**: an insight that independently *re-derives* a recent one reinforces it
+(nudging confidence toward a converged ceiling) rather than piling up a copy — so a belief the system
+keeps reaching on its own earns weight. Insights earn their way into conversation through the same
+Slice-2 surfacing as musings, and show in the Mind tab tagged as deep. Same doctrine: off the chat
+model, yields to a live turn, a healthy fleet, its own hourly cooldown, **off by default**; UI toggle
++ "deep think now" + `[deep_idle]` config. Bounded by design (a turn cap, one dialogue per cooldown);
+richer per-type routing of the insight is a future extension.
 
 **The wall-clock sleep cycle — heavy maintenance needs a real window, not scraps. [landed]** The
 burst worker's premise is that the model idles while the user reads the reply. Two things break it:

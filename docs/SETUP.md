@@ -533,6 +533,12 @@ cadence_s = 300                 # at most one thought this often (~5 min); set l
 idle_floor_s = 30               # stay quiet at least this long after a turn before musing
 check_interval_s = 20           # how often the daemon wakes to check (it self-gates on the cadence)
 
+[deep_idle]                     # Slice 3: a deeper two-voice dialogue when the quiet runs long
+enabled = false                 # OFF by default (a few calls per dialogue); needs inner_life on too
+after_s = 1800                  # only once the quiet has run this long (~30 min)
+cooldown_s = 3600               # at most one dialogue this often (~1 hour)
+max_turns = 4                   # voices per dialogue (opening + challenge/defend), the cost cap
+
 [server]                        # reference web server / integration API — see docs/API.md
 # api_token = "..."             # require Authorization: Bearer <token> on /api/* (env var wins)
 # api_token_env = "MIMIR_API_TOKEN"  # which env var holds the token; give co-located instances their own

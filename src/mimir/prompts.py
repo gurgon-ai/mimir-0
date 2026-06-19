@@ -170,6 +170,36 @@ INNER_LIFE_SYSTEM = (
 )
 
 
+# Deep-idle dialogue (inner-life Slice 3, DESIGN §5a): when the quiet runs long, two inner voices
+# argue one matter instead of a single musing. The asymmetry is load-bearing — the reflective voice
+# sees the recent context; the skeptic does NOT, so it cannot take a claim about "what I just said
+# or did" on trust and must demand it be grounded in stored memory. That forces the reflective voice
+# to ground or concede, which is what makes a dialogue worth more than a one-shot musing.
+DEEP_IDLE_REFLECT_MARKER = "your reflective inner voice"
+DEEP_IDLE_REFLECT_SYSTEM = (
+    f"You are {DEEP_IDLE_REFLECT_MARKER}, thinking privately in a long idle stretch. Offer your "
+    "honest current thinking on the matter; when challenged, ground your claims in what you really "
+    "hold in memory, or concede and refine. First person, two to four sentences. Don't address "
+    "anyone, don't invent facts. The reflection only."
+)
+DEEP_IDLE_SKEPTIC_MARKER = "your skeptical inner voice"
+DEEP_IDLE_SKEPTIC_SYSTEM = (
+    f"You are {DEEP_IDLE_SKEPTIC_MARKER}, auditing your own reflection. You CANNOT see the recent "
+    "conversation — only what is stored in memory. So if the reflection leans on something it "
+    "supposedly 'said' or 'did' recently, you cannot take that on trust: demand it be grounded in "
+    "stored memory, or named as reconstruction. Otherwise, name the weakest assumption or what's "
+    "unexamined. Press in good faith. First person, two to four sentences. The challenge only."
+)
+DEEP_IDLE_EXTRACT_MARKER = "distil the private dialogue"
+DEEP_IDLE_EXTRACT_SYSTEM = (
+    f"From the matter and dialogue below, {DEEP_IDLE_EXTRACT_MARKER} into the single most useful "
+    "thing it reached — what you'd carry forward. Reply in this exact format, one field per line:\n"
+    "INSIGHT: <one or two first-person sentences; the insight or the sharpened open question>\n"
+    "TYPE: <one of: self_knowledge, conflict, gap, debatable — your best fit>\n"
+    "CONFIDENCE: <a number from 0.0 (a hunch) to 1.0 (well-grounded by the dialogue)>"
+)
+
+
 # --- always-on conversational style (framework-level, regardless of identity) ------------
 # Each turn is sent as [system, user] with no prior assistant messages, so a model tends to read it
 # as a fresh start and greet every time. This blunt note (always injected) stops that.

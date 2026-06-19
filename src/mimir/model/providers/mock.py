@@ -21,6 +21,9 @@ from ...prompts import (
     COUNCIL_PERSONA_MARKER,
     COUNCIL_REBUTTAL_MARKER,
     COUNCIL_SYNTH_MARKER,
+    DEEP_IDLE_EXTRACT_MARKER,
+    DEEP_IDLE_REFLECT_MARKER,
+    DEEP_IDLE_SKEPTIC_MARKER,
     DOC_SUMMARY_MARKER,
     LIBRARY_COMPOSE_MARKER,
     NARRATIVE_MARKER,
@@ -58,6 +61,12 @@ class MockProvider:
             return self._council_persona(system, user)
         if OUTPUT_CHECK_MARKER in system:
             return self._output_check()
+        if DEEP_IDLE_EXTRACT_MARKER in system:
+            return self._deep_extract()
+        if DEEP_IDLE_REFLECT_MARKER in system:
+            return self._deep_reflect(user)
+        if DEEP_IDLE_SKEPTIC_MARKER in system:
+            return self._deep_skeptic(user)
         if WORKING_MEMORY_MARKER in system:
             return self._working_memory(user)
         if SELF_MODEL_MARKER in system:
@@ -136,6 +145,23 @@ class MockProvider:
         """The deterministic mock can't judge contradiction, so it answers the safe, silent way: no
         conflict. The self-correction path is exercised by monkeypatching a verdict in tests."""
         return "CONTRADICTS: none\nNOTE: none"
+
+    @staticmethod
+    def _deep_reflect(user: str) -> str:
+        """A deterministic reflective-voice turn (opening or defense), distinct from the skeptic so
+        the dialogue's two voices are tellable apart in tests."""
+        return "Reflecting: my current thinking is that this matter is worth grounding carefully."
+
+    @staticmethod
+    def _deep_skeptic(user: str) -> str:
+        """A deterministic skeptic-voice challenge — it presses the reflection for grounding."""
+        return "But what is that grounded in? The weak point is an assumption you haven't checked."
+
+    @staticmethod
+    def _deep_extract() -> str:
+        """A deterministic structured insight so the deep-idle distil/parse path is exercised."""
+        return ("INSIGHT: I should verify this against what I actually hold before leaning on it.\n"
+                "TYPE: self_knowledge\nCONFIDENCE: 0.4")
 
     @staticmethod
     def _working_memory(brief: str) -> str:

@@ -167,6 +167,13 @@ class Config:
     inner_life_cadence_s: float = 300.0        # at most one thought this often (default ~5 min)
     inner_life_idle_floor_s: float = 30.0      # stay quiet at least this long after a turn
     inner_life_check_interval_s: float = 20.0  # daemon clock-check cadence (self-gates on cadence)
+    # Deep-idle dialogue (inner-life Slice 3): when the quiet runs long, occasionally hold a short
+    # two-voice dialogue (reflect → critique → refine) instead of a solo musing. Costs a few calls,
+    # so it's rarer than musing and OFF by default (edge cost). Routes off the chat model.
+    deep_idle_enabled: bool = False
+    deep_idle_after_s: float = 1800.0          # only after the quiet has run this long (~30 min)
+    deep_idle_cooldown_s: float = 3600.0       # at most one dialogue this often (~1 hour)
+    deep_idle_max_turns: int = 4               # voices per dialogue (opening + challenge/defend)
     # Entity-graph traversal: how many hops from the query's entities, and the max connected
     # facts to inject. hops=0 disables graph retrieval (triples are still extracted/stored).
     graph_hops: int = 2
@@ -405,6 +412,10 @@ def load_config(path: str | Path) -> Config:
         inner_life_check_interval_s=float(
             raw.get("inner_life", {}).get("check_interval_s", 20.0)
         ),
+        deep_idle_enabled=bool(raw.get("deep_idle", {}).get("enabled", False)),
+        deep_idle_after_s=float(raw.get("deep_idle", {}).get("after_s", 1800.0)),
+        deep_idle_cooldown_s=float(raw.get("deep_idle", {}).get("cooldown_s", 3600.0)),
+        deep_idle_max_turns=int(raw.get("deep_idle", {}).get("max_turns", 4)),
         graph_hops=int(raw.get("entity_graph", {}).get("hops", 2)),
         graph_max_facts=int(raw.get("entity_graph", {}).get("max_facts", 8)),
         sleep_every=int(raw.get("sleep", {}).get("every", 0)),
