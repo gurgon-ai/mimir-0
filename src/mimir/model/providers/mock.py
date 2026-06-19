@@ -19,6 +19,7 @@ from ...prompts import (
     BAKE_MARKER,
     CLAIM_EXTRACTION_MARKER,
     COUNCIL_PERSONA_MARKER,
+    COUNCIL_REBUTTAL_MARKER,
     COUNCIL_SYNTH_MARKER,
     DOC_SUMMARY_MARKER,
     LIBRARY_COMPOSE_MARKER,
@@ -104,18 +105,28 @@ class MockProvider:
         return json.dumps({"facts": [stripped], "triples": _mock_triples(stripped)})
 
     @staticmethod
-    def _council_persona(system: str, question: str) -> str:
-        """A deterministic, persona-specific position (name parsed from the marker)."""
+    def _council_persona(system: str, user: str) -> str:
+        """A deterministic, persona-specific position (name parsed from the marker). The user brief
+        carries the rebuttal marker on round two, so openings and rebuttals stay distinguishable."""
         name = "voice"
         marker = f"[{COUNCIL_PERSONA_MARKER} "
         if marker in system:
             name = system.split(marker, 1)[1].split("]", 1)[0].strip()
-        snippet = question.strip()[:48]
+        if COUNCIL_REBUTTAL_MARKER in user:
+            return f"As the {name}, rebutting the floor: I hold my ground with one concession."
+        snippet = user.strip()[:48]
         return f"As the {name}, on '{snippet}': here is my distinct position."
 
     @staticmethod
     def _council_synth(question: str) -> str:
-        return "Council verdict: weighing the perspectives, a balanced conclusion emerges."
+        """A deterministic structured verdict (the §5a labelled format) so the council's parse +
+        dissent-preservation path is exercised end-to-end by the suite."""
+        return (
+            "VERDICT: Weighing the perspectives, a balanced conclusion emerges.\n"
+            "DISSENT: The strongest unresolved point is that the evidence is still thin.\n"
+            "DISSENT_BY: skeptic\n"
+            "CONSENSUS: 0.7"
+        )
 
     @staticmethod
     def _working_memory(brief: str) -> str:
