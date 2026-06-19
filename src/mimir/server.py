@@ -3216,10 +3216,14 @@ async function pollTournament() {
       const s = await api("GET", "/api/fleet/tournament/status");
       if (!s.active) { setMatrixEnabled(true); break; }
       renderTourney(s);
-      // Reflect the tournament's progress on the manual 1·2·3 buttons (it does scan→score→apply
-      // under the hood), so they're not stuck grey while the tournament runs.
-      btnState("fleetScanBtn", "done");   // the tournament scans the fleet first
-      btnState("fleetBenchBtn", s.phase === "running" ? "working" : "done");
+      // Reflect the tournament's progress on the manual 1·2·3·4 stage buttons (it does
+      // scan→score→speed-test→apply under the hood), so they show the live stage, not stuck grey.
+      btnState("fleetScanBtn", "done");   // 1 · the tournament scans the fleet first
+      btnState("fleetBenchBtn", s.phase === "running" ? "working" : "done");   // 2 · scoring
+      // 3 · Speed-test: working DURING the auto speed phase; done once it has run (only the
+      // persisting gauntlet round ≥2 speed-tests — triage/round 1 doesn't, so don't mark it then).
+      btnState("fleetMatrixBtn", s.phase === "speed" ? "working"
+        : (s.phase === "done" || (s.phase === "awaiting_veto" && (s.round || 1) >= 2)) ? "done" : "");
       if (s.phase === "running" || s.phase === "speed") {   // both are live — keep polling
         if (s.phase === "speed") {
           $("fleetMsg").textContent = `⏱ Speed-testing every (model, node) pairing — ${s.i || 0}/${s.total || 0}: ${s.current || ""}`;
@@ -3305,6 +3309,7 @@ async function pollBenchmark() {
       if (s.error) { $("fleetMsg").textContent = "Benchmark error: " + s.error; btnState("fleetBenchBtn", "failed"); btnState("fleetQualifyNewBtn", "failed"); break; }
       if (s.done || !s.running) {
         btnState("fleetBenchBtn", "done"); btnState("fleetQualifyNewBtn", "done");
+        btnState("fleetMatrixBtn", "done");   // 3 · Speed-test ran as the final phase
         if (s.benchmarked !== undefined) {   // a finished run (not just the idle initial state)
           const skips = [];
           if (s.skipped_too_big) skips.push(`${s.skipped_too_big} too large`);
@@ -3324,6 +3329,9 @@ async function pollBenchmark() {
       // current = the longest-running in-flight model (server-tracked); +N for the other nodes.
       const more = (s.inflight && s.inflight.length > 1) ? ` (+${s.inflight.length - 1})` : "";
       const speedPhase = s.phase === "speed";
+      // 2 · Benchmark works during scoring; 3 · Speed-test works during the auto speed phase.
+      btnState("fleetBenchBtn", speedPhase ? "done" : "working");
+      btnState("fleetMatrixBtn", speedPhase ? "working" : "");
       $("fleetMsg").textContent = speedPhase ? `${s.current}` : (s.total ? `Benchmarking ${s.i}/${s.total}: ${s.current}${more}…${eta}` : `${s.current || "Preparing…"}`);
       const header = speedPhase ? `⏱ Speed-testing every (model, node) pairing — ${s.i}/${s.total}`
         : (s.total ? `🏁 Benchmarking ${s.i}/${s.total}${eta}` : `🔎 ${s.current || "Preparing…"}`);
