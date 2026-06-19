@@ -144,16 +144,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
 
 ### Fixed
-- **The qualification board now shows EVERY machine tested, grouped by machine — not just the ones
-  with a passing model.** The leaderboard/tournament board rendered from `results` (only models that
-  *scored*), so a node whose models all fail or time out vanished entirely — misleading after telling
-  the user every machine is being tested. It now renders from the full catalogue (`placement_matrix`
-  — every installed `(node, model)`, dead nodes included), overlaid with the live run's scores so
-  progress still shows before persist. Each machine is a header; every model on it is a row with its
-  (model-wide) quality and **that machine's** time; a model that never scored shows **✕ no score**, a
-  machine where everything failed is flagged **"all failed / timed out."** Both the benchmark board
-  and the tournament board share one `machineBoard()` renderer; the per-round veto keeps one
-  keep-checkbox per scored model. (Backend: `placement` added to the benchmark + tournament status.) `_docx_table_lines` de-duped merged
+- **The tournament board now shows EVERY machine tested — not just the ones with a passing model.**
+  The board grouped the live `results` by machine (already the right layout), but `results` only
+  holds models that *scored*, so a node whose models all fail or time out vanished entirely —
+  misleading after telling the user every machine is being tested. Fix is data-only: the same table
+  is now fed the full roster (`withAllMachines()` merges the catalogue's `placement_matrix` — every
+  installed `(node, model)`, dead nodes included — over the live scores, quality being model-wide).
+  Machines/models that never scored simply render blank in the existing style; no machine is hidden.
+  (Backend: `placement` added to the tournament status; the per-round veto keeps one keep-checkbox
+  per scored model.) `_docx_table_lines` de-duped merged
   cells by `id(cell._tc)`, but that proxy is a temporary — once CPython GC'd it, the same address
   could be handed to a *later* cell's proxy, so a fresh cell collided with a stale id and was silently
   dropped. (It only surfaced in the full test run, where memory/GC timing differs — a table cell would

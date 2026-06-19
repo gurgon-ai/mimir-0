@@ -815,9 +815,6 @@ class _Handler(BaseHTTPRequestHandler):
         # Per-(model, node) speeds so the board can show a model on EVERY node it runs on (quality
         # scored once, speed per node) — the speed-test's output the one-row-per-model run never had.
         state["speeds"] = self.server.brain.catalogue_speeds()
-        # The full per-machine roster (EVERY node + EVERY installed model, dead ones included) so the
-        # board can show every machine tested — not just the ones with a passing model (DESIGN §5a).
-        state["placement"] = self.server.brain.placement_matrix()
         return state
 
     # -- qualifying tournament (multi-round, human-veto) ------------------------------
@@ -2947,90 +2944,55 @@ function fastestCell(model, fallback, speeds) {
   return b < 1e9 ? b.toFixed(1) + "s" : "·";
 }
 
-// EVERY machine tested, as a header, with EVERY model installed on it underneath — its (model-wide)
-// quality, this machine's time, and explicit ✕ for the ones that timed out / never scored. The full
-// (node, model) skeleton comes from `placement` (the catalogue — includes dead nodes), and the live
-// run's `results` overlay the quality/stats as they come in (so progress shows before persist). This
-// is the answer to "you can't say you tested every machine and show two": no machine is ever hidden.
-function machineBoard(placement, results, opts) {
-  opts = opts || {};
-  const showChecks = !!opts.showChecks, full = opts.full !== false;   // triage hides epistemics
-  const live = new Map();
-  (results || []).forEach(r => { live.set(r.model, r); });            // quality is model-wide
+// Augment the live results with EVERY (node, model) the catalogue knows — so machines and models
+// that never scored (timed out, errored, not yet reached) still appear under their machine heading,
+// with that machine's time. Quality is model-wide, so a model scored anywhere shows its score on
+// every machine it runs on; one that scored nowhere shows blank. SAME row shape the table already
+// renders — this only fills the gaps; it doesn't change how anything looks.
+function withAllMachines(results, placement) {
   const byNode = (placement && placement.by_node) || {};
-  const disabledNodes = new Set((placement && placement.disabled_nodes) || []);
-  const nodes = Object.keys(byNode).sort((a, b) => {
-    const la = a.includes("127.0.0.1"), lb = b.includes("127.0.0.1");
-    if (la !== lb) return la ? -1 : 1; return a.localeCompare(b);
-  });
-  if (!nodes.length) {
-    // No catalogue yet (first run, mid-scan) — fall back to the live results so something shows.
-    if (!(results || []).length) return '<div class="hint" style="margin-top:12px;">Warming up — scanning the fleet…</div>';
-    return machineBoard({by_node: {"": (results || []).map(r => ({...r}))}}, results, opts);
-  }
-  // The single best model across the whole fleet (model-wide quality) gets the 🏆.
-  let bestQ = -1, bestModel = null;
-  nodes.forEach(n => byNode[n].forEach(m => {
-    const q = (live.get(m.model) || m).quality;
-    if (q != null && q > bestQ) { bestQ = q; bestModel = m.model; }
-  }));
-  let cols = `<th></th>${showChecks ? "<th>Keep</th>" : ""}<th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th>`;
-  if (full) cols += "<th>Epistemics</th>";
-  cols += "<th>Speed</th>" + VIS_TH;
-  const seen = new Set();   // a keep-checkbox appears once per model (it's on several machines)
-  let h = "";
-  nodes.forEach(node => {
-    const off = disabledNodes.has(node);
-    const rows = byNode[node].map(m => {
-      const lv = live.get(m.model), q = lv || m;          // live scores override the catalogue
-      let rt = m.return_time;                              // this machine's measured time
+  if (!Object.keys(byNode).length) return (results || []).slice();   // no catalogue yet → as-is
+  const live = new Map();
+  (results || []).forEach(r => { if (r.quality != null) live.set(r.model, r); });   // model-wide
+  const out = [];
+  Object.keys(byNode).forEach(node => {
+    byNode[node].forEach(m => {
+      const lv = live.get(m.model), src = lv || m;     // live scores override the catalogue
+      let rt = m.return_time;                          // this machine's measured time…
       if (rt == null && lv && lv.node === node) rt = lv.return_time;   // …or the live scored node
-      return {model: m.model, quality: q.quality, talk: q.talk, tools: q.tools, code: q.code,
-              discipline: q.discipline, epistemics: q.epistemics, reasoning: q.reasoning,
-              vision: q.vision, return_time: rt, scoredHere: !!(lv && lv.node === node)};
-    }).sort((a, b) => (b.quality ?? -1) - (a.quality ?? -1)
-                   || ((a.return_time ?? 1e9) - (b.return_time ?? 1e9)));
-    const allFailed = rows.every(m => m.quality == null);
-    const tag = off ? ' — <b>disabled</b>'
-      : allFailed ? ' — <b style="color:#ff8a8a;">all failed / timed out</b>' : "";
-    h += `<div style="${off ? "opacity:0.45;" : ""}">`;
-    h += `<div class="nodehdr" style="margin-top:14px;">${shortNode(node)} · ${rows.length} model(s)${tag}</div>`;
-    h += `<table><tr>${cols}</tr>`;
-    rows.forEach((m, i) => {
-      const failed = m.quality == null;
-      const rank = (m.model === bestModel) ? "🏆" : (failed ? "✕" : _medal(i));
-      h += `<tr class="${(!failed && i === 0) ? "top" : ""}" style="${failed ? "opacity:0.65;" : ""}"><td>${rank}</td>`;
-      if (showChecks) {   // only models actually scored THIS run can advance; one box per model
-        if (live.has(m.model) && !failed && !seen.has(m.model)) {
-          seen.add(m.model);
-          h += `<td style="text-align:center;"><input type="checkbox" class="tkeep" data-model="${m.model}" checked></td>`;
-        } else h += "<td></td>";
-      }
-      h += `<td>${m.model}</td>`;
-      if (failed) {
-        h += `<td class="q" style="color:#ff8a8a;">✕ no score</td>`;
-      } else {
-        h += `<td class="q">${_stars(m.quality)} <span style="color:#8a94a3; font-weight:400;">${(m.quality ?? 0).toFixed(2)}</span></td>`;
-      }
-      h += `<td>${_emoji(m.talk)}</td><td>${_emoji(m.tools)}</td><td>${_emoji(m.code)}</td><td>${_emoji(m.reasoning)}</td><td>${_emoji(m.discipline)}</td>`;
-      if (full) h += `<td>${_emoji(m.epistemics)}</td>`;
-      h += `<td>${m.return_time != null ? m.return_time.toFixed(1) + "s"
-            : (failed ? '<span style="color:#ff8a8a;">✕</span>' : "·")}</td>`
-        + `<td${VIS_TD}>${_visionEmoji(m.vision)}</td></tr>`;
+      out.push({model: m.model, node: node, quality: src.quality, talk: src.talk, tools: src.tools,
+                code: src.code, discipline: src.discipline, epistemics: src.epistemics,
+                reasoning: src.reasoning, vision: src.vision, return_time: rt});
     });
-    h += "</table></div>";
   });
-  return h;
+  return out;
 }
 
-function renderBenchResults(results, header, speeds, currentStep, placement) {
+function renderBenchResults(results, header, speeds, currentStep) {
   if (_benchBoardClosed) return;
   benchShow(true);
-  // Grouped by MACHINE — every node tested, every model on it, dead ones included (DESIGN §5a).
+  speeds = speeds || {};
+  // ONE row per model — capability is scored once (model-wide), so it shows once, ranked by quality
+  // (fastest breaks ties). Speed is per node, shown compactly in the Speed column (every node it's
+  // been timed on). The per-(node, model) breakdown — and which node a model is installed on —
+  // lives in 📊 Per-node placement; this board ranks the models themselves, not the pairings.
+  const byModel = new Map();
+  (results || []).forEach(r => { if (!byModel.has(r.model)) byModel.set(r.model, r); });
+  const all = [...byModel.values()].sort((a, b) => (b.quality || 0) - (a.quality || 0)
+    || _bestSpeed(a.model, a.return_time, speeds) - _bestSpeed(b.model, b.return_time, speeds));
   let h = `<h2>${header || "🏁 Benchmarking…"} <button class="secondary" style="margin-left:auto; padding:4px 10px;" onclick="showPlacement()">📊 Per-node placement</button> <button class="secondary" style="padding:4px 10px;" onclick="showCouncil()">🏟️ Council</button> <button class="secondary" style="padding:4px 10px;" onclick="closeBench()">✕ Close</button></h2>`;
-  h += '<div class="legend">Every machine tested, with every model on it &nbsp;|&nbsp; ✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; ★ = quality · Speed = time on this machine · ✕ = no score (timed out / errored) &nbsp;|&nbsp; <b>Vision</b> is a capability check — it does <b>not</b> affect the score</div>';
+  h += '<div class="legend">✅ ≥ 0.80 · 🟡 0.50–0.79 · ❌ &lt; 0.50 &nbsp;|&nbsp; ★ = quality &nbsp;|&nbsp; one row per model; Speed = its fastest node (per-machine breakdown in 📊 Per-node placement) &nbsp;|&nbsp; <b>Vision</b> is a capability check (❌ none · 🟡 sees · ✅ full) — it does <b>not</b> affect the score</div>';
   h += stepBar(currentStep);   // current model's per-model "test X/N" sub-progress
-  $("benchBoard").innerHTML = h + machineBoard(placement, results, {showChecks: false, full: true});
+  if (!all.length) { $("benchBoard").innerHTML = h + '<div class="hint" style="margin-top:12px;">Warming up the first model…</div>'; return; }
+  h += "<table><tr><th></th><th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th><th>Epistemics</th><th>Speed/turn</th>" + VIS_TH + "</tr>";
+  all.forEach((r, i) => {
+    h += `<tr class="${i === 0 ? "top" : ""}"><td>${_medal(i)}</td><td>${r.model}</td>`
+      + `<td class="q">${_stars(r.quality)} <span style="color:#8a94a3; font-weight:400;">${(r.quality ?? 0).toFixed(2)}</span></td>`
+      + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td><td>${_emoji(r.epistemics)}</td>`
+      + `<td>${fastestCell(r.model, r.return_time, speeds)}</td>`
+      + `<td${VIS_TD}>${_visionEmoji(r.vision)}</td></tr>`;
+  });
+  $("benchBoard").innerHTML = h + "</table>";
 }
 
 // The per-node placement matrix — every model on EVERY node it runs on, with that node's speed and
@@ -3201,10 +3163,38 @@ async function toggleCouncilMember(model, included) {
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
 }
 
-function tourneyTable(results, showChecks, round, speeds, placement) {
-  // Every machine tested → a header; every model on it → a row (✕ for the ones that timed out).
-  // Triage (round 1) didn't measure epistemics, so that column is hidden until the gauntlet.
-  return machineBoard(placement, results, {showChecks: showChecks, full: round >= 2});
+function tourneyTable(results, showChecks, round, speeds) {
+  speeds = speeds || {};
+  if (!results.length) return '<div class="hint" style="margin-top:12px;">Warming up the first model…</div>';
+  const best = results.slice().sort((a, b) => (b.quality || 0) - (a.quality || 0))[0];
+  const groups = {};
+  results.forEach(r => { (groups[r.node || ""] = groups[r.node || ""] || []).push(r); });
+  const order = Object.keys(groups).sort((a, b) => { const la = a.includes("127.0.0.1"), lb = b.includes("127.0.0.1"); if (la !== lb) return la ? -1 : 1; return a.localeCompare(b); });
+  const full = round >= 2;   // triage (round 1) didn't measure epistemics — hide that column
+  const span = 10 + (full ? 1 : 0) + (showChecks ? 1 : 0);
+  let cols = `<th></th>${showChecks ? "<th>Keep</th>" : ""}<th>Model</th><th>Quality</th><th>Talk</th><th>Tools</th><th>Code</th><th>Reason</th><th>Discipline</th>`;
+  if (full) cols += "<th>Epistemics</th>";
+  cols += "<th>Speed/turn</th>" + VIS_TH;
+  let h = `<table><tr>${cols}</tr>`;
+  const seen = new Set();   // a model is on several machines now → keep-checkbox once, on a scored row
+  order.forEach(node => {
+    const rows = groups[node].sort((a, b) => (b.quality || 0) - (a.quality || 0));
+    h += `<tr><td colspan="${span}" class="nodehdr">${shortNode(node)} · ${rows.length} model(s)</td></tr>`;
+    rows.forEach((r, i) => {
+      const rank = (best && r.model === best.model) ? "🏆" : _medal(i);
+      h += `<tr class="${i === 0 ? "top" : ""}"><td>${rank}</td>`;
+      if (showChecks) {   // only a scored model can advance; show its checkbox just once
+        if (r.quality != null && !seen.has(r.model)) { seen.add(r.model); h += `<td style="text-align:center;"><input type="checkbox" class="tkeep" data-model="${r.model}" checked></td>`; }
+        else h += "<td></td>";
+      }
+      h += `<td>${r.model}</td>`
+        + `<td class="q">${_stars(r.quality)} <span style="color:#8a94a3; font-weight:400;">${(r.quality ?? 0).toFixed(2)}</span></td>`
+        + `<td>${_emoji(r.talk)}</td><td>${_emoji(r.tools)}</td><td>${_emoji(r.code)}</td><td>${_emoji(r.reasoning)}</td><td>${_emoji(r.discipline)}</td>`;
+      if (full) h += `<td>${_emoji(r.epistemics)}</td>`;
+      h += `<td>${r.return_time != null ? r.return_time.toFixed(1) + "s" : "·"}</td><td${VIS_TD}>${_visionEmoji(r.vision)}</td></tr>`;
+    });
+  });
+  return h + "</table>";
 }
 
 function renderTourney(s) {
@@ -3233,7 +3223,9 @@ function renderTourney(s) {
     const sc = s.scope || {};
     h += `<div class="hint" style="margin:10px 0; color:#ff8a8a;">No models qualified this round. Your scope may exclude everything — size band min <b>${sc.min_model_size_b ?? 0}</b>B / max <b>${sc.max_model_size_b ?? "∞"}</b>B (an inverted band excludes all). Widen the size fields and re-run.</div>`;
   }
-  h += tourneyTable((s.results || []).slice(), phase === "awaiting_veto", round, s.speeds, s.placement);
+  // Feed the table the FULL roster (every machine + every model, including the ones that timed out),
+  // not just the scored results — same table, no machine hidden (DESIGN §5a).
+  h += tourneyTable(withAllMachines(s.results, s.placement), phase === "awaiting_veto", round, s.speeds);
   if (phase === "awaiting_veto") {
     const next = round === 1 ? "🥊 FIGHT → Round 1 (gauntlet)" : "🏁 Compute finals (Round 2)";
     h += `<div class="row" style="margin-top:12px; gap:10px; align-items:center;"><button id="tourneyAdvanceBtn" type="button" onclick="advanceTourney()">${next}</button><span class="hint">Untick any model you don't want to advance, then ${round === 1 ? "fight" : "finalize"}.</span></div>`;
@@ -3360,7 +3352,7 @@ async function pollBenchmark() {
           const sp = s.speed_timed ? ` · speed-tested ${s.speed_timed} (model, node) pairing(s)` : "";
           $("fleetMsg").textContent = `Benchmarked ${s.benchmarked || 0} of ${s.eligible || 0} eligible model(s)${skipped}${sp}.`;
           const best = (s.results || []).slice().sort((a, b) => (b.quality || 0) - (a.quality || 0))[0];
-          renderBenchResults(s.results, `✅ Done — ${s.benchmarked || 0} scored, per-node speeds filled${best ? ` · top 🏆 ${best.model}` : ""}`, s.speeds, null, s.placement);
+          renderBenchResults(s.results, `✅ Done — ${s.benchmarked || 0} scored, per-node speeds filled${best ? ` · top 🏆 ${best.model}` : ""}`, s.speeds);
         }
         loadFleet();
         break;
@@ -3376,7 +3368,7 @@ async function pollBenchmark() {
       $("fleetMsg").textContent = speedPhase ? `${s.current}` : (s.total ? `Benchmarking ${s.i}/${s.total}: ${s.current}${more}…${eta}` : `${s.current || "Preparing…"}`);
       const header = speedPhase ? `⏱ Speed-testing every (model, node) pairing — ${s.i}/${s.total}`
         : (s.total ? `🏁 Benchmarking ${s.i}/${s.total}${eta}` : `🔎 ${s.current || "Preparing…"}`);
-      renderBenchResults(s.results, header, s.speeds, s.current_step, s.placement);   // live + step bar
+      renderBenchResults(s.results, header, s.speeds, s.current_step);   // live scoreboard + step bar
       await new Promise(r => setTimeout(r, 1500));
     }
   } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
