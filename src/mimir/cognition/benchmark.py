@@ -409,6 +409,13 @@ class _NodeUnreliable(BaseException):
     pass
 
 
+# Raised when the user clicks "Skip" on the model being scored: abort its battery (don't fail over —
+# the user wants this MODEL skipped) and move on. BaseException for the same reason as above — it
+# must sail through the scorers' `except Exception`.
+class _SkipModel(BaseException):
+    pass
+
+
 _NODE_FAIL_THRESHOLD = 3   # transport failures on one node → abandon it and fail over to another
 
 
@@ -450,6 +457,7 @@ def benchmark_model(
     model: ModelGateway, model_name: str, *, num_ctx: int = 8192,
     framework: bool = True, call_timeout_s: float = 60.0, node: str | None = None,
     on_step: Callable[[int, int, str], None] | None = None,
+    should_skip: Callable[[], bool] | None = None,
 ) -> ModelBenchmark:
     """Run the battery against one model.
 
@@ -526,6 +534,8 @@ def benchmark_model(
 
     def _guard(fn: ChatFn) -> ChatFn:
         def wrapped(messages: list[Message]) -> str:
+            if should_skip is not None and should_skip():
+                raise _SkipModel(f"{model_name}: skipped by user")
             if fail["n"] >= _NODE_FAIL_THRESHOLD:
                 raise _NodeUnreliable(f"{model_name}: node {node} unreliable")
             try:
@@ -551,6 +561,8 @@ def benchmark_model(
     _total_steps = len(_dims)
 
     def _step(label: str) -> None:
+        if should_skip is not None and should_skip():   # abort between dimensions too
+            raise _SkipModel(f"{model_name}: skipped by user")
         if on_step is not None:
             on_step(_dims.index(label) + 1, _total_steps, label)
 
@@ -717,6 +729,7 @@ def benchmark_fleet(
     on_result: Callable[[ModelBenchmark, str], None] | None = None,
     on_done: Callable[[str], None] | None = None,
     on_step: Callable[[str, int, int, str], None] | None = None,
+    should_skip: Callable[[str], bool] | None = None,
 ) -> FleetBenchmarkResult:
     """Benchmark the distinct models in the catalogue and write their scores back.
 
@@ -850,9 +863,13 @@ def benchmark_fleet(
                         call_timeout_s=call_timeout, node=node,
                         on_step=((lambda d, t, lbl: on_step(model_name, d, t, lbl))
                                  if on_step else None),
+                        should_skip=((lambda: should_skip(model_name)) if should_skip else None),
                     )
                     used = node
                     break
+                except _SkipModel:
+                    log.info("benchmark: %s skipped by user", model_name)
+                    break   # user wants THIS model skipped — don't fail over to another node
                 except _NodeUnreliable as exc:
                     log.warning("benchmark: %s unreliable on %s — failing over: %s",
                                 model_name, node, exc)

@@ -172,6 +172,15 @@ def test_benchmark_model_abandons_an_unreachable_node_for_failover() -> None:
                         call_timeout_s=1.0)
 
 
+def test_benchmark_fleet_skips_a_model_on_request(brain: Mimir) -> None:
+    # The "Skip model" button: should_skip(model) → True aborts that model's battery and moves on,
+    # so it isn't scored, while the others are.
+    result = brain.benchmark_fleet(only_approved=False, max_params_b=10.0,
+                                   should_skip=lambda m: m == "mock-a")
+    models = {b.model for b in result.results}
+    assert "mock-b" in models and "mock-a" not in models   # mock-a skipped before scoring
+
+
 def test_benchmark_fleet_signals_done_for_every_model(brain: Mimir) -> None:
     # on_done fires once per finished model (scored, failed over, or skipped) so a UI can clear it
     # from the in-flight/progress view — no ghost left climbing when a model produced no result.
