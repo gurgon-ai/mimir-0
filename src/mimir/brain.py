@@ -1164,8 +1164,8 @@ class Mimir:
     _CONTEXT_PRESETS: dict[str, tuple[int, int]] = {
         "small":  (4096, 2048),
         "medium": (8192, 4096),
-        "large":  (16384, 8192),
-        "xlarge": (32768, 12288),
+        "large":  (32768, 12288),    # ~32k window — generous, still loads on most boxes
+        "xlarge": (65536, 24576),    # ~64k — about 2x large, still within many models' max
     }
 
     def _settings_defaults(self) -> dict[str, Any]:

@@ -1547,7 +1547,7 @@ _HTML = """<!doctype html>
       <button data-tab="graph">Graph</button>
       <button data-tab="procedures">Habits</button>
       <button data-tab="council">Council</button>
-      <button data-tab="fleet">Fleet</button>
+      <button data-tab="fleet">Models</button>
       <button data-tab="library">Library</button>
     </div>
 
@@ -1636,7 +1636,7 @@ _HTML = """<!doctype html>
         <span class="hint" id="setContextHint"></span>
       </div>
 
-      <button id="saveSleep" type="button">Save schedule</button>
+      <button id="saveSleep" type="button">Save settings</button>
       <span id="settingsMsg" class="hint" style="margin-left:10px;"></span>
       <h2 style="margin-top:18px;">Status</h2>
       <div id="sleepStatus" class="hint">—</div>
@@ -3592,7 +3592,7 @@ async function loadModels() {
     $("poolBackend").innerHTML = `<b>Backend:</b> ${backend} &middot; <b>Auto roles:</b> ${auto}. Locality is set by [backend] lan_backend in mimir.toml (restart to change).`;
     const list = $("poolList"); list.innerHTML = "";
     const models = data.models || [];
-    if (!models.length) { list.innerHTML = '<div class="hint">No models yet — open the Fleet tab and click "1 · Find models".</div>'; return; }
+    if (!models.length) { list.innerHTML = '<div class="hint">No models yet — open the Models tab and click "1 · Find models".</div>'; return; }
     models.forEach(m => {
       const row = document.createElement("div"); row.className = "mem"; if (!m.enabled) row.style.opacity = "0.5";
       const label = document.createElement("label"); label.style.display = "flex"; label.style.alignItems = "center"; label.style.gap = "8px"; label.style.cursor = "pointer";

@@ -8,6 +8,10 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **The "Fleet" tab is now "Models".** It holds all the model information (roles, qualification,
+  per-node placement), so the label matches what's there. The "Save schedule" button on the Sleep tab
+  is now "Save settings" — it persists the whole settings form (timezone, sleep window, inner life,
+  *and* context size), so it reads right sitting under the Context-size section.
 - **A "⏭ Skip model" button on the gauntlet progress bar.** If a model is grinding (a thinking model,
   a slow node), skip it — `should_skip(model)` is checked between every dimension and before every
   call, so it aborts that model's battery promptly (raising `_SkipModel`, which — unlike a failover —
@@ -19,7 +23,7 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   unique facts than the window can hold — so the two move together. Each preset sets the operational
   `num_ctx` injected into *every* model call (consistent, so a warm model isn't reloaded between
   callers), the `context_budget_tokens` we assemble, and the `benchmark_num_ctx` we qualify at:
-  Small 4096/2048 · Medium 8192/4096 · Large 16384/8192 · X-Large 32768/12288. A runtime setting
+  Small 4096/2048 · Medium 8192/4096 · Large 32768/12288 · X-Large 65536/24576. A runtime setting
   (kv override, default Medium), applied live on the Sleep tab — changing it reloads warm models at
   the new window. `brain._apply_context_size()` / `ModelGateway.set_operational_num_ctx()`.
 - **The Finals "Your champions" picker is now the onboarding surface: per-role colour, role
@@ -140,6 +144,15 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
   in → `speaker_kind="ai_peer"`. `bake._tier_and_provenance(..., is_peer=)`, `normalize_speaker_kind`.
 
 ### Fixed
+- **.docx table extraction dropped cells under GC pressure.** `_docx_table_lines` de-duped merged
+  cells by `id(cell._tc)`, but that proxy is a temporary — once CPython GC'd it, the same address
+  could be handed to a *later* cell's proxy, so a fresh cell collided with a stale id and was silently
+  dropped. (It only surfaced in the full test run, where memory/GC timing differs — a table cell would
+  vanish from the extracted text.) Now `seen` holds the cell **elements themselves**: dedupe by
+  identity, and the live reference keeps the id from recurring.
+- **Larger Large/X-Large context presets.** Large 16384→**32768** window (12288 budget), X-Large
+  32768→**65536** (24576 budget) — roughly 2× Large, still within many models' max — so the slider's
+  top end actually reaches a long-context window. Small/Medium unchanged.
 - **Cleaner qualification board: per-model "test X/N" progress, one time per machine.** Each model
   runs the whole battery (talk, tools, code, discipline, reasoning, latency, epistemics, vision), so
   the gauntlet now shows a per-model sub-bar — *test X/8 · scoring reasoning… (3 left)* — under the

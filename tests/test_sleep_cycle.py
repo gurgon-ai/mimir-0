@@ -177,11 +177,11 @@ def test_context_size_preset_applies(brain: Mimir) -> None:
     assert brain.settings()["context_size"] == "medium"          # default
     assert brain.config.context_budget_tokens == 4096            # medium budget (applied on init)
     brain.update_settings({"context_size": "large"})
-    assert brain.config.context_budget_tokens == 8192            # large budget
-    assert brain._model._op_num_ctx == 16384                     # large window injected into calls
+    assert brain.config.context_budget_tokens == 12288           # large budget
+    assert brain._model._op_num_ctx == 32768                     # large window injected into calls
     if brain.config.backend:
-        assert brain.config.backend.benchmark_num_ctx == 16384   # qualify at the size we run
-    assert brain.settings()["context_presets"]["xlarge"]["num_ctx"] == 32768
+        assert brain.config.backend.benchmark_num_ctx == 32768   # qualify at the size we run
+    assert brain.settings()["context_presets"]["xlarge"]["num_ctx"] == 65536
     with pytest.raises(ConfigError):
         brain.update_settings({"context_size": "ginormous"})
 
