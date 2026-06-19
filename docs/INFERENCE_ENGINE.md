@@ -343,7 +343,7 @@ Extensions this engine adds:
 
 ## 6a. The qualifying tournament  **[built]**
 
-The web UI exposes qualification as a **staged, human-veto knock-out** (Fleet tab → "🏆 Run
+The web UI exposes qualification as a **staged, human-veto knock-out** (Models tab → "🏆 Run
 qualifying tournament") — the interactive realization of triage→score, with the user in the loop
 between rounds. It separates the two questions a fleet must answer, which behave differently across
 machines:

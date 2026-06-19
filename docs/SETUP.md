@@ -80,8 +80,9 @@ The **chat pane** streams replies (each shows its source count and embedding mod
 evidence) with a conversation dropdown on top (**Restore** a past conversation or **+ New** one) and a
 **🕸 Graph** toggle that flips it to a drifting galaxy of memory blobs + entities — click any blob to
 review/edit it. The side tabs cover **Profile** (the seeding interview / your orienting facts),
-**Mind**, **Memories**, **Graph**, **Habits**, **Council**, **Fleet** (role assignment → qualify →
-models), and **Library** (your documents — ingest, per-doc include toggles, composite pages, ZIM).
+**Mind**, **Memories**, **Graph**, **Habits**, **Council**, **Models** (the model fleet — role
+assignment → qualify → per-node placement), and **Library** (your documents — ingest, per-doc include
+toggles, composite pages, ZIM).
 It binds to localhost by default; it's a reference adapter, not a hardened
 public service — put a reverse proxy in front if you expose it.
 
@@ -439,9 +440,9 @@ The Pi discovers your LAN's Ollama nodes and routes every model call to them. Af
 fleet can serve.
 
 Inspect or refresh the catalogue from `brain.scan_fleet()` / `brain.fleet_report()`, or the web
-UI's **Fleet** tab.
+UI's **Models** tab (it holds all the model-fleet info — roles, qualification, per-node placement).
 
-**Benchmark your models** (`brain.benchmark_fleet()` or the Fleet tab's *Benchmark* button) to fill
+**Benchmark your models** (`brain.benchmark_fleet()` or the Models tab's *Benchmark* button) to fill
 the catalogue's `quality` and `return_time`. Each model runs a capability battery — *talk*
 (instruction following), *tools* (emit a valid tool call), *code* (write parseable code), *reasoning*
 (solve a problem with one checkable answer), *discipline* (don't leak the internal `[tier=…]` tags),
@@ -450,12 +451,14 @@ context-only facts, handle long context). The reasoning cases are chosen empiric
 models actually separate from weak ones, and after scoring the benchmark **speed-tests every
 `(model, node)` pairing automatically** (so each model's true fastest node is known). The per-role
 recommendation is a transparent **points** rank — quality (dominant) + speed + a faint size prior.
+The board groups results **by machine** and shows every machine tested, *including the
+failed/timed-out ones* (a failed test is still a test result), so no node is silently hidden.
 It's call-heavy, so run it on-demand (or add a model later with **＋ Qualify new**, which scores only
 the new ones). Recommended models are
 instruction-following families — `gemma`, `qwen`, `llama`, `mistral`, `phi`, `command-r`, `deepseek`;
 running a **variety** of families is ideal.
 
-**Or run the qualifying tournament** (Fleet tab → *🏆 Run qualifying tournament*) — a staged,
+**Or run the qualifying tournament** (Models tab → *🏆 Run qualifying tournament*) — a staged,
 human-veto narrowing instead of one big pass. **Round 0 · Qualifying** scores the whole fleet fast
 and cheap; you untick who shouldn't advance; **Round 1 · Gauntlet** puts the survivors through the
 full framework qualification; **Round 2 · Finals** points each role at its champion *among your
@@ -464,12 +467,11 @@ switch tabs. The size/latency scope fields (`min_model_size_b`, `max_model_size_
 apply to the whole run. This is the recommended path; *Find / Benchmark / Apply* remain as the manual,
 one-step-at-a-time equivalents.
 
-**Assign roles manually** (Fleet tab → *Role assignment*, or `brain.set_role(role, model)`). Each role
+**Assign roles manually** (Models tab → *Role assignment*, or `brain.set_role(role, model)`). Each role
 has a dropdown: leave it on **auto** (the system routes to the best-qualified model and re-picks on a
 rescan) or choose a specific model to **pin** it — a pin is honoured exactly and never substituted or
-re-assigned. The Fleet tab now also holds the full **model pool** (enable/disable each model, see which
-roles it serves or is barred from) — Fleet and Models were merged into one view since they share so
-much.
+re-assigned. The Models tab holds the full **model pool** too (enable/disable each model, see which
+roles it serves or is barred from) — all the model-fleet information lives in this one tab.
 
 ## 6. Configuration reference
 
