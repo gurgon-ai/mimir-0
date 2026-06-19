@@ -8,6 +8,12 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **A "⏭ Skip model" button on the gauntlet progress bar.** If a model is grinding (a thinking model,
+  a slow node), skip it — `should_skip(model)` is checked between every dimension and before every
+  call, so it aborts that model's battery promptly (raising `_SkipModel`, which — unlike a failover —
+  does *not* retry on another node; the user wants this model skipped) and moves on. Wired
+  benchmark_model → benchmark_fleet → brain → server (`POST /api/fleet/benchmark/skip`), for both the
+  benchmark and the tournament gauntlet.
 - **A Context-size slider (Small / Medium / Large / X-Large) — one knob for the KV-cache window and
   how much you recall.** VRAM and KV-cache size vary by box, and there's no point pushing in more
   unique facts than the window can hold — so the two move together. Each preset sets the operational

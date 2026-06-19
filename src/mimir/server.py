@@ -359,6 +359,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._benchmark_fleet(body))
             elif route == "/api/fleet/benchmark/new":
                 self._send_json(self._qualify_new(body))
+            elif route == "/api/fleet/benchmark/skip":
+                self._send_json(self._skip_model(body))
             elif route == "/api/fleet/benchmark/council":
                 self._send_json(self._benchmark_council())
             elif route == "/api/fleet/tournament/start":
@@ -666,8 +668,8 @@ class _Handler(BaseHTTPRequestHandler):
         with srv.bench_lock:
             if srv.bench_state.get("running"):
                 return {"started": False, **srv.bench_state}  # already running
-            srv.bench_state = {"running": True, "i": 0, "total": 0,
-                               "current": scanning, "done": False, "results": [], "inflight": {}}
+            srv.bench_state = {"running": True, "i": 0, "total": 0, "current": scanning,
+                               "done": False, "results": [], "inflight": {}, "skip": set()}
 
         def _progress(i: int, total: int, model: str, eta: float | None) -> None:
             with srv.bench_lock:
@@ -689,11 +691,16 @@ class _Handler(BaseHTTPRequestHandler):
             with srv.bench_lock:
                 srv.bench_state.get("inflight", {}).pop(model, None)
                 srv.bench_state.get("steps", {}).pop(model, None)
+                srv.bench_state.get("skip", set()).discard(model)
 
         def _on_step(model: str, done: int, total: int, label: str) -> None:
             with srv.bench_lock:   # per-model sub-progress: which test it's on (the gauntlet's X/N)
                 srv.bench_state.setdefault("steps", {})[model] = {
                     "done": done, "total": total, "label": label}
+
+        def _should_skip(model: str) -> bool:   # the per-model "Skip" button
+            with srv.bench_lock:
+                return model in srv.bench_state.get("skip", set())
 
         def _speed_progress(i: int, total: int, model: str) -> None:
             with srv.bench_lock:
@@ -703,7 +710,7 @@ class _Handler(BaseHTTPRequestHandler):
         def _run() -> None:
             try:
                 with srv.brain_lock:
-                    result = run(_progress, _on_result, _on_done, _on_step)
+                    result = run(_progress, _on_result, _on_done, _on_step, _should_skip)
                     # Phase 3 — speed-test EVERY remaining (model, node) pairing, so each model's
                     # TRUE fastest node is known: a node can be far faster than the one a model's
                     # capability was scored on, and the recommendation's speed term (+ the per-node
@@ -739,9 +746,9 @@ class _Handler(BaseHTTPRequestHandler):
         cap = float(body["max_model_size_b"]) if body.get("max_model_size_b") not in (None, "") else None
         floor = float(body["min_model_size_b"]) if body.get("min_model_size_b") not in (None, "") else None
         latency = float(body["max_latency_s"]) if body.get("max_latency_s") not in (None, "") else None
-        return self._run_benchmark_bg(lambda p, r, d, st: self.server.brain.benchmark_fleet(
+        return self._run_benchmark_bg(lambda p, r, d, st, sk: self.server.brain.benchmark_fleet(
             max_params_b=cap, min_params_b=floor, latency_budget_s=latency,
-            progress=p, on_result=r, on_done=d, on_step=st,
+            progress=p, on_result=r, on_done=d, on_step=st, should_skip=sk,
         ))
 
     def _qualify_new(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -751,19 +758,32 @@ class _Handler(BaseHTTPRequestHandler):
         floor = float(body["min_model_size_b"]) if body.get("min_model_size_b") not in (None, "") else None
         latency = float(body["max_latency_s"]) if body.get("max_latency_s") not in (None, "") else None
         return self._run_benchmark_bg(
-            lambda p, r, d, st: self.server.brain.qualify_new_models(
+            lambda p, r, d, st, sk: self.server.brain.qualify_new_models(
                 max_params_b=cap, min_params_b=floor, latency_budget_s=latency,
-                progress=p, on_result=r, on_done=d, on_step=st,
+                progress=p, on_result=r, on_done=d, on_step=st, should_skip=sk,
             ),
             scanning="finding newly-installed models…",
         )
+
+    def _skip_model(self, body: dict[str, Any]) -> dict[str, Any]:
+        """The 'Skip model' button: flag a model so the worker aborts its battery and moves on
+        (whichever of the benchmark / tournament is running checks its own set)."""
+        model = str(body.get("model", "")).strip()
+        if not model:
+            raise ValueError("model is required")
+        srv = self.server
+        with srv.bench_lock:
+            srv.bench_state.setdefault("skip", set()).add(model)
+        with srv.tourney_lock:
+            srv.tourney_state.setdefault("skip", set()).add(model)
+        return {"skipping": model}
 
     def _benchmark_council(self) -> dict[str, Any]:
         """Grade the council pool — the big models above the chat cap, caps off — in place (no
         rescan, so the main pool's scores survive). Then they enter the council roster."""
         return self._run_benchmark_bg(
-            lambda p, r, d, st: self.server.brain.benchmark_council_pool(
-                progress=p, on_result=r, on_done=d, on_step=st),
+            lambda p, r, d, st, sk: self.server.brain.benchmark_council_pool(
+                progress=p, on_result=r, on_done=d, on_step=st, should_skip=sk),
             scanning="grading the council pool (big models, caps off)…",
         )
 
@@ -787,8 +807,11 @@ class _Handler(BaseHTTPRequestHandler):
             inflight = dict(state.get("inflight", {}))
             steps = dict(state.get("steps", {}))
         state.update(self._inflight_view(inflight))
-        state["current_step"] = steps.get(state.get("current"))   # the current model's test X/N
+        cur = state.get("current")
+        cs = steps.get(cur)
+        state["current_step"] = {**cs, "model": cur} if cs else None   # test X/N (+ model, for Skip)
         state.pop("steps", None)
+        state.pop("skip", None)   # a set — not JSON-serializable, and internal
         # Per-(model, node) speeds so the board can show a model on EVERY node it runs on (quality
         # scored once, speed per node) — the speed-test's output the one-row-per-model run never had.
         state["speeds"] = self.server.brain.catalogue_speeds()
@@ -802,8 +825,11 @@ class _Handler(BaseHTTPRequestHandler):
             inflight = dict(state.get("inflight", {}))
             steps = dict(state.get("steps", {}))
         state.update(self._inflight_view(inflight))
-        state["current_step"] = steps.get(state.get("current"))   # the current model's test X/N
+        cur = state.get("current")
+        cs = steps.get(cur)
+        state["current_step"] = {**cs, "model": cur} if cs else None   # test X/N (+ model, for Skip)
         state.pop("steps", None)
+        state.pop("skip", None)   # a set — not JSON-serializable, and internal
         # Per-(model, node) speeds so the tournament table shows each model on EVERY node it's timed
         # on (the speed-test's output), not just the one node it was scored on.
         state["speeds"] = self.server.brain.catalogue_speeds()
@@ -930,7 +956,7 @@ class _Handler(BaseHTTPRequestHandler):
                 active=True, round=round_num, round_name=meta["name"], round_key=meta["key"],
                 round_label=meta["label"], blurb=meta["blurb"], total_rounds=_TOURNEY_TOTAL,
                 phase="running", i=0, total=0, current="scanning the fleet…", eta=None,
-                results=[], error=None, recommendations=None, inflight={},
+                results=[], error=None, recommendations=None, inflight={}, skip=set(),
             )
 
         def _progress(i: int, total: int, model: str, eta: float | None) -> None:
@@ -951,11 +977,16 @@ class _Handler(BaseHTTPRequestHandler):
             with srv.tourney_lock:
                 srv.tourney_state.get("inflight", {}).pop(model, None)
                 srv.tourney_state.get("steps", {}).pop(model, None)
+                srv.tourney_state.get("skip", set()).discard(model)
 
         def _on_step(model: str, done: int, total: int, label: str) -> None:
             with srv.tourney_lock:   # the gauntlet's per-model "test X/N" bar
                 srv.tourney_state.setdefault("steps", {})[model] = {
                     "done": done, "total": total, "label": label}
+
+        def _should_skip(model: str) -> bool:   # the per-model "Skip" button (the gauntlet)
+            with srv.tourney_lock:
+                return model in srv.tourney_state.get("skip", set())
 
         def _speed_progress(i: int, total: int, model: str) -> None:
             with srv.tourney_lock:
@@ -975,7 +1006,7 @@ class _Handler(BaseHTTPRequestHandler):
                         latency_budget_s=scope.get("max_latency_s"),
                         only_models=keep, framework=not triage, persist=not triage,
                         progress=_progress, on_result=_on_result, on_done=_on_done,
-                        on_step=_on_step,
+                        on_step=_on_step, should_skip=_should_skip,
                     )
                     # After the REAL (persisting) round, speed-test every (model, node) pairing so
                     # the finals are computed with each model's true fastest node — not the one node
@@ -2863,10 +2894,17 @@ const BAND_COLOR = { green: "#7fd17f", yellow: "#e0c060", red: "#e0604a" };
 function stepBar(cs) {
   if (!cs || !cs.total) return "";
   const pct = Math.round((cs.done / cs.total) * 100);
+  const skip = cs.model ? `<button class="secondary" style="padding:1px 9px; margin-left:10px; font-size:11px;" onclick="skipModel('${cs.model}')">⏭ Skip model</button>` : "";
   return `<div style="margin:3px 0 8px;"><div class="hint">test ${cs.done}/${cs.total}`
-    + `${cs.label ? " · scoring " + cs.label + "…" : ""} (${cs.total - cs.done} left)</div>`
+    + `${cs.label ? " · scoring " + cs.label + "…" : ""} (${cs.total - cs.done} left)${skip}</div>`
     + `<div style="background:#2b333f; height:7px; border-radius:4px; max-width:340px;">`
     + `<div style="background:#2d8; height:7px; border-radius:4px; width:${pct}%;"></div></div></div>`;
+}
+async function skipModel(model) {
+  try {
+    await api("POST", "/api/fleet/benchmark/skip", { model });
+    $("fleetMsg").textContent = `Skipping ${model} — finishing its current call, then moving on…`;
+  } catch (e) { $("fleetMsg").textContent = "Error: " + e.message; }
 }
 function _medal(i) { return i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : (i + 1) + "."; }
 function _stars(q) { const n = Math.max(0, Math.min(5, Math.round((q || 0) * 5))); return "★".repeat(n) + "☆".repeat(5 - n); }
