@@ -179,15 +179,15 @@ other**. Full contract in [`docs/API.md`](docs/API.md); the essentials:
 ```python
 from mimir import Mimir
 m = Mimir.from_config("mimir.toml")
-print(m.turn("My garlic goes in around October.", user="greg").reply)
-print(m.turn("When do I plant the garlic?", user="greg").reply)   # recalls it, attributed
+print(m.turn("My garlic goes in around October.", user="alex").reply)
+print(m.turn("When do I plant the garlic?", user="alex").reply)   # recalls it, attributed
 ```
 
 **Over HTTP** — `python -m mimir.server --config mimir.toml` serves the UI *and* the API on one port:
 ```bash
 curl -s http://127.0.0.1:8765/api/turn \
   -H "Content-Type: application/json" \
-  -d '{"text": "hello", "user": "greg"}'
+  -d '{"text": "hello", "user": "alex"}'
 # → {"reply": "...", "introspect": {context accounting: sources, tiers, tokens}}
 ```
 - **`user` is the speaker's identity** and **`speaker_kind` (`human`/`ai_peer`) is its kind** — the
