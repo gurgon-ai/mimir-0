@@ -78,6 +78,13 @@ _BATCH_MAX = 64  # max ops per transaction
 
 def _apply_pragmas(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA journal_mode=WAL")
+    # WAL + synchronous=NORMAL is the standard high-throughput-safe combo: fsync only at checkpoint,
+    # not on every commit. The DB can NEVER corrupt this way (WAL guarantees integrity); the only
+    # risk is losing the *last* transaction(s) on a hard power-loss — acceptable for a memory store,
+    # and the difference between "keeps up" and "stalls" on weak hardware (a Pi's SD card fsyncs
+    # glacially). Without it, the default synchronous=FULL fsyncs every write → ~30ms/write even on
+    # an SSD. (See bench/storage_throughput.py.)
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=5000")
 
@@ -246,13 +253,25 @@ class StorageGateway:
             conn.close()
 
     def _drain_batch(self) -> list[_WriteOp]:
-        """Block for the first op, then gather more (up to batch_max / flush_interval)."""
+        """Block for the first op, then gather more. If the first op is a **blocking** write (a
+        caller is waiting on its future — the turn's own writes), commit ASAP: drain only what's
+        already queued, with NO gather delay (the old fixed ``flush_interval`` wait added ~20ms to
+        every blocking write — sequential turn writes each paid it, so a turn's burst stalled). A
+        **fire-and-forget** first op (access touches, working-memory refresh) can afford the short
+        window so a burst of them coalesces into one transaction — nobody is waiting on it."""
         try:
             first = self._queue.get(timeout=1.0)
         except queue.Empty:
             return []
         batch = [first.op]
-        deadline = time.monotonic() + self._flush_interval_s
+        if first.op.future is not None:  # blocking — no artificial wait; take what's instant
+            while len(batch) < self._batch_max:
+                try:
+                    batch.append(self._queue.get_nowait().op)
+                except queue.Empty:
+                    break
+            return batch
+        deadline = time.monotonic() + self._flush_interval_s  # fire-and-forget — gather a burst
         while len(batch) < self._batch_max:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
