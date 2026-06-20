@@ -248,6 +248,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._sessions())
             elif route == "/api/mind":
                 self._send_json(self._mind())
+            elif route == "/api/notebooks":
+                with self.server.brain_lock:
+                    self._send_json({"notebooks": self.server.brain.notebooks()})
             elif route == "/api/memories":
                 self._send_json(self._memories(params))
             elif route == "/api/graph":
@@ -1624,6 +1627,9 @@ _HTML = """<!doctype html>
       <details class="section" open><summary>Inner life — thoughts while idle</summary>
         <div id="thoughts"></div>
       </details>
+      <details class="section"><summary>Notebooks — what it's working on</summary>
+        <div id="notebooks"></div>
+      </details>
       <details class="section"><summary>Working memory</summary>
         <div class="selfmodel" id="workingMemory">—</div>
       </details>
@@ -2624,6 +2630,7 @@ async function loadMind() {
     });
     if (!(m.recent_thoughts||[]).length) th.innerHTML =
       '<div class="hint">No inner-life thoughts yet — enable it in the Sleep tab, or hit “Think now”.</div>';
+    loadNotebooks();
     const refl = $("reflections"); refl.innerHTML = "";
     (m.recent_reflections || []).forEach(t => {
       const d = document.createElement("div"); d.className = "mem";
@@ -2663,6 +2670,31 @@ async function loadMind() {
         }).join("");
     }
   } catch (e) { $("selfModel").textContent = "error: " + e.message; }
+}
+
+async function loadNotebooks() {
+  const el = $("notebooks");
+  if (!el) return;
+  try {
+    const data = await api("GET", "/api/notebooks");
+    const nbs = data.notebooks || [];
+    el.innerHTML = "";
+    if (!nbs.length) {
+      el.innerHTML = '<div class="hint">No notebooks yet — the model writes these itself as it works.</div>';
+      return;
+    }
+    nbs.forEach(nb => {
+      const d = document.createElement("details"); d.className = "mem";
+      const sm = document.createElement("summary");
+      const secs = (nb.sections || []).length ? " · " + nb.sections.join(", ") : "";
+      sm.textContent = `${nb.title} (${nb.size} chars)${secs}`;
+      const body = document.createElement("div"); body.className = "selfmodel";
+      body.style.marginTop = "6px"; body.textContent = nb.body || "(empty)";
+      const meta = document.createElement("div"); meta.className = "meta";
+      meta.textContent = forumWhen(nb.updated_at) + (nb.owner && nb.owner !== "__self__" ? " · " + nb.owner : "");
+      d.appendChild(sm); d.appendChild(body); d.appendChild(meta); el.appendChild(d);
+    });
+  } catch (e) { el.innerHTML = '<div class="hint">error: ' + escapeHtml(e.message) + '</div>'; }
 }
 
 async function loadMemories() {

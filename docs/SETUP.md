@@ -541,6 +541,17 @@ after_s = 1800                  # only once the quiet has run this long (~30 min
 cooldown_s = 3600               # at most one dialogue this often (~1 hour)
 max_turns = 4                   # voices per dialogue (opening + challenge/defend), the cost cap
 
+[notebook]                      # lossless, name-addressable working memory the model curates itself
+enabled = true                  # a `notebook` tool (read/write/edit/append/rename/delete) + a catalog
+self_soft_cap = 15              # nudge the model to groom (rename/merge/delete) past this many
+inject_index = true             # ambient [notebooks] catalog section (titles only, never bodies)
+read_rag = true                 # a notebook read re-triggers recall, reconnecting it to live memory
+
+[temporal_registry]             # STATE vs NARRATIVE: a dated, status-tagged ledger of milestones
+enabled = true                  # injects a high-attention [Timeline]; a `record_milestone` tool
+timeline_max = 12               # milestones shown in the [Timeline] block
+reconcile_in_sleep = true       # the sleep authority pass that demotes stale-state / protects current
+
 [server]                        # reference web server / integration API — see docs/API.md
 # api_token = "..."             # require Authorization: Bearer <token> on /api/* (env var wins)
 # api_token_env = "MIMIR_API_TOKEN"  # which env var holds the token; give co-located instances their own

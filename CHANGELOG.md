@@ -8,6 +8,43 @@ Pre-1.0: the API and schema may change between releases.
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
 ### Added
+- **Temporal Registry — STATE vs NARRATIVE (schema v24, docs/EXTENSIBILITY.md).** The memory store is
+  NARRATIVE: it accumulates in mixed tense ("planning to do X" … "X is underway" … "X is done"), all
+  coexisting and ranked by relevance/recency/tier — *not* by which one is currently true, so a status
+  question can surface the old, high-salience *planning* note and answer as if a finished thing is
+  still upcoming. The registry is the separate STATE axis: a small, authoritative, dated,
+  status-tagged ledger of milestones (what is true *now*) in its own table (so inherently
+  decay-exempt). It injects a high-attention `[Timeline]` section near the top of the prompt, pins
+  current-config milestones into the self-model ("how am I set up"), exposes a non-actuating
+  **`record_milestone`** tool (motor port — it writes the brain's own ledger, not the world), and runs
+  a deterministic **reconcile** pass during sleep that uses the ledger as authority: it **demotes** a
+  narrative memory that frames as still-upcoming something a milestone says is done, and **protects** a
+  faded memory a current milestone confirms (lifting it above the archive floor). The guard is
+  **distinctive tokens** — a proper-noun / number / rare word shared with the milestone — so it never
+  clobbers an unrelated memory on a generic word like "system". No model call. `[temporal_registry]`
+  config (`enabled` / `timeline_max` / `reconcile_in_sleep`). The second connector built on the
+  extensibility ports. `cognition/temporal_registry.py`.
+- **Notebook — lossless, name-addressable working memory (schema v23, docs/EXTENSIBILITY.md).** A
+  notebook the model curates itself (markdown, `##` sections; SQLite via the gateway, decay-exempt) —
+  *memory is what it knows; a notebook is what it's working on.* Attaches entirely on the extensibility
+  ports: a **`notebook` tool** (read/write/edit/append/rename/delete — non-actuating, so safe always)
+  on the motor port + an **ambient catalog section** (titles only, never bodies) on the sensory port.
+  Its signature mechanism is **read = RAG re-trigger** (`read_with_memory`): a cold re-read runs the
+  note back through recall so it reconnects to current memory instead of being an orphaned clipping.
+  `[notebook]` config; off-by-cap grooming surfaces (never silently drops). `cognition/notebook.py`.
+  The first connector on the ports, and the template a third-party connector follows.
+- **Extensibility — "a brain with four typed ports for hands" (docs/EXTENSIBILITY.md).** Core ships
+  the connector slots + protocols (never a built integration, so it stays zero-dependency): ①
+  **sensory** = a `ContextSource` that folds a typed `Section` into the prompt
+  (`register_context_source` / `Mimir(…, context_sources=)`); ② **motor** = a `Tool` the model invokes
+  mid-turn via a `<TOOL name=… args=…>` marker, run through **one guarded dispatcher** that
+  schema-validates and **trust-gates** state-changing actions (a peer/guest can't actuate — the
+  actuation analogue of the memory trust policy), surfaced as `TurnResult.actions` / the `/api/turn`
+  `actions` field; ③ **backend** = an open `register_provider` registry + `Mimir(…, embedder=)`; ④
+  **reflex** = `register_burst_task`. Council personas are overridable. Phase 1 + the Phase-2
+  foundation (single-round tool loop) are built; multi-round ReAct, streaming-turn tool support, config
+  module-paths, `/api/event`, `/api/tools`, and an MCP adapter are the tracked follow-ups.
+  `cognition/tools.py`.
 - **The "Fleet" tab is now "Models".** It holds all the model information (roles, qualification,
   per-node placement), so the label matches what's there. The "Save schedule" button on the Sleep tab
   is now "Save settings" — it persists the whole settings form (timezone, sleep window, inner life,

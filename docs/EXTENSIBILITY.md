@@ -226,13 +226,14 @@ optional, never a core dependency.)
 
 - **Phase 1 — wire the dormant seams.** Forward `ContextSource`/`extra_sections` through
   `turn()`/`turn_stream()`; open provider/embedder registries + `embedder=` injection; expose
-  `register_burst_task`; make council personas overridable. → ports ①③④ real. **[building now]**
+  `register_burst_task`; make council personas overridable. → ports ①③④ real. **[built]**
 - **Phase 2 — the motor port.** `Tool` + `ToolRegistry` (register-replace-by-name, keyword/always-on
   selection) + the guarded dispatcher (schema-validate, **trust-gating**, handler-error-as-string) +
   `actions` in `TurnResult`/`/api/turn` + a single-round invocation in `turn()` generalizing the
-  `<FETCH>` mechanism. **[built]** Still proposed: multi-round ReAct (call-dedup, outcome logging),
-  a confirmation gate for state-changing tools, tool-calling in the *streaming* turn, and
-  `register_tool` reference connectors.
+  `<FETCH>` mechanism. **[built]** The Notebook and Temporal Registry are two real connectors built on
+  it. Still proposed: multi-round ReAct (call-dedup, outcome logging), a confirmation gate for
+  state-changing tools, and tool-calling in the *streaming* turn (today's single-round loop is on the
+  non-streaming `turn()` path, so `/api/turn/stream` doesn't return `actions` yet).
 - **Phase 3 — packaging + API.** Config module-paths, `POST /api/event`, `GET /api/tools`, `actions`
   + `context` on `/api/turn`. **[proposed]**
 - **Phase 4 — ecosystem.** The MCP adapter + manifest/subprocess connectors. **[proposed]**
