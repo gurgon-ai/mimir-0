@@ -149,6 +149,33 @@ re-trigger** (`read_with_memory`): a cold re-read runs the note back through rec
 to current memory instead of being an orphaned clipping. `[notebook]`-gated; off-by-cap grooming
 surfaces (never silently drops). This is the template a third-party connector follows.
 
+## Worked example built on the ports: the Temporal Registry **[built]**
+
+The **Temporal Registry** (`cognition/temporal_registry.py`, schema v24) is the second primitive on
+these ports, and it fixes a specific failure of a narrative memory store: memory accumulates in
+**mixed tense** ("planning to do X" … "X is underway" … "X is done"), all coexisting and ranked by
+relevance/recency/tier — *not* by which one is currently true, so a status question can surface the
+old, high-salience *planning* note and answer as if a finished thing is still upcoming. The registry
+is the separate axis: a small, **authoritative, dated, status-tagged** ledger of milestones (STATE —
+what is true *now*) beside the narrative store. It lives in its own table, so it is inherently exempt
+from memory decay/archival.
+
+It dogfoods three ports plus the sleep cycle:
+
+- **Sensory** — the brain injects a high-attention `[Timeline]` section (current STATE) near the top
+  of every prompt, so a "what's the status of …" is answered from what's true now.
+- **Motor** — a **`record_milestone` tool** (non-actuating — it writes the brain's own ledger, not
+  the world, so `state_changing=False`, safe always) lets the model log a state change the operator
+  states ("we finished the migration today").
+- **Self-model** — current-config milestones are pinned into the authored self-knowledge ("how am I
+  set up"), so configuration is answered from authoritative state, not a stale note.
+- **Reflex / sleep** — a deterministic **reconcile** pass during consolidation uses the ledger as the
+  authority: it **demotes** a narrative memory that frames as still-upcoming something a milestone
+  says is done, and **protects** a faded memory a current milestone confirms (lifting it above the
+  archive floor). The guard is **distinctive tokens** — a proper-noun / number / rare word shared
+  with the milestone — so it never clobbers an unrelated memory on a generic word like "system". No
+  model call; pure functions, the brain owns the wiring. `[temporal_registry]`-gated.
+
 ## How connectors attach — three tiers
 
 1. **Library injection** (the clean default, Phase 1) — `Mimir(config, provider=…, embedder=…,

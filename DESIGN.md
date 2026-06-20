@@ -75,10 +75,26 @@ discipline and its own slot in the prompt.
 | **Working memory** | Rolling cross-session salient context | recency + compression |
 | **Self-model** | The system's authored identity | always-on |
 | **Procedural** | Learned reasoning habits (trigger → procedure) | cosine + structural |
+| **Timeline (STATE)** | Durable milestones — what is true *now* (dated, status-tagged) | always-on, high-attention |
 
 Each layer is **separate by design** — understanding never competes with memory for injection slots;
 they live in different prompt sections with different framing. Additional layers (a compiled doc
 library, etc.) register as further typed sources.
+
+**STATE vs NARRATIVE (the Timeline layer).** Memory is NARRATIVE: it accumulates in **mixed tense**
+("planning to do X" … "X is underway" … "X is done"), all coexisting and ranked by
+relevance/recency/tier — *not* by which one is currently true. So a status question can surface the
+old, high-salience *planning* memory and answer as if a finished thing is still upcoming, and
+confidence/salience decoupling (§3c) doesn't fix it: the stale memory isn't false in general — it was
+true when said; it's just **superseded as current state.** The **Temporal Registry**
+(`cognition/temporal_registry.py`) is the separate STATE axis: a small, authoritative, dated,
+status-tagged ledger of milestones, in its own table (so inherently decay-exempt). It injects a
+high-attention `[Timeline]` section, pins current-config milestones into the self-model, and in the
+sleep pass runs a deterministic **reconcile** that uses the ledger as authority — demoting a memory
+that frames as upcoming what a milestone says is done, protecting a faded memory a current milestone
+confirms. The guard is **distinctive tokens** (a shared proper-noun / number / rare word), so it
+never acts on a generic word like "system". (Extracted per `MIMIR0_EXTRACTIONS.md`; see
+`docs/EXTENSIBILITY.md` for the connector wiring.)
 
 ### 3b. Evidence tiers (truth provenance)
 Every memory carries an `evidence_tier` assigned at write time by *how it was sourced* — e.g.
