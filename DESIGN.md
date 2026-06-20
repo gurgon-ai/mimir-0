@@ -142,9 +142,14 @@ was never injected — a death spiral. Don't let "haven't used it lately" masque
 After context assembly, count how many layers produced substantive content — recalled memory facts,
 connected graph edges, wiki passages, **and cited library claims** (every independent grounding
 layer must be counted; omitting one falsely starves the gate and makes the model deflect on material
-it actually has). If a real question drew from ≤1 source, inject an explicit honesty flag: *say what
-you don't know, name the gap, ask a clarifying question.* Pure pipeline introspection — no model
-call. The mechanical antidote to confident hallucination.
+it actually has). A memory hit only counts as grounding if it clears a **grounding-relevance bar set
+higher than the injection floor**: recall always returns its top-k, so on a populated store something
+almost always scrapes over the low floor used to *decide what to inject* — counting every injected
+hit as a "source" makes the gate go silent the moment any memory exists, even for a genuinely-unknown
+question whose only hits are incidental. Inject (be generous), but only *on-topic* hits ground.
+If a real question drew from ≤1 grounding source, inject an explicit honesty flag: *say what you
+don't know, name the gap, ask a clarifying question.* Pure pipeline introspection — no model call.
+The mechanical antidote to confident hallucination.
 
 ### 3e. The assembly contract — `build_context()`
 This is the heart. Given a turn + user, it produces an ordered, budgeted prompt: self-model →

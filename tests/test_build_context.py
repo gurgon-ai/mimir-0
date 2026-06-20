@@ -92,6 +92,31 @@ def test_library_claims_count_as_grounding() -> None:
     assert "epistemic check" not in bundle.prompt
 
 
+def test_incidental_hits_below_grounding_floor_still_fire_the_gate() -> None:
+    """Recall always returns its top-k; on a populated store (e.g. ingested README chunks) something
+    usually scrapes over the low *injection* floor. Those incidental, off-topic hits must NOT count
+    as grounding — the gate stays meaningful instead of going silent once memory exists (§3d).
+    (Live API test: an off-topic question saw source_count > 1 from barely-relevant doc chunks.)"""
+    doc = EvidenceTier.DOCUMENT
+    weak = [
+        _scored("the project ships zero runtime dependencies", doc, "README", 0.08, 1),
+        _scored("the storage gateway is the single writer", doc, "README", 0.06, 2),
+        _scored("sleep runs in a nightly window", doc, "README", 0.07, 3),
+    ]
+    bundle = build_context(
+        query="what's the torque spec for the tractor's drawbar bolt?",
+        user=None,
+        identity="id",
+        retrieved=weak,
+        sentinel_note=None,
+        embed_mode=EmbeddingMode.ENDPOINT,
+        budget_tokens=4096,
+    )
+    assert bundle.retrieved_ids == [1, 2, 3]   # still injected (kept the low injection floor)
+    assert bundle.source_count == 0            # but none count as grounding
+    assert bundle.uncertainty_triggered        # so the gate fires, as it should
+
+
 def test_uncertainty_gate_ignores_non_questions() -> None:
     bundle = build_context(
         query="i like hiking",
