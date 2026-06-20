@@ -59,7 +59,7 @@ simply be written to memory (it then recalls like any fact) or pushed via `POST 
 
 ---
 
-## ② Motor port — the hands **[partial: registry + dispatcher foundation landing; full loop proposed]**
+## ② Motor port — the hands **[partial: registry + guarded dispatcher + single-round loop built; multi-round ReAct proposed]**
 
 The brain emits only prose today, so an external system can't learn *what it wants to do*. The motor
 port adds a structured action channel: **registered tools the model can invoke**, run through **one
@@ -83,12 +83,15 @@ small local models degrade sharply when handed too many (a hard-won lesson from 
 so this cap is load-bearing, not cosmetic.
 
 **Invocation is tool-calling, not prose-scanning** (the chosen model): the model *deliberately*
-invokes a tool by emitting a structured in-band call (generalizing the existing `<FETCH id=N>`
-marker, which is exactly this pattern for one hardcoded verb), the brain runs it through the
-dispatcher, feeds the result back, and re-invokes — a bounded **ReAct loop** (call-dedup, outcome
-logged to procedural memory). In-band markers (not the provider's native `tools` array) keep it
-working on small/local models and the deterministic mock. Acting on what a reply merely *says*
-("turning on the light") is **out of core** by design — too sharp an edge.
+invokes a tool by emitting a structured in-band call — `<TOOL name="x" args={…}>` — generalizing the
+existing `<FETCH id=N>` marker, which is exactly this pattern for one hardcoded verb. The brain runs
+each call through the dispatcher and re-invokes with the results in hand. **Built now:** a
+**single-round** loop (offer relevant tools → the model may call → dispatch → re-invoke once →
+`actions`). **Next:** a bounded **multi-round ReAct** loop (call-dedup, outcomes logged to procedural
+memory). In-band markers (not the provider's native `tools` array) keep it working on small/local
+models and the deterministic mock. Acting on what a reply merely *says* ("turning on the light") is
+**out of core** by design — too sharp an edge. Tools reach the model only when registered *and*
+keyword/always-selected for the turn, so a tool-free deployment pays nothing.
 
 ### The dispatcher — one guarded choke point **[foundation: Phase 2]**
 *Every* action funnels through one executor; safety lives there, so it can't be bypassed:
@@ -186,9 +189,11 @@ optional, never a core dependency.)
   `turn()`/`turn_stream()`; open provider/embedder registries + `embedder=` injection; expose
   `register_burst_task`; make council personas overridable. → ports ①③④ real. **[building now]**
 - **Phase 2 — the motor port.** `Tool` + `ToolRegistry` (register-replace-by-name, keyword/always-on
-  selection) + the guarded dispatcher (allow-list, schema-validate, confirmation gate, **trust-gating**)
-  + `actions` in `TurnResult`. The invocation ReAct loop generalizes the `<FETCH>` mechanism.
-  **[foundation building now; full loop next]**
+  selection) + the guarded dispatcher (schema-validate, **trust-gating**, handler-error-as-string) +
+  `actions` in `TurnResult`/`/api/turn` + a single-round invocation in `turn()` generalizing the
+  `<FETCH>` mechanism. **[built]** Still proposed: multi-round ReAct (call-dedup, outcome logging),
+  a confirmation gate for state-changing tools, tool-calling in the *streaming* turn, and
+  `register_tool` reference connectors.
 - **Phase 3 — packaging + API.** Config module-paths, `POST /api/event`, `GET /api/tools`, `actions`
   + `context` on `/api/turn`. **[proposed]**
 - **Phase 4 — ecosystem.** The MCP adapter + manifest/subprocess connectors. **[proposed]**

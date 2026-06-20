@@ -105,6 +105,15 @@ from .cognition.temporal import (
     resolve_timezone,
     time_prefix,
 )
+from .cognition.tools import (
+    ActionContext,
+    Tool,
+    ToolCall,
+    ToolRegistry,
+    dispatch,
+    parse_tool_calls,
+    tools_hint,
+)
 from .cognition.wiki import WikiSource
 from .cognition.working_memory import (
     current_working_memory,
@@ -234,6 +243,9 @@ class TurnResult:
     context: ContextBundle
     baked: list[Memory]
     library_sources: list[dict[str, Any]] = field(default_factory=list)
+    # The motor port (docs/EXTENSIBILITY.md): tools the model invoked this turn + their outcomes,
+    # so an external system sees what the brain *did*, not just the prose. Empty when no tools.
+    actions: list[ToolCall] = field(default_factory=list)
 
 
 # The backend port (docs/EXTENSIBILITY.md): provider construction is an OPEN registry, so a
@@ -295,14 +307,18 @@ class Mimir:
         provider: Provider | None = None,
         embedder: Embedder | None = None,
         context_sources: Sequence[ContextSource] | None = None,
+        tools: Sequence[Tool] | None = None,
         council_personas: Sequence[tuple[str, str]] | None = None,
     ) -> None:
         config.validate()
         self.config = config
         # Extension ports (docs/EXTENSIBILITY.md): connectors injected at construction. ① sensory:
-        # context sources folded into every turn; council personas overridable. (② motor/tools and
-        # ④ reflex are registered post-construction via register_tool / register_burst_task.)
+        # context sources folded into every turn; ② motor: tools the model can invoke; council
+        # personas overridable. (④ reflex tasks register post-construction via register_burst_task.)
         self._context_sources: list[ContextSource] = list(context_sources or [])
+        self._tools = ToolRegistry()
+        for _tool in tools or []:
+            self._tools.register(_tool)
         self._council_personas: list[tuple[str, str]] = (
             list(council_personas) if council_personas else list(COUNCIL_PERSONAS))
         # Capture WARNING+ off the `mimir` logger into a ring, so the system can see its own recent
@@ -721,6 +737,43 @@ class Mimir:
         priority/trigger options."""
         self._burst.register(name, factory, **kwargs)
 
+    def register_tool(self, tool: Tool) -> None:
+        """② Motor port: attach a tool the model can invoke (replaces a same-named tool). Calls run
+        through the guarded dispatcher — state-changing tools are gated to trusted speakers."""
+        self._tools.register(tool)
+
+    def _action_context(self, user: str | None, speaker_kind: str) -> ActionContext:
+        """The dispatcher's trust input for this speaker: only a trusted human may actuate
+        (state-changing tools); a peer AI / guest is barred — the actuation analogue of the memory
+        trust policy (§3b). Read-only tools run regardless."""
+        is_peer = (speaker_kind in ("ai_peer", "peer", "ai")
+                   or user in (self.config.peer_agents or []))
+        trusted = (not is_peer) and (
+            user == self.config.primary_user or user in (self.config.trusted_users or []))
+        return ActionContext(user=user, speaker_kind=speaker_kind, trusted=trusted)
+
+    def _run_tool_calls(
+        self, reply: str, sys_content: str, user: str | None, speaker_kind: str,
+        sid: str | None, text: str,
+    ) -> tuple[str, list[ToolCall]]:
+        """Single-round tool invocation (the Phase-2 foundation; multi-round ReAct is next): if the
+        model emitted any ``<TOOL …>`` calls, run them through the guarded dispatcher and re-invoke
+        once with the results in hand. Returns ``(final_reply, calls)``; ``([], reply)`` if none."""
+        calls = parse_tool_calls(reply)
+        if not calls:
+            return reply, []
+        ctx = self._action_context(user, speaker_kind)
+        done = [dispatch(self._tools, call, ctx) for call in calls]
+        results = "\n".join(f"[{c.tool} → {c.status}] {c.result}" for c in done)
+        final = strip_epistemic_tags(self._model.chat("chat", [
+            {"role": "system", "content": sys_content},
+            *self._history_messages(user, sid),
+            {"role": "user", "content": text},
+            {"role": "assistant", "content": reply},
+            {"role": "user", "content": f"Tool results:\n{results}\n\nNow give your answer."},
+        ]))
+        return final, done
+
     def _build_context_sections(self, query: str, user: str | None) -> list[Section]:
         """Run each registered context source (the sensory port), guarded so one fault degrades that
         section rather than the turn. Returns the sections to fold into the prompt."""
@@ -838,16 +891,24 @@ class Mimir:
 
             # 3. Generate the reply through the model gateway. Strip any internal epistemic tags the
             #    model echoed (small models mimic the [tier=...; source=...] style) before it lands.
+            #    ② Motor port: if tools are registered + relevant, offer them and run a tool round.
+            selected_tools = self._tools.select(text) if self._tools.all() else []
+            sys_content = bundle.prompt + (
+                "\n\n" + tools_hint(selected_tools) if selected_tools else "")
             reply = strip_epistemic_tags(
                 self._model.chat(
                     "chat",
                     [
-                        {"role": "system", "content": bundle.prompt},
+                        {"role": "system", "content": sys_content},
                         *self._history_messages(user, sid),
                         {"role": "user", "content": text},
                     ],
                 )
             )
+            actions: list[ToolCall] = []
+            if selected_tools:
+                reply, actions = self._run_tool_calls(reply, sys_content, user, speaker_kind, sid,
+                                                      text)
             # 3b. Model-driven Library fetch (opt-in): if the model asked to open a page, load it
             #     and answer again with the detail in hand (docs/LIBRARY.md Phase 2).
             reply = self._maybe_model_fetch(reply, bundle, user, sid, text)
@@ -879,7 +940,8 @@ class Mimir:
         self._burst.signal(ResponseContext(
             user_text=text, reply=reply, user=user, turn_index=self._turn_count
         ))
-        return TurnResult(reply=reply, context=bundle, baked=baked, library_sources=lib_refs)
+        return TurnResult(reply=reply, context=bundle, baked=baked, library_sources=lib_refs,
+                          actions=actions)
 
     def turn_stream(
         self, text: str, user: str | None = None, *, speaker_kind: str = "human",
