@@ -17,8 +17,25 @@ def test_store_dedups_case_insensitively(brain: Mimir) -> None:
 
 
 def test_store_skips_malformed(brain: Mimir) -> None:
-    n = store_triples(brain._storage, [["a", "b"], ["x", "", "z"], ["s", "r", "o"]], user=None)
-    assert n == 1  # only the well-formed, non-blank triple
+    raw = [["a", "b"], ["barn", "", "red"], ["sky", "is", "blue"]]
+    n = store_triples(brain._storage, raw, user=None)
+    assert n == 1  # only the well-formed, non-blank triple (wrong-arity + blank-relation dropped)
+
+
+def test_store_cleans_junk_entities(brain: Mimir) -> None:
+    # Entity hygiene at the boundary: first-person resolves to the speaker; pronoun/generic-hub
+    # subjects and clause-length objects are dropped — junk must never reach the graph/council.
+    raw = [
+        ["I", "have a dog named", "Biscuit"],   # first-person → resolves to the speaker
+        ["it", "is", "happy"],                  # bare pronoun subject → dropped
+        ["system", "uses", "memory"],           # over-generic hub → dropped
+        ["the feedback layer", "needs",
+         "a mechanism to measure the divergence between predicted risk and the realized state"],
+    ]                                            # clause-length object (>64 chars) → dropped
+    store_triples(brain._storage, raw, user="alex")
+    from mimir.storage.repo import browse_triples
+    kept = [(t.subject, t.relation, t.object) for t in browse_triples(brain._storage)]
+    assert kept == [("alex", "have a dog named", "Biscuit")]  # only the resolved first-person one
 
 
 def test_traverse_one_hop_both_directions(brain: Mimir) -> None:

@@ -90,7 +90,13 @@ def retrieve(
         if query_vec and mem.embedding:
             base = _KEYWORD_WEIGHT * kw + _VECTOR_WEIGHT * vec
         else:
-            # No usable vector signal → keyword carries the whole score (degraded path).
+            # No usable vector signal → keyword carries the whole score (degraded path). Guard
+            # against false grounding: a single shared token on a multi-word query is too thin to
+            # count as a source (it would silence the uncertainty gate on an unrelated question), so
+            # require ≥2 overlapping content tokens unless the query itself is 1–2 tokens (where one
+            # match is meaningful, e.g. "teal").
+            if len(query_tokens) > 2 and len(query_tokens & _tokens(mem.text)) < 2:
+                continue
             base = kw
 
         # Gentle adjustments: tier breaks ties, salience reflects relevance-now.
