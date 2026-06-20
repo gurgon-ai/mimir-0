@@ -57,3 +57,6 @@ Thumbs.db
 # Local scratch — screenshots, scratch notes (never part of the public repo)
 Screenshot*.png
 *.local.md
+
+# AI build-guide for local coding sessions — kept on disk, not published (carries provenance)
+CLAUDE.md

@@ -3,8 +3,8 @@
 Thanks for your interest. Mimir 0 is a **cognition core**, not an agent framework — the bar for
 what goes in core is high and the discipline is specific. This document is the contract.
 
-> Read `DESIGN.md` first — it is the spec. `CLAUDE.md` holds the working conventions. This file is
-> about *how to contribute without breaking the doctrine*.
+> Read `DESIGN.md` first — it is the spec. This file is about *how to contribute without breaking
+> the doctrine*; the working conventions it relies on are spelled out below.
 
 ## The runtime contract (the law)
 
