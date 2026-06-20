@@ -26,7 +26,7 @@ from typing import Any
 from ..cognition.temporal import relative_age
 from ..embed.base import EmbeddingMode
 from ..prompts import CONVERSATION_STYLE, RECALL_CLOSE, RECALL_OPEN, uncertainty_flag
-from ..retrieval.hybrid import ScoredMemory
+from ..retrieval.hybrid import GROUNDING_RELEVANCE, ScoredMemory
 from ..storage.models import Memory
 from .sections import Section, SectionTier, estimate_tokens, is_question
 
@@ -376,7 +376,13 @@ def build_context(
     # memory facts, connected graph edges, wiki passages, and cited library claims — independent
     # grounding layers. The library is real, attributed evidence; omitting it falsely tripped the
     # uncertainty gate on questions answered from one's own reading, making the model deflect.
-    source_count = len(retrieved_ids) + len(graph_facts or []) + wiki_count + max(0, library_count)
+    # Memory hits must clear GROUNDING_RELEVANCE (a higher bar than the injection floor) to count —
+    # else recall's always-returned top-k makes the gate toothless on a populated store (§3d).
+    admitted = set(retrieved_ids)
+    grounded_memories = sum(
+        1 for s in retrieved if s.memory.id in admitted and s.score >= GROUNDING_RELEVANCE
+    )
+    source_count = grounded_memories + len(graph_facts or []) + wiki_count + max(0, library_count)
 
     # 3c. Recent history — the temporal-narrative arc (month → week → lately), longer-horizon
     #     context before working memory's recency (DESIGN §3a/§3e). Lossy summaries, not facts.

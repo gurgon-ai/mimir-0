@@ -23,9 +23,17 @@ from ..storage.models import Memory
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
-# Below this blended relevance a memory is treated as not a real hit — it neither gets
-# injected nor counts as a "source" for the uncertainty gate (DESIGN §3d).
+# Below this blended relevance a memory is treated as not a real hit — it is never injected.
 MIN_RELEVANCE = 0.05
+
+# A *higher* bar than MIN_RELEVANCE for what counts as actual grounding for the uncertainty gate
+# (DESIGN §3d). Recall always returns its top-k, and on a populated store (e.g. an ingested README's
+# document chunks) something almost always clears the low injection floor — so counting every
+# admitted memory as a "source" makes the gate toothless: it stops firing once memory exists, even
+# for a genuinely-unknown question whose only "hits" are incidental. A memory must be *on-topic*
+# (not merely above the injection floor) to count as grounding. (A live API test surfaced this: an
+# off-topic question still saw source_count > 1 because README chunks scraped over MIN_RELEVANCE.)
+GROUNDING_RELEVANCE = 0.15
 
 _KEYWORD_WEIGHT = 0.5
 _VECTOR_WEIGHT = 0.5
