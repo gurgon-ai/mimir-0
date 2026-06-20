@@ -1,7 +1,8 @@
 # Mimir 0 — Design
 
 > Founding design document. The architecture is specified here; the code is built spine-first
-> against it. Status: **design phase / pre-alpha.**
+> against it — and is now **implemented end-to-end** (see §11). Status: **pre-alpha** — feature-rich
+> and self-tested, not yet hardened for production.
 
 ---
 
@@ -662,7 +663,8 @@ be the least-fragile, loudest-failing, self-testing part of the system.
   Misconfiguration **fails loud with instructions** — it never silently falls back to an alternate
   store.
 - **The acceptance test is also a runtime self-test** — §6's loop runs as an automated guard at
-  startup and on a schedule (synthetic turn → must bake → must recall → sentinel must fire).
+  **server startup** (and in CI / on demand via `python -m mimir.selftest`): a synthetic turn → must
+  bake → must recall → sentinel must fire, with a canary that fails loud on degenerate retrieval.
   "No writes / no recall / no sentinel over N turns" is a *fault*, not a quiet state. The self-test
   ships a canary so a broken self-test is itself loud.
 - **Context accounting** — `build_context()` records per-section tokens requested vs admitted and

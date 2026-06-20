@@ -224,13 +224,6 @@ def add_forum_post(
     gateway.submit(_write)
 
 
-def set_forum_thread_verdict(gateway: StorageGateway, thread_id: int, verdict: str) -> None:
-    def _write(conn: sqlite3.Connection) -> None:
-        conn.execute("UPDATE forum_threads SET verdict = ? WHERE id = ?", (verdict, thread_id))
-
-    gateway.submit(_write)
-
-
 def set_forum_thread_status(gateway: StorageGateway, thread_id: int, status: str) -> None:
     def _write(conn: sqlite3.Connection) -> None:
         conn.execute("UPDATE forum_threads SET status = ? WHERE id = ?", (status, thread_id))

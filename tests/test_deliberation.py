@@ -15,22 +15,22 @@ def _seed_tension(brain: Mimir) -> None:
     # "wants" is neither functional (consolidation's job) nor additive (a pure list) — it's an
     # ambiguous preference relation whose values *can* genuinely compete, so it's surfaced for the
     # council/curator to judge (quiet farm vs busy startup is a real lifestyle tension).
-    save_triple(brain._storage, Triple(subject="Greg", relation="wants", object="a quiet farm"))
-    save_triple(brain._storage, Triple(subject="Greg", relation="wants", object="a busy startup"))
+    save_triple(brain._storage, Triple(subject="Alex", relation="wants", object="a quiet farm"))
+    save_triple(brain._storage, Triple(subject="Alex", relation="wants", object="a busy startup"))
 
 
 def test_surface_graph_tension(brain: Mimir) -> None:
     _seed_tension(brain)
     conflicts = surface_conflicts(brain._storage, embedder=brain._embedder)
-    assert any(c.key.startswith("graph:greg|wants") for c in conflicts)
-    q = next(c.question for c in conflicts if c.key.startswith("graph:greg|wants"))
+    assert any(c.key.startswith("graph:alex|wants") for c in conflicts)
+    q = next(c.question for c in conflicts if c.key.startswith("graph:alex|wants"))
     assert "quiet farm" in q and "busy startup" in q
 
 
 def test_functional_relations_are_not_surfaced(brain: Mimir) -> None:
     # "lives in" IS functional → consolidation's job, not the council's.
-    save_triple(brain._storage, Triple(subject="Greg", relation="lives in", object="Mission"))
-    save_triple(brain._storage, Triple(subject="Greg", relation="lives in", object="Vancouver"))
+    save_triple(brain._storage, Triple(subject="Alex", relation="lives in", object="Riverton"))
+    save_triple(brain._storage, Triple(subject="Alex", relation="lives in", object="Vancouver"))
     conflicts = surface_conflicts(brain._storage, embedder=brain._embedder)
     assert not any("lives in" in c.key for c in conflicts)
 

@@ -47,7 +47,7 @@ def test_excludes_facts_just_baked_this_turn(brain: Mimir) -> None:
 
 
 def test_task_emits_a_surface_for_the_next_turn(brain: Mimir) -> None:
-    _seed(brain, "Greg keeps bees on the south slope.", age_s=3600)
+    _seed(brain, "Alex keeps bees on the south slope.", age_s=3600)
     ctx = ResponseContext(user_text="...", reply="Tell me more about the bees on the south slope.")
     result = brain._output_rag_task(ctx)()
     assert result.surface and "bees" in result.surface.lower()

@@ -44,7 +44,7 @@ def test_render_anchors_first_person() -> None:
 
 def test_anchors_injected_into_self_model_section(brain: Mimir) -> None:
     brain.establish_identity({"name": "Mimir", "purpose": "to remember"})
-    r = brain.turn("hello", user="greg")
+    r = brain.turn("hello", user="alex")
     sm = next((s for s in r.context.sections if s.name == "self_model"), None)
     assert sm is not None
     assert "My name is Mimir." in sm.body

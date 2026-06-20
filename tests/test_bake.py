@@ -15,24 +15,24 @@ def _tier(user, primary=None, trusted=None):
 
 def test_zero_config_single_user_trusts_the_lone_speaker() -> None:
     # No policy at all → a build-your-own-UI that names its user gets full trust. "Just works."
-    assert _tier("greg") is EvidenceTier.STATED_BY_PRIMARY_USER
+    assert _tier("alex") is EvidenceTier.STATED_BY_PRIMARY_USER
 
 
 def test_unattributed_calls_are_conversation_tier() -> None:
     assert _tier(None) is EvidenceTier.CONVERSATION
-    assert _tier(None, primary="greg", trusted=["julien"]) is EvidenceTier.CONVERSATION
+    assert _tier(None, primary="alex", trusted=["julien"]) is EvidenceTier.CONVERSATION
 
 
 def test_policy_only_believes_configured_identities() -> None:
-    primary, trusted = "greg", ["julien"]
-    assert _tier("greg", primary, trusted) is EvidenceTier.STATED_BY_PRIMARY_USER
+    primary, trusted = "alex", ["julien"]
+    assert _tier("alex", primary, trusted) is EvidenceTier.STATED_BY_PRIMARY_USER
     assert _tier("julien", primary, trusted) is EvidenceTier.STATED_BY_TRUSTED
     # an unrecognized named speaker (open-API caller, peer AI, guest) is attributed, NOT believed
     assert _tier("mimir-parent", primary, trusted) is EvidenceTier.CONVERSATION
 
 
 def test_unrecognized_speaker_is_still_attributed() -> None:
-    _tier_, provenance = _tier_and_provenance("mimir-parent", "greg", ["julien"])
+    _tier_, provenance = _tier_and_provenance("mimir-parent", "alex", ["julien"])
     assert provenance == "stated by mimir-parent"  # attribution kept, just at conversation tier
 
 
@@ -43,7 +43,7 @@ def test_trusted_list_without_primary_still_gates() -> None:
 
 
 def test_peer_kind_is_below_human_and_marked_ai_sourced() -> None:
-    tier, provenance = _tier_and_provenance("mimir-home", "greg", [], is_peer=True)
+    tier, provenance = _tier_and_provenance("mimir-home", "alex", [], is_peer=True)
     assert tier is EvidenceTier.STATED_BY_PEER
     assert tier.multiplier < EvidenceTier.CONVERSATION.multiplier  # below human conversation
     assert provenance == "stated by peer AI mimir-home"  # attributed AND marked as an AI
@@ -51,7 +51,7 @@ def test_peer_kind_is_below_human_and_marked_ai_sourced() -> None:
 
 def test_peer_flag_wins_over_a_trusted_identity() -> None:
     # An agent can't reach a human tier by also being named primary/trusted — kind wins.
-    assert _tier_and_provenance("greg", "greg", [], is_peer=True)[0] is EvidenceTier.STATED_BY_PEER
+    assert _tier_and_provenance("alex", "alex", [], is_peer=True)[0] is EvidenceTier.STATED_BY_PEER
 
 
 def test_normalize_speaker_kind() -> None:

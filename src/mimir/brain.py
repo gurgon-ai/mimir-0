@@ -702,6 +702,18 @@ class Mimir:
 
         self._turn_active = True  # foreground in progress — the burst yields to it (§5a)
         try:
+            # Optional context-source layers (self-model, working memory, graph, procedures,
+            # library, wiki, inner-life surfacing) are *enrichment* — a fault in one degrades that
+            # section, never breaks the reply (§10's "background never breaks the turn", extended to
+            # in-turn enrichment). Recall, generation, and bake are the spine; they surface errors.
+            def _enrich(label: str, fn: Callable[[], Any], default: Any) -> Any:
+                try:
+                    return fn()
+                except Exception as exc:
+                    log.error("turn enrichment %r failed (degraded, turn unaffected): %s",
+                              label, exc, exc_info=True)
+                    return default
+
             # Background notes the prior burst surfaced, to carry into this reply.
             notes = self._burst.drain_surfaces()
 
@@ -711,26 +723,24 @@ class Mimir:
             disabled_docs = self._disabled_documents()  # per-doc "include in context" toggles
             candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY,
                                        exclude_sources=disabled_docs)
-            candidates, il_note = self._surface_inner_life(candidates, text, query_vec)
+            candidates, il_note = _enrich(
+                "inner_life", lambda: self._surface_inner_life(candidates, text, query_vec),
+                (candidates, None))
             if il_note and include_memory:
                 notes = notes + [il_note]
             candidates = self._filter_layers(candidates, include_memory, include_library)
             retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
             note = latest_sentinel_note(self._storage, user)
-            self_knowledge = self._compose_self_knowledge()
-            working_memory = current_working_memory(self._storage)
-            graph_facts = self._connected_facts(text, user)
-            procedures = self._matching_procedures(text, user)
-            if include_library:
-                lib_text, lib_refs, lib_count = self._library_gist(text, query_vec, disabled_docs)
-                pages = self._pages_to_load(loaded_pages, deep_read, lib_refs)
-                library = self._merge_loaded_library(lib_text, pages)
-                lib_count += len(pages)  # full pages (loaded or deep-read) are strong grounding too
-                if self.config.library_model_fetch and lib_refs:
-                    library = self._with_fetch_hint(library, lib_refs)  # let the model open a page
-            else:
-                lib_refs, lib_count, library = [], 0, None
-            wiki = self._wiki_context(text) if include_wiki else None
+            self_knowledge = _enrich("self_knowledge", self._compose_self_knowledge, None)
+            working_memory = _enrich("working_memory",
+                                     lambda: current_working_memory(self._storage), None)
+            graph_facts = _enrich("graph", lambda: self._connected_facts(text, user), [])
+            procedures = _enrich("procedures", lambda: self._matching_procedures(text, user), [])
+            lib_refs, lib_count, library = _enrich(
+                "library", lambda: self._library_section(
+                    text, query_vec, disabled_docs, loaded_pages, deep_read),
+                ([], 0, None)) if include_library else ([], 0, None)
+            wiki = _enrich("wiki", lambda: self._wiki_context(text), None) if include_wiki else None
 
             # 2. Assemble the prompt (a closure so draft-RAG can rebuild with more recall).
             def assemble(rset: list) -> ContextBundle:
@@ -835,29 +845,38 @@ class Mimir:
 
         self._turn_active = True  # foreground in progress — the burst yields to it (§5a)
         try:
+            # Enrichment layers degrade on fault; the reply never breaks for one (§10). Like turn().
+            def _enrich(label: str, fn: Callable[[], Any], default: Any) -> Any:
+                try:
+                    return fn()
+                except Exception as exc:
+                    log.error("turn enrichment %r failed (degraded, turn unaffected): %s",
+                              label, exc, exc_info=True)
+                    return default
+
             notes = self._burst.drain_surfaces()
             query_vec = self._embedder.embed(text)
             disabled_docs = self._disabled_documents()  # per-doc "include in context" toggles
             candidates = list_memories(self._storage, user=user, kind=MemoryKind.MEMORY,
                                        exclude_sources=disabled_docs)
-            candidates, il_note = self._surface_inner_life(candidates, text, query_vec)
+            candidates, il_note = _enrich(
+                "inner_life", lambda: self._surface_inner_life(candidates, text, query_vec),
+                (candidates, None))
             if il_note and include_memory:
                 notes = notes + [il_note]
             candidates = self._filter_layers(candidates, include_memory, include_library)
             retrieved = retrieve(text, query_vec, candidates, top_k=DEFAULT_TOP_K)
             note = latest_sentinel_note(self._storage, user)
-            self_knowledge = self._compose_self_knowledge()
-            working_memory = current_working_memory(self._storage)
-            graph_facts = self._connected_facts(text, user)
-            procedures = self._matching_procedures(text, user)
-            if include_library:
-                lib_text, lib_refs, lib_count = self._library_gist(text, query_vec, disabled_docs)
-                pages = self._pages_to_load(loaded_pages, deep_read, lib_refs)
-                library = self._merge_loaded_library(lib_text, pages)
-                lib_count += len(pages)  # full pages (loaded or deep-read) are strong grounding too
-            else:
-                lib_refs, lib_count, library = [], 0, None
-            wiki = self._wiki_context(text) if include_wiki else None
+            self_knowledge = _enrich("self_knowledge", self._compose_self_knowledge, None)
+            working_memory = _enrich("working_memory",
+                                     lambda: current_working_memory(self._storage), None)
+            graph_facts = _enrich("graph", lambda: self._connected_facts(text, user), [])
+            procedures = _enrich("procedures", lambda: self._matching_procedures(text, user), [])
+            lib_refs, lib_count, library = _enrich(
+                "library", lambda: self._library_section(
+                    text, query_vec, disabled_docs, loaded_pages, deep_read, fetch_hint=False),
+                ([], 0, None)) if include_library else ([], 0, None)
+            wiki = _enrich("wiki", lambda: self._wiki_context(text), None) if include_wiki else None
 
             def assemble(rset: list) -> ContextBundle:
                 return build_context(
@@ -2429,6 +2448,23 @@ class Mimir:
         page_titles = {p.id: p.title for p in list_library_pages(self._storage)}
         refs = [{"page_id": pid, "title": page_titles.get(pid, "")} for pid in sorted(page_ids)]
         return text, refs, len(top)
+
+    def _library_section(
+        self, query: str, query_vec: list[float] | None, disabled_docs: set[str] | None,
+        loaded_pages: list[int] | None, deep_read: bool, *, fetch_hint: bool = True,
+    ) -> tuple[list[dict[str, Any]], int, str | None]:
+        """The full Library context block for a turn: the on-topic gist, plus any composite pages
+        the user pinned or deep-read merged in, plus the model-fetch hint when enabled. Returns
+        ``(refs, count, library_text)`` — factored out of ``turn()`` so it sits behind one enrich
+        guard rather than several inline calls. ``fetch_hint=False`` for the streaming path, which
+        handles the model fetch inline (`_stream_chat_with_fetch`) not via the prompt hint."""
+        lib_text, lib_refs, lib_count = self._library_gist(query, query_vec, disabled_docs)
+        pages = self._pages_to_load(loaded_pages, deep_read, lib_refs)
+        library = self._merge_loaded_library(lib_text, pages)
+        lib_count += len(pages)  # full pages (loaded or deep-read) are strong grounding too
+        if fetch_hint and self.config.library_model_fetch and lib_refs:
+            library = self._with_fetch_hint(library, lib_refs)  # let the model open a page
+        return lib_refs, lib_count, library
 
     def _loaded_library_detail(self, page_ids: list[int]) -> str:
         """The full Markdown of the given composite pages, as one block (empty if none load)."""

@@ -95,7 +95,7 @@ class WikiSource:
         try:
             raw = self._fetch(f"/suggest?content={book}&term={urllib.parse.quote(query)}")
             items = json.loads(raw.decode("utf-8", "replace"))
-        except Exception as exc:  # unreachable / bad json / timeout — silently yield nothing
+        except Exception as exc:  # unreachable / bad json / timeout — log + yield nothing (§10)
             log.warning("wiki: suggest failed: %s", exc)
             return []
         out: list[dict[str, str]] = []

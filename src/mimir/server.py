@@ -29,6 +29,7 @@ import hmac
 import json
 import logging
 import os
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -42,6 +43,7 @@ from .cognition.bake import normalize_speaker_kind
 from .cognition.self_model import gather_signals
 from .cognition.working_memory import current_working_memory
 from .errors import ConfigError, IngestError, MimirError
+from .selftest import run_self_test
 from .storage.models import Memory, MemoryKind, Procedure, Triple
 from .storage.repo import (
     browse_memories,
@@ -1316,7 +1318,8 @@ def _triple_to_dict(triple: Triple) -> dict[str, Any]:
 def serve(config_path: str, host: str = "127.0.0.1", port: int = 8765) -> None:
     """Boot a brain from config and serve the web UI until interrupted."""
     print(f"Starting Mimir from {config_path} …")
-    print("(scanning the LAN for Ollama nodes can take a couple of seconds)", flush=True)
+    print("(if you've configured a LAN fleet, scanning for Ollama nodes can take a few seconds)",
+          flush=True)
     brain = Mimir.from_config(config_path)
     server = create_server(brain, host, port)
     bound_port = server.server_address[1]  # the real port (when port=0, the OS-assigned one)
@@ -1375,18 +1378,35 @@ def main(argv: list[str] | None = None) -> int:
         "server stopped). Use once after changing [roles.embed] — vectors from different models "
         "are not comparable even at the same dimension.",
     )
+    parser.add_argument(
+        "--no-selftest",
+        action="store_true",
+        help="skip the startup self-test (the §6 acceptance loop on the mock). Faster restarts; "
+        "the loop still runs in CI and via `python -m mimir.selftest`.",
+    )
     args = parser.parse_args(argv)
     _setup_logging(args.log_file)
-    if args.reembed:
-        brain = Mimir.from_config(args.config)
-        try:
-            counts = brain.reembed()
-        finally:
-            brain.close()
-        print("re-embed complete:", ", ".join(f"{k}={v}" for k, v in counts.items()))
+    try:
+        if args.reembed:
+            brain = Mimir.from_config(args.config)
+            try:
+                counts = brain.reembed()
+            finally:
+                brain.close()
+            print("re-embed complete:", ", ".join(f"{k}={v}" for k, v in counts.items()))
+            return 0
+        if not args.no_selftest:
+            log.info("running startup self-test (the §6 acceptance loop on the mock)…")
+            report = run_self_test()  # raises SelfTestError (→ loud exit) if the core is unhealthy
+            log.info("startup self-test passed: %s", report)
+        serve(args.config, host=args.host, port=args.port)
         return 0
-    serve(args.config, host=args.host, port=args.port)
-    return 0
+    except MimirError as exc:
+        # A bad/missing config or a failed self-test should exit with one clean, actionable line —
+        # not a raw traceback that reads as a crash (the messages are already specific; §10).
+        print(f"error: {exc}", file=sys.stderr)
+        log.error("startup aborted: %s", exc)
+        return 2
 
 
 # The single-page UI. No framework, no build step — vanilla HTML/CSS/JS that talks to the JSON API.

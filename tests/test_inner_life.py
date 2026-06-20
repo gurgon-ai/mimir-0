@@ -175,7 +175,7 @@ def test_gather_stimuli_skips_reference_and_self_output(brain: Mimir) -> None:
     save_memory(brain._storage, Memory(text="a prior council verdict on something", salience=1.0,
         evidence_tier=EvidenceTier.INFERRED, provenance="sleep deliberation", user="g",
         embedding=brain._embedder.embed("verdict")))
-    save_memory(brain._storage, Memory(text="Greg keeps bees on the farm", salience=0.5,
+    save_memory(brain._storage, Memory(text="Alex keeps bees on the farm", salience=0.5,
         evidence_tier=EvidenceTier.CONVERSATION, user="g", embedding=brain._embedder.embed("bees")))
     mem_stim = [s for s in gather_stimuli(brain._storage, embedder=brain._embedder)
                 if s.kind == "memory"]

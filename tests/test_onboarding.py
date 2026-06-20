@@ -18,7 +18,7 @@ def _answers(profile: list[dict]) -> dict[str, str | None]:
 
 
 def test_answer_is_stored_as_a_top_tier_onboarding_fact(brain: Mimir) -> None:
-    brain.record_onboarding_answer("work", "I run a small farm in Mission, BC.")
+    brain.record_onboarding_answer("work", "I run a small farm in Riverton.")
     rows = [m for m in list_memories(brain._storage, kind=MemoryKind.MEMORY)
             if m.provenance == ONBOARDING_PROVENANCE]
     assert len(rows) == 1
@@ -26,7 +26,7 @@ def test_answer_is_stored_as_a_top_tier_onboarding_fact(brain: Mimir) -> None:
     assert mem.evidence_tier is EvidenceTier.STATED_BY_PRIMARY_USER  # the orienting bedrock (1.30x)
     assert "small farm" in mem.text
     assert mem.meta["onboarding_key"] == "work"
-    assert mem.meta["answer"] == "I run a small farm in Mission, BC."
+    assert mem.meta["answer"] == "I run a small farm in Riverton."
     assert mem.salience > 1.0  # load-bearing, surfaces ahead of incidental chatter
 
 
@@ -43,10 +43,10 @@ def test_anchored_questions_mirror_into_the_self_model(brain: Mimir) -> None:
     # What to call the AI / who you are / where this is also become identity anchors (injected
     # verbatim into the always-on self-model), not just memories.
     brain.record_onboarding_answer("assistant_name", "Mimir")
-    brain.record_onboarding_answer("location", "a farm in Mission, BC")
+    brain.record_onboarding_answer("location", "a farm in Riverton")
     anchors = brain.identity_anchors()
     assert anchors["name"] == "Mimir"
-    assert anchors["location"] == "a farm in Mission, BC"
+    assert anchors["location"] == "a farm in Riverton"
 
 
 def test_reanswering_updates_in_place(brain: Mimir) -> None:

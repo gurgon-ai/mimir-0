@@ -36,9 +36,9 @@ def test_capability_checkers_are_strict_but_lenient() -> None:
 
 def test_discipline_checkers_catch_the_tag_leak() -> None:
     # The core failure mode: any square bracket when told not to is a fail.
-    assert _check_no_brackets("Mona's favorite tea is genmaicha.")
-    assert not _check_no_brackets("Genmaicha [tier=stated_by_user; source=Mona].")
-    assert not _check_no_brackets("She likes genmaicha [1].")  # any bracket, even a citation
+    assert _check_no_brackets("Sam's favorite tea is chamomile.")
+    assert not _check_no_brackets("Chamomile [tier=stated_by_user; source=Sam].")
+    assert not _check_no_brackets("She likes chamomile [1].")  # any bracket, even a citation
     assert not _check_no_brackets("")  # silence is not discipline
     # Negative lexical constraint.
     assert _check_no_dog_or_cat("Fish") and _check_no_dog_or_cat("a hamster")

@@ -6,8 +6,8 @@ from mimir.sanitize import StreamTagStripper, strip_epistemic_tags
 
 
 def test_strip_removes_tier_and_source_tags() -> None:
-    raw = "Greetings, Greg. [tier=deduction; source=Mimir's internal assessment] I am ready."
-    assert strip_epistemic_tags(raw) == "Greetings, Greg. I am ready."
+    raw = "Greetings, Alex. [tier=deduction; source=Mimir's internal assessment] I am ready."
+    assert strip_epistemic_tags(raw) == "Greetings, Alex. I am ready."
 
 
 def test_strip_removes_invented_single_field_tags() -> None:
@@ -27,7 +27,7 @@ def test_strip_leaves_ordinary_brackets_alone() -> None:
 
 
 def test_strip_is_idempotent() -> None:
-    raw = "Fact. [tier=stated_by_primary_user; source=Greg] Done."
+    raw = "Fact. [tier=stated_by_primary_user; source=Alex] Done."
     once = strip_epistemic_tags(raw)
     assert strip_epistemic_tags(once) == once
 
@@ -40,8 +40,8 @@ def _stream(stripper: StreamTagStripper, deltas: list[str]) -> str:
 
 def test_streaming_strips_tag_split_across_deltas() -> None:
     # The tag is fragmented exactly the way token streaming would fragment it.
-    deltas = ["Hello Greg. ", "[tier", "=ded", "uction; source=x", "] ", "Ready."]
-    assert _stream(StreamTagStripper(), deltas) == "Hello Greg. Ready."
+    deltas = ["Hello Alex. ", "[tier", "=ded", "uction; source=x", "] ", "Ready."]
+    assert _stream(StreamTagStripper(), deltas) == "Hello Alex. Ready."
 
 
 def test_streaming_emits_plain_text_promptly() -> None:
@@ -49,7 +49,7 @@ def test_streaming_emits_plain_text_promptly() -> None:
     # Bracketless text flows through; only a trailing whitespace run is briefly held (it could
     # precede a tag in the next delta), arriving with the following chunk.
     assert stripper.feed("Hello ") == "Hello"
-    assert stripper.feed("Greg") == " Greg"
+    assert stripper.feed("Alex") == " Alex"
 
 
 def test_streaming_releases_non_tag_bracket() -> None:

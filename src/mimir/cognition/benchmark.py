@@ -9,7 +9,7 @@ running each model through a short, cheapest-first battery:
   pass (the old peer-judged *coherence* was dropped: it duplicated *epistemics* and, on a vague 0–1
   scale, every model landed mid-range, so it discriminated nothing).
 
-Quality is the aggregate of whatever scores were obtained; speed is the average call time. An
+Quality is the agalexate of whatever scores were obtained; speed is the average call time. An
 approved-family allowlist is the floor (the README recommends families); everything else still
 gets benchmarked, the scores just speak for themselves.
 """
@@ -223,12 +223,12 @@ _DISCIPLINE_RECALL = (
     "reply and attribute in plain words when it matters, but do NOT copy the bracketed "
     "[tier=...; source=...] tags into your response.\n"
     "<RECALL>\n"
-    "- Greg's home server runs a full backup every Sunday [tier=document; source=handbook.md]\n"
-    "- Greg has a dog named Kodi [tier=stated_by_primary_user; source=Greg]\n"
+    "- Alex's home server runs a full backup every Sunday [tier=document; source=handbook.md]\n"
+    "- Alex has a dog named Biscuit [tier=stated_by_primary_user; source=Alex]\n"
     "- The Ariko river freezes solid in winter [tier=conversation; source=chat]\n"
-    "- Mona's favorite tea is genmaicha [tier=stated_by_trusted; source=Mona]\n"
+    "- Sam's favorite tea is chamomile [tier=stated_by_trusted; source=Sam]\n"
     "</RECALL>\n\n"
-    "Greg asks: \"Remind me when the full backup runs and what my dog's name is.\" "
+    "Alex asks: \"Remind me when the full backup runs and what my dog's name is.\" "
     "Answer in two short sentences."
 )
 

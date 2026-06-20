@@ -34,7 +34,7 @@ def test_signals_are_generic_store_stats(brain: Mimir) -> None:
 
 
 def test_synthesis_stores_grounded_self_model(brain: Mimir) -> None:
-    save_memory(brain._storage, Memory(text="a fact", user="greg"))
+    save_memory(brain._storage, Memory(text="a fact", user="alex"))
     mem = synthesize_self_model(brain._model, brain._storage)
     assert mem.kind is MemoryKind.SELF_MODEL
     assert mem.text.strip()
@@ -62,11 +62,11 @@ def test_build_context_puts_self_model_first() -> None:
 
 
 def test_brain_seeds_self_model_on_first_turn_and_injects_it(brain: Mimir) -> None:
-    brain.turn("My favorite color is teal.", user="greg")
+    brain.turn("My favorite color is teal.", user="alex")
     brain.wait_for_sentinel()  # joins background incl. the self-model refresh
     assert latest_self_model(brain._storage) is not None
 
-    r2 = brain.turn("What is my favorite color?", user="greg")
+    r2 = brain.turn("What is my favorite color?", user="alex")
     assert r2.context.sections[0].name == "self_model"
     assert "memory system" in r2.context.prompt  # the mock's self-description phrasing
 
