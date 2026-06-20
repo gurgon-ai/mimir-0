@@ -238,6 +238,11 @@ Runs on **Python + SQLite + one chat endpoint + one embeddings endpoint.** No GP
 no cloud, no peripherals. Bring a local model (Ollama, etc.) or an API — it's provider-agnostic,
 and it can pool several local inference nodes across a LAN for distributed local inference.
 
+## Security
+
+Pre-alpha and not yet hardened; the reference server is for localhost / a trusted LAN, not a public
+service. Responsible disclosure and the security model are in [`SECURITY.md`](SECURITY.md).
+
 ## Contributing
 
 The bar for core is high and the discipline is specific (zero runtime deps, the two gateways are
