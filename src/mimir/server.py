@@ -190,10 +190,15 @@ class _Handler(BaseHTTPRequestHandler):
     def _send_json(self, obj: Any, status: int = 200) -> None:
         self._send(status, json.dumps(obj).encode("utf-8"), "application/json; charset=utf-8")
 
+    _MAX_BODY_BYTES = 64 * 1024 * 1024  # 64 MB — generous for a base64 document upload, but bounded
+                                        # so a single request can't OOM the process / fill the disk
+
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
             return {}
+        if length > self._MAX_BODY_BYTES:
+            raise ValueError(f"request body too large ({length} bytes; max {self._MAX_BODY_BYTES})")
         raw = self.rfile.read(length)
         data = json.loads(raw)
         if not isinstance(data, dict):
@@ -306,9 +311,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"error": str(exc)}, status=400)
         except _CLIENT_GONE:  # client vanished mid-request — benign, not a fault
             return
-        except Exception as exc:  # never leak a stack to the client; log loud (DESIGN §10)
+        except Exception:  # never leak internals to the client; log loud (DESIGN §10)
             log.exception("GET %s failed", self.path)
-            self._send_json({"error": str(exc)}, status=500)
+            self._send_json({"error": "internal error — see the server log"}, status=500)
 
     def do_POST(self) -> None:  # noqa: N802
         if not self._gate():
@@ -397,9 +402,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"error": str(exc)}, status=400)
         except _CLIENT_GONE:  # client vanished mid-request — benign, not a fault
             return
-        except Exception as exc:
+        except Exception:  # unexpected fault — log the detail, return a generic message (§10)
             log.exception("POST %s failed", self.path)
-            self._send_json({"error": str(exc)}, status=500)
+            self._send_json({"error": "internal error — see the server log"}, status=500)
 
     # -- operations (all under the brain lock) ----------------------------------------
 
@@ -519,7 +524,9 @@ class _Handler(BaseHTTPRequestHandler):
         if not path:
             raise ValueError("'path' is required")
         with self.server.brain_lock:
-            result = self.server.brain.ingest(path)
+            # Confine a request-supplied path to the configured documents/library folder — an HTTP
+            # caller must not read arbitrary files off disk (path traversal on an exposed API).
+            result = self.server.brain.ingest(self.server.brain.resolve_ingest_path(path))
         return {
             "source": result.source,
             "units": result.units,
@@ -2040,7 +2047,7 @@ const graph = { on: false, nodes: [], links: [], byId: {}, raf: 0, sel: null,
                 w: 600, h: 500, k: 1, px: 0, py: 0, root: null, frozen: false, phase: 0 };
 
 function escapeHtml(s) {
-  return (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  return (s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 // Light inline formatting for assistant replies: escape, then turn a SHORT **bold** span (≤10 words,
 // no line break) into real bold and drop the asterisks — Gemma/Qwen lean on **..** heavily. A long

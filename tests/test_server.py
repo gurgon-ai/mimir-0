@@ -120,12 +120,28 @@ def test_turn_bakes_and_recalls_over_http(base_url: str) -> None:
     assert data["introspect"]["source_count"] >= 1
 
 
-def test_ingest_over_http(base_url: str, tmp_path: Path) -> None:
-    doc = tmp_path / "note.md"
-    doc.write_text("# Topic\nThe answer is 42.\n", encoding="utf-8")
-    status, data = _json("POST", base_url + "/api/ingest", {"path": str(doc)})
-    assert status == 200
-    assert data["chunks_written"] >= 1
+def test_ingest_over_http(mock_config: Config, tmp_path: Path) -> None:
+    import dataclasses
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "note.md").write_text("# Topic\nThe answer is 42.\n", encoding="utf-8")
+    brain = Mimir(dataclasses.replace(mock_config, documents_folder=str(docs)))
+    server = create_server(brain, "127.0.0.1", 0)
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        # a path inside the configured folder → ingested
+        status, data = _json("POST", base + "/api/ingest", {"path": str(docs / "note.md")})
+        assert status == 200 and data["chunks_written"] >= 1
+        # a path OUTSIDE the folder → refused (path-traversal guard on the exposed endpoint)
+        outside = tmp_path / "secret.md"
+        outside.write_text("private", encoding="utf-8")
+        status, _ = _json("POST", base + "/api/ingest", {"path": str(outside)})
+        assert status == 400
+    finally:
+        server.shutdown()
+        brain.close()
 
 
 def test_mind_endpoint_reports_state(base_url: str) -> None:

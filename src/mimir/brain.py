@@ -2216,6 +2216,42 @@ class Mimir:
         return {"folder": str(folder), "documents": processed, "claims": total_claims,
                 "composed": composed, "dropped": dropped}
 
+    def _doc_roots(self) -> list[Path]:
+        """The configured documents + library folders (resolved) — the only on-disk locations the
+        document workflow is allowed to read-by-path or delete from."""
+        roots: list[Path] = []
+        for folder in (self.config.documents_folder, self.config.library_folder):
+            if folder:
+                try:
+                    roots.append(Path(folder).resolve())
+                except OSError:  # an unresolvable configured path is simply not a root
+                    pass
+        return roots
+
+    def _within_doc_roots(self, path: str) -> bool:
+        """Whether ``path`` sits inside a configured documents/library folder."""
+        roots = self._doc_roots()
+        if not roots:
+            return False
+        try:
+            resolved = Path(path).resolve()
+        except OSError:
+            return False
+        return any(resolved == r or r in resolved.parents for r in roots)
+
+    def resolve_ingest_path(self, path: str) -> str:
+        """Resolve a *request-supplied* document path, confined to the configured documents/library
+        folder. Blocks arbitrary-file read via an exposed API (path traversal); raises
+        ``IngestError`` if no folder is configured or the path escapes it. Local callers use
+        ``ingest()`` directly (in-process, unconfined — they have the operator's file access)."""
+        if not self._doc_roots():
+            raise IngestError(
+                "path ingest is disabled — set [documents] folder to ingest files by path, or use "
+                "the upload button (it writes into the drop folder)")
+        if not self._within_doc_roots(path):
+            raise IngestError("path is outside the configured documents/library folder")
+        return str(Path(path).resolve())
+
     def _resolve_source(self, source: str) -> str:
         """Map a UI identifier (resolved path, or a bare filename) to the canonical source key — the
         one shared by memories.source / library_documents.path / the ledger. Prefers a known key."""
@@ -2271,7 +2307,11 @@ class Mimir:
             kv_set(self._storage, self._DOCS_LEDGER_KEY, json.dumps(ledger))
 
         file_deleted = False
-        if delete_file:
+        if delete_file and not self._within_doc_roots(src):
+            # Never unlink a file outside the configured documents/library folder — a `forget` with
+            # an arbitrary path must not delete arbitrary files (path traversal on an exposed API).
+            log.warning("forget: refusing to delete %s — outside the documents/library folder", src)
+        elif delete_file:
             try:
                 p = Path(src)
                 if p.is_file():
