@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
@@ -105,13 +105,14 @@ def _ask_persona(
 
 
 def _assignments(
-    models: list[str], placements: list[tuple[str, str]]
+    models: list[str], placements: list[tuple[str, str]],
+    personas: Sequence[tuple[str, str]],
 ) -> list[tuple[str, str, str, str]]:
     """(persona, stance, node, model) for each persona. With a known fleet, spread round-robin
     across nodes (one machine per slot until they wrap) so every node works at once; otherwise
     round-robin across distinct models and let routing place each call (node left blank)."""
     out: list[tuple[str, str, str, str]] = []
-    for i, (name, stance) in enumerate(COUNCIL_PERSONAS):
+    for i, (name, stance) in enumerate(personas):
         if placements:
             node, on_model = placements[i % len(placements)]
         else:
@@ -236,11 +237,15 @@ def deliberate(
     question: str,
     user: str | None = None,
     provenance: str = "inner council",
+    personas: Sequence[tuple[str, str]] | None = None,
 ) -> CouncilResult:
     """Run a council deliberation and persist the verdict as recallable understanding.
 
     ``provenance`` tags the stored verdict — defaults to user-convened ``"inner council"``; the
-    sleep cycle passes ``"sleep deliberation"`` for self-initiated arguments (DESIGN §5a)."""
+    sleep cycle passes ``"sleep deliberation"`` for self-initiated arguments (DESIGN §5a).
+    ``personas`` overrides the generic roster (the extensibility seam); defaults to the universal
+    ``COUNCIL_PERSONAS``."""
+    roster = list(personas) if personas else list(COUNCIL_PERSONAS)
     models = _eligible_models(model)
     placements = model.council_placements()
     if placements:
@@ -248,7 +253,7 @@ def deliberate(
                  [f"{n}:{m}" for n, m in placements])
     else:
         log.info("council: deliberating across %d model(s): %s", len(models), models)
-    assignments = _assignments(models, placements)
+    assignments = _assignments(models, placements, roster)
     width = len(placements) if placements else len(models)
     openings = _gather(model, assignments, width, lambda _i: question)
     rebuttals = _gather(

@@ -22,7 +22,7 @@ import logging
 import re
 import threading
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
@@ -114,6 +114,7 @@ from .cognition.working_memory import (
 )
 from .config import AUTO_MODEL, BackendConfig, Config, ProviderSpec, RoleSpec, load_config
 from .context.build import ContextBundle, build_context
+from .context.sections import ContextSource, Section
 from .diagnostics import install_error_capture, render_errors
 from .documents.extract import extract
 from .embed.base import Embedder, EmbeddingMode, cosine
@@ -126,7 +127,12 @@ from .model.pool import ProviderPool
 from .model.provider import Provider, is_embedding_model
 from .model.providers.mock import MockProvider
 from .model.providers.ollama import OllamaProvider
-from .prompts import DOC_SUMMARY_SYSTEM, OUTPUT_CHECK_SYSTEM, VISION_DESCRIBE_SYSTEM
+from .prompts import (
+    COUNCIL_PERSONAS,
+    DOC_SUMMARY_SYSTEM,
+    OUTPUT_CHECK_SYSTEM,
+    VISION_DESCRIBE_SYSTEM,
+)
 from .retrieval.hybrid import retrieve
 from .sanitize import StreamTagStripper, strip_epistemic_tags
 from .storage.gateway import StorageGateway
@@ -230,15 +236,34 @@ class TurnResult:
     library_sources: list[dict[str, Any]] = field(default_factory=list)
 
 
+# The backend port (docs/EXTENSIBILITY.md): provider construction is an OPEN registry, so a
+# third-party chat/embeddings backend can be named in config (``[provider] type = "..."``) without
+# forking core. The built-ins are registered just below.
+_PROVIDER_REGISTRY: dict[str, Callable[[ProviderSpec], Provider]] = {}
+
+
+def register_provider(name: str, factory: Callable[[ProviderSpec], Provider]) -> None:
+    """Register a provider factory under ``name`` (replaces by name), so config can select it."""
+    _PROVIDER_REGISTRY[name] = factory
+
+
 def build_provider(spec: ProviderSpec) -> Provider:
-    """Construct the provider named in config. Fails loud on an unknown type."""
-    if spec.type == "mock":
-        return MockProvider()
-    if spec.type == "ollama":
-        return OllamaProvider(host=str(spec.options.get("host", "http://localhost:11434")))
-    raise ConfigError(
-        f"unknown provider type {spec.type!r}; supported: 'ollama', 'mock'. See docs/SETUP.md."
-    )
+    """Construct the provider named in config (open registry). Fails loud on an unknown type."""
+    factory = _PROVIDER_REGISTRY.get(spec.type)
+    if factory is None:
+        known = ", ".join(repr(k) for k in sorted(_PROVIDER_REGISTRY)) or "(none registered)"
+        raise ConfigError(
+            f"unknown provider type {spec.type!r}; registered: {known}. Register one with "
+            "register_provider(name, factory), or see docs/SETUP.md."
+        )
+    return factory(spec)
+
+
+register_provider("mock", lambda spec: MockProvider())
+register_provider(
+    "ollama",
+    lambda spec: OllamaProvider(host=str(spec.options.get("host", "http://localhost:11434"))),
+)
 
 
 def build_fleet_pool(backend: BackendConfig) -> ProviderPool:
@@ -265,9 +290,21 @@ def make_embedder(config: Config, model: ModelGateway) -> Embedder:
 class Mimir:
     """The cognition core. One instance owns one store and one provider."""
 
-    def __init__(self, config: Config, *, provider: Provider | None = None) -> None:
+    def __init__(
+        self, config: Config, *,
+        provider: Provider | None = None,
+        embedder: Embedder | None = None,
+        context_sources: Sequence[ContextSource] | None = None,
+        council_personas: Sequence[tuple[str, str]] | None = None,
+    ) -> None:
         config.validate()
         self.config = config
+        # Extension ports (docs/EXTENSIBILITY.md): connectors injected at construction. ① sensory:
+        # context sources folded into every turn; council personas overridable. (② motor/tools and
+        # ④ reflex are registered post-construction via register_tool / register_burst_task.)
+        self._context_sources: list[ContextSource] = list(context_sources or [])
+        self._council_personas: list[tuple[str, str]] = (
+            list(council_personas) if council_personas else list(COUNCIL_PERSONAS))
         # Capture WARNING+ off the `mimir` logger into a ring, so the system can see its own recent
         # failures — surfaced into context each turn and digested in the sleep cycle (DESIGN §10).
         self._errors = install_error_capture()
@@ -290,7 +327,9 @@ class Mimir:
             log.info("Mimir online | fleet: discovered nodes; inventorying in background")
         else:
             self._model = ModelGateway(provider or build_provider(config.provider), config.roles)
-        self._embedder: Embedder = make_embedder(config, self._model)
+        # Backend port: an injected embedder wins over the config-built one (a custom Embedder
+        # Protocol drops in, like a custom Provider above).
+        self._embedder: Embedder = embedder or make_embedder(config, self._model)
         # Fail-loud visibility: announce the active embedding mode so no one mistakes the
         # cheap bootstrap path for poor memory (DESIGN §10; kickoff decision).
         log.info("Mimir online | embeddings: %s", self._embedder.mode.banner())
@@ -664,6 +703,39 @@ class Mimir:
             self._model, self._storage, now=local_now(self._tz())
         )
 
+    # -- extension ports (docs/EXTENSIBILITY.md) --------------------------------------
+
+    def register_context_source(self, source: ContextSource) -> None:
+        """① Sensory port: attach a context source. Its ``Section`` is folded into every turn's
+        prompt with full budget/tier accounting (a faulty source degrades, never breaks the turn).
+        Replaces a same-named source."""
+        self._context_sources = [s for s in self._context_sources if s.name != source.name]
+        self._context_sources.append(source)
+
+    def register_burst_task(
+        self, name: str, factory: Callable[[ResponseContext], Callable[[], BurstResult] | None],
+        **kwargs: Any,
+    ) -> None:
+        """④ Reflex port: attach a background task that runs in the idle burst window after a reply
+        and may surface a note into the next turn. See ``cognition/burst.py`` ``register()`` for the
+        priority/trigger options."""
+        self._burst.register(name, factory, **kwargs)
+
+    def _build_context_sections(self, query: str, user: str | None) -> list[Section]:
+        """Run each registered context source (the sensory port), guarded so one fault degrades that
+        section rather than the turn. Returns the sections to fold into the prompt."""
+        out: list[Section] = []
+        for src in self._context_sources:
+            try:
+                section = src.build(query, user)
+            except Exception as exc:  # a connector fault must never break the turn (§10)
+                log.error("context source %r failed (degraded): %s",
+                          getattr(src, "name", "?"), exc)
+                continue
+            if section is not None:
+                out.append(section)
+        return out
+
     # -- the turn ---------------------------------------------------------------------
 
     def turn(self, text: str, user: str | None = None, *,
@@ -741,6 +813,7 @@ class Mimir:
                     text, query_vec, disabled_docs, loaded_pages, deep_read),
                 ([], 0, None)) if include_library else ([], 0, None)
             wiki = _enrich("wiki", lambda: self._wiki_context(text), None) if include_wiki else None
+            extra_sections = self._build_context_sections(text, user)  # the sensory port
 
             # 2. Assemble the prompt (a closure so draft-RAG can rebuild with more recall).
             def assemble(rset: list) -> ContextBundle:
@@ -754,6 +827,7 @@ class Mimir:
                     background_notes="\n".join(notes) if notes else None,
                     wiki_context=wiki, library=library, library_count=lib_count,
                     system_health=self._error_context(), now_ts=now,
+                    extra_sections=extra_sections,
                 )
             bundle = assemble(retrieved)
             # 2b. Output-triggered RAG (opt-in, slower): a short draft surfaces what the reply is
@@ -877,6 +951,7 @@ class Mimir:
                     text, query_vec, disabled_docs, loaded_pages, deep_read, fetch_hint=False),
                 ([], 0, None)) if include_library else ([], 0, None)
             wiki = _enrich("wiki", lambda: self._wiki_context(text), None) if include_wiki else None
+            extra_sections = self._build_context_sections(text, user)  # the sensory port
 
             def assemble(rset: list) -> ContextBundle:
                 return build_context(
@@ -889,6 +964,7 @@ class Mimir:
                     background_notes="\n".join(notes) if notes else None,
                     wiki_context=wiki, library=library, library_count=lib_count,
                     system_health=self._error_context(), now_ts=now,
+                    extra_sections=extra_sections,
                 )
             bundle = assemble(retrieved)
             # Output-triggered RAG (opt-in, slower): draft → re-retrieve memory → rebuild richer.
@@ -1593,6 +1669,7 @@ class Mimir:
             result = deliberate(
                 self._model, self._storage, self._embedder,
                 question=stim.prompt, provenance="inner life",
+                personas=self._council_personas,
             )
         except Exception as exc:  # a bad council run never destabilises the idle loop (§10)
             log.error("inner life: council escalation failed on %r: %s", stim.key, exc)
@@ -2759,6 +2836,7 @@ class Mimir:
                 outcome = deliberate(
                     self._model, self._storage, self._embedder,
                     question=conflict.question, provenance="sleep deliberation",
+                    personas=self._council_personas,
                 )
             except Exception as exc:  # one bad council run never sinks the phase (§10)
                 log.error("deliberation: council failed on %r: %s", conflict.key, exc)
@@ -3177,7 +3255,8 @@ class Mimir:
         Personas spread across whatever models are installed; the verdict is stored as recallable
         understanding (DESIGN §0.4, §4, §5).
         """
-        return deliberate(self._model, self._storage, self._embedder, question=question, user=user)
+        return deliberate(self._model, self._storage, self._embedder, question=question, user=user,
+                          personas=self._council_personas)
 
     # -- the council forum (browsable deliberations + housekeeping; DESIGN §5a) --------
 
