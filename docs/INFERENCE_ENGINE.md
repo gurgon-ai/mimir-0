@@ -100,7 +100,7 @@ family          "gemma"               # CANONICAL family (see family map below),
 params_b        8.0
 quantization    "Q4_K_M"
 context_length  8192
-nodes           ["http://192.168.2.50:11434", ...]   # every node that has it
+nodes           ["http://192.168.1.50:11434", ...]   # every node that has it
 digest          "sha256:1a2b…"        # [new] Ollama model digest — staleness key (§8)
 recommended     true                  # [new] present in the registry (§4)
 enabled         true                  # user veto (model_prefs.enabled)
@@ -156,7 +156,7 @@ allow_families = ["gemma", "qwen"]    # optional narrowing
 deny_models    = ["gemma3:4b"]        # the bias veto, declaratively
 
 [[lan.node]]
-url      = "http://192.168.2.50:11434"
+url      = "http://192.168.1.50:11434"
 approved = true                   # NO context is routed to an unapproved node (§5.2)
 ```
 
@@ -178,7 +178,7 @@ discovery = "on"
 [roles.chat]    model = "auto"
 [roles.bake]    model = "auto"
 [[lan.node]]
-url = "http://192.168.2.50:11434"   # the RTX box
+url = "http://192.168.1.50:11434"   # the RTX box
 approved = true
 ```
 Discovery finds `gemma4:e4b`, `qwen2.5:3b`, `nomic-embed-text` on the node. Qualification (recommended

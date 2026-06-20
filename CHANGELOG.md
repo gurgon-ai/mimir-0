@@ -7,6 +7,14 @@ Pre-1.0: the API and schema may change between releases.
 
 First fixes from real single-machine + LAN use after the feature-complete cut.
 
+### Security
+- **Added `SECURITY.md`** — responsible-disclosure policy (GitHub private vulnerability reporting),
+  the pre-alpha/not-hardened caveat, and the in-scope/out-of-scope boundary. Linked from the README.
+- **Pre-public history scrub.** Before the repo went public, two stray SQLite sidecar files
+  (`mimir.db-wal`, `mimir.db-shm`, committed before `.gitignore` caught them — generic test pages, no
+  real data) were removed from the entire git history with `git-filter-repo`, and commit author email
+  was rewritten to a GitHub noreply. Every commit SHA prior to the rewrite changed.
+
 ### Added
 - **Temporal Registry — STATE vs NARRATIVE (schema v24, docs/EXTENSIBILITY.md).** The memory store is
   NARRATIVE: it accumulates in mixed tense ("planning to do X" … "X is underway" … "X is done"), all
