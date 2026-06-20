@@ -129,6 +129,16 @@ after_s = 1800               # only once the quiet has run this long (~30 min)
 cooldown_s = 3600            # at most one dialogue this often (~1 hour)
 max_turns = 4                # voices per dialogue (opening + challenge/defend) — the cost cap
 
+[notebook]
+# Notebook (docs/EXTENSIBILITY.md): lossless, name-addressable working memory the model curates
+# itself — a `notebook` tool (read/write/edit/append/rename/delete) + an ambient catalog section so it
+# knows what notebooks exist. Distinct from the lossy memory store (memory is what it knows; a notebook
+# is what it's working on). The tool is non-actuating (its own notes), so it's safe always.
+enabled = true
+self_soft_cap = 15           # nudge the model to groom (rename/merge/delete) past this many
+inject_index = true          # ambient [notebooks] catalog section (titles only, never bodies)
+read_rag = true              # a notebook read re-triggers recall, reconnecting it to live memory
+
 [server]
 # Reference web server / integration API (see docs/API.md). Auth is off by default (open localhost).
 # Set a token to require `Authorization: Bearer <token>` on every /api/* route — or use the env var
