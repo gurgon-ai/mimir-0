@@ -3,6 +3,8 @@ brain's sleep-phase / manual path that submits the system's own conflicts to the
 
 from __future__ import annotations
 
+import pytest
+
 from mimir.brain import Mimir
 from mimir.cognition.deliberation import Conflict, curate, surface_conflicts
 from mimir.storage.models import Triple
@@ -10,8 +12,9 @@ from mimir.storage.repo import save_triple
 
 
 def _seed_tension(brain: Mimir) -> None:
-    # A non-functional relation with two values for the same subject = a genuine tension.
-    # ("likes" is not in FUNCTIONAL_RELATIONS, so consolidation leaves it for the council.)
+    # "wants" is neither functional (consolidation's job) nor additive (a pure list) — it's an
+    # ambiguous preference relation whose values *can* genuinely compete, so it's surfaced for the
+    # council/curator to judge (quiet farm vs busy startup is a real lifestyle tension).
     save_triple(brain._storage, Triple(subject="Greg", relation="wants", object="a quiet farm"))
     save_triple(brain._storage, Triple(subject="Greg", relation="wants", object="a busy startup"))
 
@@ -32,10 +35,36 @@ def test_functional_relations_are_not_surfaced(brain: Mimir) -> None:
     assert not any("lives in" in c.key for c in conflicts)
 
 
+def test_additive_relations_are_not_surfaced(brain: Mimir) -> None:
+    # Regression for the worst real failure: "has 16-core; has 64GB; has RTX 5090" is a spec LIST,
+    # not a disagreement — the council was reasoning itself out of true hardware facts.
+    for obj in ("a 16-core CPU", "64 GB of RAM", "an RTX 5090"):
+        save_triple(brain._storage, Triple(subject="Parent system", relation="has", object=obj))
+    conflicts = surface_conflicts(brain._storage, embedder=brain._embedder)
+    assert not any(c.key.startswith("graph:parent system|has") for c in conflicts)
+
+
 def test_curate_caps_to_limit(brain: Mimir) -> None:
     many = [Conflict(key=f"k{i}", question=f"Q{i}?", weight=float(i)) for i in range(8)]
     chosen = curate(brain._model, many, limit=3)
     assert len(chosen) == 3
+
+
+def test_curate_drops_all_when_curator_says_none(
+    brain: Mimir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The curator is now a FILTER: if it judges none a real conflict, no council runs.
+    monkeypatch.setattr(brain._model, "chat", lambda *a, **k: "none — these all simply coexist")
+    many = [Conflict(key=f"k{i}", question=f"Q{i}?", weight=float(i)) for i in range(4)]
+    assert curate(brain._model, many, limit=3) == []
+
+
+def test_curate_honors_explicit_selection(
+    brain: Mimir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(brain._model, "chat", lambda *a, **k: "0, 2")
+    many = [Conflict(key=f"k{i}", question=f"Q{i}?", weight=float(8 - i)) for i in range(4)]
+    assert [c.key for c in curate(brain._model, many, limit=3)] == ["k0", "k2"]
 
 
 def test_deliberate_open_questions_runs_council(brain: Mimir) -> None:

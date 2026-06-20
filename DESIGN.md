@@ -506,14 +506,20 @@ any time. This is the pattern lifted (clean) from the private home-AI's nightly 
 **Self-directed deliberation — the council argues the system's own conflicts. [landed]** A
 `deliberate` phase (after consolidation) turns the inner council from a hand-invoked tool into
 autonomous cognition (`cognition/deliberation.py`). Consolidation settles the clear-cut cases; what
-remains are genuine *tensions* it deterministically surfaces: **graph tensions** (a subject with two+
-objects under the same *non-functional* relation — functional ones like "lives in" are consolidation's
-job) and **divergent near-duplicates** (memory pairs in a cosine band close enough to be the same
-topic but not merged, whose text differs). A **hybrid curator** picks the few most worth arguing — an
-LLM ranks them, with a deterministic weight order as the no-model fallback — and each is submitted to
-the council; the verdict is stored as recallable understanding (`provenance="sleep deliberation"`).
-Conflicts argued recently are skipped so it doesn't loop. This is the public-clean analogue of the
-home-AI's nightly BBS/deliberation forum (its 16-persona forum + curator → our council + curator).
+remains are genuine *tensions* it deterministically surfaces: **graph tensions** and **divergent
+near-duplicates** (memory pairs in a cosine band close enough to be the same topic but not merged,
+whose text differs). Graph tensions sort relations three ways — **functional** (single-valued, e.g.
+"lives in") go to consolidation (newest-wins); **additive** (compositional, e.g. "has"/"uses"/
+"performs" — a thing legitimately has many components) are **never** a conflict and skipped; only
+*ambiguous* relations ("wants"/"prioritizes", where values might genuinely compete) surface, framed so
+the council can answer "these coexist." This is load-bearing: without it the council reasons itself
+*out* of true facts — fed "has 16-core; has 64GB; has RTX 5090" as a disagreement, it doubts its own
+hardware. The **curator is a filter, not just a ranker**: an LLM judges which surfaced items are real
+conflicts (it may answer *none*, and that's honored — no council), degrading to a deterministic weight
+order only on a model error. Each genuine conflict is submitted to the council; the verdict is stored
+as recallable understanding (`provenance="sleep deliberation"`). Conflicts argued recently are skipped
+so it doesn't loop. This is the public-clean analogue of the home-AI's nightly BBS/deliberation forum
+(its 16-persona forum + curator → our council + curator).
 
 **The forum — deliberations made legible + governable. [landed]** Council runs (convened, asked, or
 self-initiated in sleep) persist as **threads**: one post per persona (tagged with the node+model that
