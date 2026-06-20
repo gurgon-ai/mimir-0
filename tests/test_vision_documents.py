@@ -4,6 +4,7 @@ into recallable text. Needs a vision model — without one an image ingest fails
 from __future__ import annotations
 
 import dataclasses
+import json
 
 from mimir.brain import Mimir
 from mimir.config import Config, RoleSpec
@@ -42,6 +43,19 @@ def test_image_is_described_into_recallable_text(mock_config: Config, tmp_path) 
         # …and shown in the unified Library doc list with the description as its summary.
         doc = next(d for d in brain.library_overview()["documents"] if d["filename"] == "sign.png")
         assert "VOLTAGE" in (doc["summary"] or "")
+    finally:
+        brain.close()
+
+
+def test_library_overview_is_json_serializable_with_a_vision_model(
+    mock_config: Config, tmp_path,
+) -> None:
+    # Regression: with a vision role bound, `vision_model` must be the model STRING, not the
+    # RoleSpec object — else GET /api/library 500s ("RoleSpec is not JSON serializable"). Live find.
+    brain = _vision_brain(mock_config, tmp_path)
+    try:
+        assert brain._vision_model() == "mock"  # the .model string, never a RoleSpec
+        json.dumps(brain.library_overview())     # the /api/library payload must serialize cleanly
     finally:
         brain.close()
 

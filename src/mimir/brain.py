@@ -2163,8 +2163,9 @@ class Mimir:
     def _vision_model(self) -> str | None:
         """The model currently bound to the `vision` role (a real model, not unresolved 'auto'), or
         ``None`` — so the UI/ingest can tell whether images can be described."""
-        m = self._model.roles_view().get("vision")
-        return m if m and m != AUTO_MODEL else None
+        spec = self._model.roles_view().get("vision")
+        model = spec.model if spec else None  # roles_view() returns RoleSpec, not the model string
+        return model if model and model != AUTO_MODEL else None
 
     def _vision_available(self) -> bool:
         """True when images can be ingested: the toggle is on AND a vision-role model is bound."""
