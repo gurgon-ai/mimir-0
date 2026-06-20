@@ -1444,6 +1444,8 @@ _HTML = """<!doctype html>
   button.working { background:#9e6a03; }   /* amber — in progress */
   button.done    { background:#1f7a37; }   /* green — completed */
   button.failed  { background:#b62324; }   /* red — errored */
+  button:hover:not(:disabled) { filter:brightness(1.12); }
+  button:active:not(:disabled) { transform:translateY(1px); filter:brightness(.85); }  /* press */
   button:disabled { opacity:.5; cursor:default; }
   aside { overflow-y:auto; min-height:0; padding:16px; }   /* right column scrolls independently */
   aside section { margin-bottom:26px; }
@@ -1621,6 +1623,15 @@ _HTML = """<!doctype html>
         <input type="checkbox" id="setDeliberate"/> Reason adversarially over my own conflicts during sleep
       </label>
 
+      <h2 style="margin-top:18px;">Status</h2>
+      <div id="sleepStatus" class="hint">—</div>
+      <div style="margin-top:8px;">
+        <button class="secondary" id="sleepBtn" type="button">Run sleep now</button>
+        <button class="secondary" id="delibBtn" type="button">Deliberate now</button>
+      </div>
+      <div id="sleepResult" class="hint" style="margin-top:8px;"></div>
+      <div id="delibResult" style="margin-top:8px;"></div>
+
       <h2 style="margin-top:18px;">Inner life</h2>
       <div class="hint" style="margin-bottom:8px;">When idle, Mimir can think on its own — reflecting
         on a recent exchange, a memory, a tension in what it knows, or an error it hit — and keep the
@@ -1639,6 +1650,11 @@ _HTML = """<!doctype html>
         <input type="checkbox" id="setDeepIdle"/> …and when the quiet runs long, occasionally hold a
         deeper two-voice dialogue with myself (rarer, a few calls — needs idle-thinking on)
       </label>
+      <div style="margin-top:4px;">
+        <button class="secondary" id="innerBtn" type="button">Think now</button>
+        <button class="secondary" id="deepBtn" type="button">Deep think now</button>
+      </div>
+      <div id="innerResult" class="hint" style="margin-top:8px;"></div>
 
       <h2 style="margin-top:18px;">Context size</h2>
       <div class="hint" style="margin-bottom:8px;">How big a window (KV cache) Mimir loads, and how
@@ -1652,15 +1668,6 @@ _HTML = """<!doctype html>
 
       <button id="saveSleep" type="button">Save settings</button>
       <span id="settingsMsg" class="hint" style="margin-left:10px;"></span>
-      <h2 style="margin-top:18px;">Status</h2>
-      <div id="sleepStatus" class="hint">—</div>
-      <button class="secondary" id="sleepBtn" type="button">Run sleep now</button>
-      <button class="secondary" id="delibBtn" type="button">Deliberate now</button>
-      <button class="secondary" id="innerBtn" type="button">Think now</button>
-      <button class="secondary" id="deepBtn" type="button">Deep think now</button>
-      <div id="sleepResult" class="hint"></div>
-      <div id="delibResult" style="margin-top:8px;"></div>
-      <div id="innerResult" class="hint" style="margin-top:8px;"></div>
     </div>
 
     <div class="tabpane hidden" id="tab-memories">
@@ -2730,6 +2737,7 @@ async function loadSleepTab() {
 }
 
 $("saveSleep").addEventListener("click", async () => {
+  btnState("saveSleep", "working");
   $("settingsMsg").textContent = "Saving…";
   try {
     await api("POST", "/api/settings", { settings: {
@@ -2744,12 +2752,14 @@ $("saveSleep").addEventListener("click", async () => {
       context_size: $("setContextSize").value || "medium",
     }});
     $("settingsMsg").textContent = "Saved.";
-    setTimeout(() => $("settingsMsg").textContent = "", 1500);
+    btnState("saveSleep", "done");
+    setTimeout(() => { $("settingsMsg").textContent = ""; btnState("saveSleep", null); }, 1800);
     loadSleepStatus();
-  } catch (e) { $("settingsMsg").textContent = "Error: " + e.message; }
+  } catch (e) { $("settingsMsg").textContent = "Error: " + e.message; btnState("saveSleep", "failed"); }
 });
 
 $("sleepBtn").addEventListener("click", async () => {
+  btnState("sleepBtn", "working");
   $("sleepResult").textContent = "Running sleep cycle…";
   try {
     const r = await api("POST", "/api/sleep");
@@ -2757,15 +2767,18 @@ $("sleepBtn").addEventListener("click", async () => {
       ? ` Deduped ${r.deduped} · decayed ${r.decayed} · archived ${r.archived} · contradictions ${r.contradictions_resolved}.`
       : "";
     $("sleepResult").textContent = `Ran ${(r.ran||[]).join(", ") || "nothing"}.${counts}`;
+    btnState("sleepBtn", "done"); setTimeout(() => btnState("sleepBtn", null), 2000);
     loadSleepStatus(); loadMind(); refreshState();
-  } catch (e) { $("sleepResult").textContent = "Error: " + e.message; }
+  } catch (e) { $("sleepResult").textContent = "Error: " + e.message; btnState("sleepBtn", "failed"); }
 });
 
 $("delibBtn").addEventListener("click", async () => {
+  btnState("delibBtn", "working");
   $("delibResult").innerHTML = '<span class="hint">Surfacing conflicts and convening the council… (this can take a while)</span>';
   try {
     const r = await api("POST", "/api/deliberate/run");
     const ran = r.ran || [];
+    btnState("delibBtn", "done"); setTimeout(() => btnState("delibBtn", null), 2000);
     if (!ran.length) {
       $("delibResult").innerHTML = `<span class="hint">No open conflicts to argue${r.surfaced ? ` (surfaced ${r.surfaced}, none fresh)` : ""}.</span>`;
       return;
@@ -2774,29 +2787,33 @@ $("delibBtn").addEventListener("click", async () => {
       ran.map(d => `<div class="mem"><div class="text"><b>Q:</b> ${escapeHtml(d.question)}</div>` +
         `<div class="text" style="color:#9fb3c8;"><b>Verdict:</b> ${escapeHtml(d.verdict)}</div></div>`).join("");
     refreshState();
-  } catch (e) { $("delibResult").innerHTML = '<span class="hint">Error: ' + escapeHtml(e.message) + '</span>'; }
+  } catch (e) { $("delibResult").innerHTML = '<span class="hint">Error: ' + escapeHtml(e.message) + '</span>'; btnState("delibBtn", "failed"); }
 });
 
 $("innerBtn").addEventListener("click", async () => {
+  btnState("innerBtn", "working");
   $("innerResult").textContent = "Thinking…";
   try {
     const r = await api("POST", "/api/inner_life/run");
     $("innerResult").textContent = r.ran
       ? `Mused on ${r.kind}: ${r.thought}`
       : `Skipped (${r.reason}).`;
+    btnState("innerBtn", r.ran ? "done" : null); setTimeout(() => btnState("innerBtn", null), 2000);
     refreshState();
-  } catch (e) { $("innerResult").textContent = "Error: " + e.message; }
+  } catch (e) { $("innerResult").textContent = "Error: " + e.message; btnState("innerBtn", "failed"); }
 });
 
 $("deepBtn").addEventListener("click", async () => {
+  btnState("deepBtn", "working");
   $("innerResult").textContent = "Holding a dialogue with myself…";
   try {
     const r = await api("POST", "/api/inner_life/deep");
     $("innerResult").textContent = r.ran
       ? `Deep reflection on ${r.kind}${r.converged ? " (reconverged)" : ""}: ${r.insight}`
       : `Skipped (${r.reason}).`;
+    btnState("deepBtn", r.ran ? "done" : null); setTimeout(() => btnState("deepBtn", null), 2000);
     refreshState();
-  } catch (e) { $("innerResult").textContent = "Error: " + e.message; }
+  } catch (e) { $("innerResult").textContent = "Error: " + e.message; btnState("deepBtn", "failed"); }
 });
 
 $("memKind").addEventListener("change", loadMemories);
