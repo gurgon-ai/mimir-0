@@ -161,6 +161,13 @@ def test_mind_endpoint_reports_state(base_url: str) -> None:
     assert self_model is not None
 
 
+def test_notebooks_endpoint_returns_the_list_shape(base_url: str) -> None:
+    # The read endpoint that makes notebooks visible to the UI/integrators (the gap a live API test
+    # found). Empty to start; the facade-level content coverage lives in test_notebook.py.
+    status, data = _json("GET", base_url + "/api/notebooks")
+    assert status == 200 and data["notebooks"] == []
+
+
 def test_memories_browser_lists_and_searches(base_url: str) -> None:
     _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "alex"})
 

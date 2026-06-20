@@ -81,6 +81,20 @@ def test_notebook_index_section_appears_in_a_turn(brain: Mimir) -> None:
     assert "ship it" not in r.context.prompt  # the index is the catalog, not the bodies
 
 
+def test_notebooks_facade_exposes_bodies_for_the_ui(brain: Mimir) -> None:
+    # Mimir.notebooks() is the read-only window the /api/notebooks route serves — title, sections,
+    # size, and the full body, newest first (so the UI shows what the model is working on).
+    assert brain.notebooks() == []
+    nb.write(brain._storage, "Greenhouse", "## Settings\nThermostat set to 12 overnight.")
+    out = brain.notebooks()
+    assert len(out) == 1
+    entry = out[0]
+    assert entry["title"] == "Greenhouse"
+    assert entry["sections"] == ["Settings"]
+    assert "Thermostat set to 12 overnight." in entry["body"]
+    assert entry["size"] > 0 and entry["owner"] == "__self__"
+
+
 def test_notebook_tool_writes_through_a_turn(
     brain: Mimir, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

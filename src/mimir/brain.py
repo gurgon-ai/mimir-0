@@ -28,6 +28,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from .cognition import notebook as notebook_mod
 from .cognition.bake import bake, normalize_speaker_kind
 from .cognition.benchmark import FleetBenchmarkResult, ModelBenchmark
 from .cognition.benchmark import benchmark_fleet as _benchmark_fleet
@@ -1954,6 +1955,19 @@ class Mimir:
              "deep": (m.provenance or "") == "deep idle"}
             for m in thoughts[: max(1, limit)]
         ]
+
+    def notebooks(self, *, owner: str = notebook_mod.SELF) -> list[dict[str, Any]]:
+        """The owner's notebooks for the UI/integrators (newest first), each with its full body —
+        notebooks are the model's self-curated working memory, so observability matters (a read-only
+        window like the Mind tab's thoughts). Returns `[]` when the notebook layer is disabled."""
+        if not self.config.notebook_enabled:
+            return []
+        out = []
+        for m in notebook_mod.meta(self._storage, owner):
+            out.append({"title": m.title, "owner": m.owner, "sections": m.section_titles,
+                        "size": m.size, "updated_at": m.updated_at,
+                        "body": notebook_mod.read(self._storage, m.title, owner=m.owner)})
+        return out
 
     def _start_inner_life(self) -> None:
         """Daemon: every check interval run one inner-life tick (which self-gates on

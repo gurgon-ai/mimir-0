@@ -1,9 +1,15 @@
 # Mimir 0 — integration API
 
-Mimir 0 is a **brain, not an app**: it deliberately ships **no built-in hands** (no voice, no
-avatar, no Home Assistant, no social). Instead it exposes a small, stable HTTP surface so you can
-build whatever IO you want against it — voice in/out, an avatar, a home-assistant bridge, a social
-bot, an agent framework, or a middle layer that lets **two Mimirs talk to each other**.
+Mimir 0 is a **brain, not an app**: it ships **no built-in IO** (no voice, no avatar, no Home
+Assistant, no social). Instead it exposes a small, stable HTTP surface so you can build whatever IO
+you want against it — voice in/out, an avatar, a home-assistant bridge, a social bot, an agent
+framework, or a middle layer that lets **two Mimirs talk to each other**.
+
+It *can* grow hands, on your terms: the **motor port** (see [`EXTENSIBILITY.md`](EXTENSIBILITY.md))
+lets you register **tools** the model invokes mid-turn (`<TOOL name=… args=…>`), dispatched through
+one trust-gated choke point — state-changing actions are blocked for untrusted/peer speakers. What
+the model did is reported back in the turn's `actions` (see the response schema below). Core ships the
+slots, never a built integration, so it stays zero-dependency.
 
 Two ways in:
 
@@ -103,17 +109,32 @@ Response:
     "uncertainty_triggered": false,
     "warnings": [],
     "sections": [ { "name": "knowledge", "tier": "HIGH", "...": "..." } ]
-  }
+  },
+  "library_sources": [ { "id": 3, "title": "…", "...": "..." } ],
+  "actions": [
+    { "tool": "notebook", "args": { "op": "write", "title": "ideas" },
+      "result": "wrote 'ideas'", "status": "ok" }
+  ]
 }
 ```
-`introspect` is the context accounting (what was in the prompt, how big, how many grounding sources)
-— useful for an avatar that wants to show confidence/sources, and for debugging.
+- `introspect` is the context accounting (what was in the prompt, how big, how many grounding
+  sources) — useful for an avatar that wants to show confidence/sources, and for debugging.
+- `library_sources` — the library page(s) a library-grounded reply drew on (for one-click "Load"
+  pinning in a UI); empty when the turn didn't use the library.
+- `actions` — what **tools** the model invoked this turn (motor port), each
+  `{tool, args, result, status}` where `status` is `ok` | `unknown` (no such tool) | `error`
+  (handler/validation fault) | `blocked` (a state-changing action refused for an untrusted/peer
+  speaker). Empty `[]` when no tools were called (the common case, and always when none are
+  registered).
 
 ### Streaming
 
 `POST /api/turn/stream` — same request body, a **Server-Sent-Events** stream: `token` events as the
 reply generates, then a final `done` event carrying `introspect`. Use this for low-latency voice/chat
-frontends. (Send the `Authorization` header here too.)
+frontends. (Send the `Authorization` header here too.) **Note:** the single-round tool loop runs on
+the non-streaming `POST /api/turn` path, so the streaming `done` event does **not** carry `actions`
+yet — use `/api/turn` when you need the model to call tools (streaming tool support is a tracked
+follow-up in [`EXTENSIBILITY.md`](EXTENSIBILITY.md)).
 
 ## Examples
 
@@ -222,9 +243,14 @@ synthesized understanding, fetched on demand). Built in idle from the `[document
 - **Model-driven fetch** (opt-in `[library] model_fetch`): the model may reply `<FETCH id=N>` to open
   a page itself; the turn loads it and re-answers (capped, off by default; non-streaming path).
 
+- `GET /api/notebooks` — the model's self-curated notebooks (lossless working memory):
+  `{notebooks:[{title, owner, sections:[…], size, updated_at, body}]}`, newest first. Read-only
+  (the model writes them via its `notebook` tool); the window the UI's Mind tab renders.
+
 ## Other routes
 
 The turn endpoints above are what most integrations need. The web UI is driven by a wider set —
-identity, onboarding, mind, memories, graph, sessions, settings, sleep, deliberate, council, forum,
-fleet/*, wiki/status, ingest, documents/* — all under `/api/` and so all behind the same token
-(except `/api/health`). The authoritative list is the `do_GET`/`do_POST` dispatch in `server.py`.
+identity, onboarding, mind, notebooks, memories, graph, sessions, settings, sleep, deliberate,
+council, forum, fleet/*, wiki/status, ingest, documents/* — all under `/api/` and so all behind the
+same token (except `/api/health`). The authoritative list is the `do_GET`/`do_POST` dispatch in
+`server.py`.

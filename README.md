@@ -8,16 +8,17 @@ it's assembled into the prompt with an explicit epistemic structure. You tell it
 later it recalls that fact, cites where it came from, and tells you when it's reasoning from
 thin evidence instead of confabulating.
 
-> **Status: pre-alpha — feature-rich, actively evolving (snapshot 2026-06-19; subject to
+> **Status: pre-alpha — feature-rich, actively evolving (snapshot 2026-06-20; subject to
 > change).** The whole architecture in [`DESIGN.md`](DESIGN.md) is implemented and verified
 > end-to-end against a live multi-node LAN: the acceptance loop, every typed knowledge layer, the
 > async cognition, and the distributed model fleet. On top of the spine, the **highest-leverage
 > thinking layers** from the larger private home-AI have been extracted public-clean — temporal
 > grounding, hierarchical memory narratives, the idle-window burst worker, durable session history,
-> and a visual memory graph — alongside the **fleet qualification** surface, which is still being
-> actively tuned. The feature list below is a current snapshot; APIs, schema, scores, and UI may
-> shift between commits, and it is **not yet hardened**. Setup lives in
-> [`docs/SETUP.md`](docs/SETUP.md); see [`CHANGELOG.md`](CHANGELOG.md) for the running log.
+> a visual memory graph, a self-curated **notebook**, and a **STATE-vs-NARRATIVE timeline** — over a
+> set of **typed connector ports** ("hands") for tools, context, and backends, alongside the **fleet
+> qualification** surface, which is still being actively tuned. The feature list below is a current
+> snapshot; APIs, schema, scores, and UI may shift between commits, and it is **not yet hardened**.
+> Setup lives in [`docs/SETUP.md`](docs/SETUP.md); see [`CHANGELOG.md`](CHANGELOG.md) for the log.
 
 ## What's included vs. what you provide
 
@@ -81,10 +82,11 @@ Most memory libraries store text in a vector blob and retrieve by similarity. Mi
 
 ## What's inside
 
-Every turn assembles an epistemic prompt — self-model → identity → persona → **the current moment**
-→ attributed knowledge (memory + documents + entity graph, **each fact tagged with its age**) →
-learned procedures → **recent history (journal)** → working memory → **temporal awareness** →
-background notes → sentinel note → uncertainty gate — and routes it through two disciplined gateways.
+Every turn assembles an epistemic prompt — self-model → **current state (timeline)** → identity →
+persona → **the current moment** → attributed knowledge (memory + documents + entity graph, **each
+fact tagged with its age**) → learned procedures → **recent history (journal)** → working memory →
+**temporal awareness** → background notes → sentinel note → uncertainty gate — and routes it through
+two disciplined gateways.
 On top of that:
 
 - **Document ingestion + a local "wiki"** — `ingest()` a file by path, **upload with the 📎** by the
@@ -163,6 +165,21 @@ On top of that:
     system on this hardware* — best **for you**, not "best model in the world."
 
   Run the brain on a Raspberry Pi and borrow GPUs over the network.
+- **Notebook** — lossless, name-addressable working memory the model curates itself (markdown with
+  `##` sections), distinct from the lossy memory store: *memory is what it knows; a notebook is what
+  it's working on.* Never decayed or deduped; a re-read **re-triggers recall** so the note reconnects
+  to live memory instead of becoming an orphaned clipping.
+- **Timeline (STATE vs NARRATIVE)** — memory accumulates in mixed tense ("planning X" … "X is done"),
+  so a status question can surface a stale *planning* note. The **Temporal Registry** is the separate
+  STATE axis: a small, dated, status-tagged ledger of milestones (what's true *now*) that injects a
+  high-attention timeline, pins your current setup into the self-model, and during sleep **reconciles**
+  memories it supersedes — guarded so it never touches a memory sharing only a generic word.
+- **Connector ports ("hands")** — the brain ships four typed extension seams so you attach
+  capabilities without forking: **tools** the model invokes mid-turn through one trust-gated dispatcher
+  (a peer/guest can't actuate), **context sources** that fold typed sections into the prompt,
+  **backends** (any chat/embeddings provider), and **background reflexes**. The notebook and timeline
+  above are the two reference connectors built entirely on these ports. See
+  [`docs/EXTENSIBILITY.md`](docs/EXTENSIBILITY.md).
 - **Reference web UI + integration API** — a zero-dependency stdlib server for all of the above, and
   a documented, optionally token-authenticated HTTP API ([`docs/API.md`](docs/API.md)). Mimir is a
   *brain with endpoints, no built-in hands*: bring your own IO (voice, avatar, Home Assistant, an
@@ -173,7 +190,10 @@ On top of that:
 Mimir ships **no IO of its own** (no voice, avatar, Home Assistant, social) — on purpose. You drive
 it through a small, stable surface and build whatever front-end you want on top: a voice loop, an
 avatar, a home-assistant bridge, an agent framework, or a relay where **two Mimirs talk to each
-other**. Full contract in [`docs/API.md`](docs/API.md); the essentials:
+other**. It *can* grow hands on your terms — register **tools** on the motor port and the model
+invokes them mid-turn through one trust-gated dispatcher, reported back in the turn's `actions` (see
+[`docs/EXTENSIBILITY.md`](docs/EXTENSIBILITY.md)). Full contract in [`docs/API.md`](docs/API.md);
+the essentials:
 
 **In Python (the cleanest path):**
 ```python
