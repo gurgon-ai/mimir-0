@@ -29,6 +29,44 @@ from ..storage.repo import (
 log = logging.getLogger("mimir.graph")
 
 _MIN_ENTITY_LEN = 3
+_MAX_ENTITY_LEN = 64   # an entity is a short noun phrase; longer "objects" are clauses, not nodes
+_MAX_RELATION_LEN = 40
+
+# First-person subjects resolve to the speaker ("I have a dog" → "<user> — has → dog"); other
+# pronouns and over-generic hubs are unresolvable references that produce degenerate,
+# everything-connects-to-everything triples ("it is happy", "system uses X") — dropped at the
+# boundary so the graph (and the council that reads it) is never fed junk entities. (Cheap,
+# universal; NER-grade resolution is a later refinement.)
+_FIRST_PERSON = frozenset({"i", "me", "my", "myself", "mine"})
+_DROP_ENTITIES = frozenset({
+    "you", "your", "yours", "it", "its", "they", "them", "their", "we", "us", "our", "he", "she",
+    "him", "her", "his", "this", "that", "these", "those", "here", "there", "thing", "things",
+    "system", "the system", "user", "the user", "ai", "the ai", "someone", "something", "anyone",
+})
+
+
+def _valid_entity(name: str) -> bool:
+    """A storable entity node: a short phrase with at least one letter (not a clause, not a pronoun
+    handled separately)."""
+    return 2 <= len(name) <= _MAX_ENTITY_LEN and any(c.isalpha() for c in name)
+
+
+def _resolve_subject(subject: str, speaker: str | None) -> str | None:
+    """Resolve a triple subject, or ``None`` to drop it. First-person → the speaker; a bare pronoun
+    or over-generic hub → dropped (it would connect to everything)."""
+    low = subject.lower()
+    if low in _FIRST_PERSON:
+        return speaker if (speaker and speaker.lower() not in _DROP_ENTITIES) else None
+    if low in _DROP_ENTITIES:
+        return None
+    return subject if _valid_entity(subject) else None
+
+
+def _clean_object(obj: str) -> str | None:
+    """A storable object, or ``None`` — drop unresolvable pronouns and clause-length 'objects'."""
+    if obj.lower() in _FIRST_PERSON or obj.lower() in _DROP_ENTITIES:
+        return None
+    return obj if _valid_entity(obj) else None
 
 
 def build_graph_map(
@@ -89,7 +127,9 @@ def store_triples(
     provenance: str = "conversation",
     confidence: float = 0.8,
 ) -> int:
-    """Persist extracted ``[subject, relation, object]`` triples. Returns the count newly stored."""
+    """Persist extracted ``[subject, relation, object]`` triples, after entity hygiene (first-person
+    resolved to the speaker; pronoun/generic-hub subjects and clause-length objects dropped — junk
+    must not enter the graph or, downstream, the council). Returns the count newly stored."""
     stored = 0
     for raw in raw_triples:
         if len(raw) != 3:
@@ -97,12 +137,17 @@ def store_triples(
         subject, relation, obj = (str(p).strip() for p in raw)
         if not (subject and relation and obj):
             continue
+        clean_subject = _resolve_subject(subject, user)
+        clean_object = _clean_object(obj)
+        if clean_subject is None or clean_object is None or len(relation) > _MAX_RELATION_LEN:
+            log.debug("graph: dropped low-quality triple %r", [subject, relation, obj])
+            continue
         new_id = save_triple(
             storage,
             Triple(
-                subject=subject,
+                subject=clean_subject,
                 relation=relation,
-                object=obj,
+                object=clean_object,
                 user=user,
                 provenance=provenance,
                 confidence=confidence,
