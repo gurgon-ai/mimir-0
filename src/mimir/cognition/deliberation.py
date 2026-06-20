@@ -7,15 +7,21 @@ something you only invoke by hand and becomes self-initiated: during the sleep c
 
 Two deterministic sources, neither of which consolidation resolves:
 
-- **Graph tensions** — a subject with two+ objects under the *same non-functional* relation
-  (e.g. "wants X" vs "wants Y"). Functional relations like "lives in" are left to consolidation,
-  which resolves them newest-wins; non-functional ones are real judgment calls.
+- **Graph tensions** — a subject with two+ objects under the *same* relation. Three kinds of
+  relation are handled differently: **functional** ones (single-valued, e.g. "lives in") are left
+  to consolidation (newest-wins); **additive** ones (compositional, e.g. "has"/"uses"/"performs" — a
+  thing legitimately has many components) are NEVER a contradiction and are skipped; what's left —
+  ambiguous relations ("wants"/"prioritizes") whose values *might* compete — is surfaced, but framed
+  so the council can answer "these coexist" rather than be led to manufacture a conflict.
+  This guards against the worst failure mode seen in practice: the council reasoning itself *out* of
+  true facts ("has 16-core; has 64GB; has RTX 5090" is a spec list, not a disagreement).
 - **Divergent near-duplicates** — memory pairs similar enough to be about the same thing but not so
   similar that consolidation merged them (a cosine *tension band*), whose text actually differs.
 
-A **curator** then picks the few most worth arguing (an LLM ranks them; a deterministic weight order
-is the fallback when no model answers), and each goes to the council. The module is pure surfacing +
-curation; the brain wires in the council call, the seen-conflict memory, and persistence.
+A **curator** then filters + picks the few most worth arguing (an LLM may judge that *none* are real
+conflicts and drop them all; a deterministic weight order is the fallback only when the model errors
+or is unparseable). The module is pure surfacing + curation; the brain wires in the council call,
+the seen-conflict memory, and persistence.
 """
 
 from __future__ import annotations
@@ -44,10 +50,26 @@ _MAX_MEMORIES_SCANNED = 200  # cap the O(n^2) near-duplicate scan to the most sa
 # among what someone *stated* (primary/trusted/conversation/peer).
 NON_BELIEF_TIERS = frozenset({EvidenceTier.DOCUMENT, EvidenceTier.INFERRED})
 
+# Relations whose values ACCUMULATE — a subject legitimately has many (compositional/structural), so
+# multiple objects are never a contradiction. Distinct from FUNCTIONAL_RELATIONS (single-valued,
+# consolidation's job) and from ambiguous preference relations (wants/prioritizes/needs) where the
+# values *can* genuinely compete — those go to the curator + council to judge. Matched on the head
+# verb, so phrasal forms ("has access to", "relies on") are caught too.
+ADDITIVE_RELATION_HEADS = frozenset({
+    "has", "have", "had", "uses", "use", "used", "includes", "include", "contains", "contain",
+    "comprises", "comprise", "consists", "consist", "provides", "provide", "supports", "support",
+    "owns", "own", "runs", "run", "performs", "perform", "offers", "offer", "stores", "store",
+    "tracks", "track", "handles", "handle", "manages", "manage", "knows", "know", "holds", "hold",
+    "requires", "require", "relies", "rely", "depends", "depend",
+})
+
 _CURATOR_SYSTEM = (
-    "You triage a list of open questions/tensions found in an AI's own memory. Choose the few most "
-    "worth careful adversarial reasoning — genuine disagreements or consequential judgments, not "
-    "trivia with an obvious answer. Reply with ONLY the chosen item numbers, comma-separated."
+    "You triage a list of possible tensions found in an AI's own memory. FIRST decide which are "
+    "*genuine* conflicts — values that are mutually exclusive, or one wrong or stale — versus "
+    "items that merely list several things that coexist fine (a thing having many parts, or a user "
+    "wanting several things). Choose only the genuine, consequential ones worth arguing over. "
+    "Reply with ONLY the chosen item numbers, comma-separated — or the single word 'none' if none "
+    "is a real conflict."
 )
 
 
@@ -65,6 +87,13 @@ def _norm(text: str) -> str:
     return " ".join(text.lower().split())
 
 
+def _is_additive(relation: str) -> bool:
+    """True for compositional relations whose values accumulate (a subject having many is normal,
+    never a contradiction) — matched on the head verb so phrasal forms are caught."""
+    head = relation.split(" ", 1)[0] if relation else ""
+    return head in ADDITIVE_RELATION_HEADS
+
+
 def _graph_conflicts(storage: StorageGateway) -> list[Conflict]:
     triples = browse_triples(storage, limit=10_000)
     groups: dict[tuple[str, str, str], list] = {}
@@ -72,17 +101,22 @@ def _graph_conflicts(storage: StorageGateway) -> list[Conflict]:
         relation = _norm(triple.relation)
         if relation in FUNCTIONAL_RELATIONS:
             continue  # consolidation owns functional contradictions (newest-wins) — not a debate
+        if _is_additive(relation):
+            continue  # "has X; has Y; has Z" is a list, not a disagreement — never a conflict
         groups.setdefault((_norm(triple.subject), relation, triple.user or ""), []).append(triple)
 
     conflicts: list[Conflict] = []
     for (subject, relation, user), group in groups.items():
         objects = sorted({t.object.strip() for t in group if t.object.strip()})
         if len(objects) < 2:
-            continue  # no disagreement
+            continue  # only one value — nothing to weigh
         listing = "; ".join(f"{relation} {o}" for o in objects)
+        # Framed honestly — NOT "which holds?" (which presupposes a conflict). The council is asked
+        # whether they coexist, so a list that slipped through isn't reasoned into a false tension.
         question = (
-            f"My records disagree about {group[0].subject}: {listing}. "
-            f"Which holds — or can they be reconciled — and why?"
+            f"My records show several values for {group[0].subject} on one point: {listing}. "
+            f"Are these genuinely in tension — one wrong, stale, or mutually exclusive — or do "
+            f"they simply coexist? If there's a real conflict, resolve it; if they coexist, say so."
         )
         weight = float(len(objects)) + sum(t.confidence for t in group)
         conflicts.append(Conflict(key=f"graph:{subject}|{relation}|{user}", question=question,
@@ -136,23 +170,30 @@ def _parse_indices(text: str, n: int) -> list[int]:
 
 
 def curate(model: ModelGateway, conflicts: list[Conflict], *, limit: int) -> list[Conflict]:
-    """Pick the ``limit`` conflicts most worth arguing. Hybrid: an LLM ranks; if it errors or
-    returns nothing usable, fall back to the deterministic weight order. Never raises."""
+    """Filter to the genuine conflicts, then pick the ``limit`` most worth arguing. The LLM curator
+    runs even when there are few items (it's the gate that drops false conflicts the additive-skip
+    can't catch — wants/prioritizes lists that merely coexist): it may answer 'none' and we
+    honor that (no council). Only on a model error or an unparseable reply do we degrade to the
+    deterministic weight order — fail toward arguing, not toward silence. Never raises."""
     ranked = sorted(conflicts, key=lambda c: c.weight, reverse=True)
-    if len(ranked) <= limit:
-        return ranked
+    if not ranked:
+        return []
     try:
         listing = "\n".join(f"{i}. {c.question}" for i, c in enumerate(ranked))
         resp = model.chat(
             "reasoning",
             [
                 {"role": "system", "content": _CURATOR_SYSTEM},
-                {"role": "user", "content": f"Pick the {limit} most worth it:\n\n{listing}"},
+                {"role": "user", "content":
+                    f"Pick the genuine conflicts (up to {limit}), or 'none':\n\n{listing}"},
             ],
         )
-        chosen = [ranked[i] for i in _parse_indices(resp, len(ranked))[:limit]]
-        if chosen:
-            return chosen
     except Exception as exc:  # curator is an optimization — degrade to weight order, never fail
         log.warning("deliberation: curator model failed (%s); using weight order", exc)
-    return ranked[:limit]
+        return ranked[:limit]
+    chosen = [ranked[i] for i in _parse_indices(resp, len(ranked))[:limit]]
+    if chosen:
+        return chosen
+    if re.search(r"\bnone\b", resp, re.IGNORECASE):
+        return []  # curator judged none a real conflict — drop them all (don't argue non-conflicts)
+    return ranked[:limit]  # unparseable answer → degrade to weight order
