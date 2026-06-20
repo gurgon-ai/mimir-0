@@ -4,8 +4,8 @@ This is the **user-facing** guide: everything a new human (or a fresh AI session
 from a clone to a running cognition core. It is maintained from day one and updated in lockstep
 with any change that touches setup or config — if something here is stale, that's a bug.
 
-> For the architecture and the "why", read `DESIGN.md`. For build conventions, read `CLAUDE.md`.
-> This document is only about **getting it running**.
+> For the architecture and the "why", read `DESIGN.md`. For contribution conventions, read
+> `CONTRIBUTING.md`. This document is only about **getting it running**.
 
 ---
 

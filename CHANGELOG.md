@@ -10,6 +10,9 @@ First fixes from real single-machine + LAN use after the feature-complete cut.
 ### Security
 - **Added `SECURITY.md`** — responsible-disclosure policy (GitHub private vulnerability reporting),
   the pre-alpha/not-hardened caveat, and the in-scope/out-of-scope boundary. Linked from the README.
+- **Untracked `CLAUDE.md` from the public repo** (kept locally, now gitignored) — it's the AI
+  build-guide for local coding sessions and carries personal provenance; the public contribution
+  conventions live in `CONTRIBUTING.md`. Doc pointers updated to match.
 - **Pre-public history scrub.** Before the repo went public, two stray SQLite sidecar files
   (`mimir.db-wal`, `mimir.db-shm`, committed before `.gitignore` caught them — generic test pages, no
   real data) were removed from the entire git history with `git-filter-repo`, and commit author email

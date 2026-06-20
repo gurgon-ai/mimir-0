@@ -1,5 +1,8 @@
 # Mimir 0
 
+[![ci](https://github.com/gurgon-ai/mimir-0/actions/workflows/ci.yml/badge.svg)](https://github.com/gurgon-ai/mimir-0/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 **A local-first cognition core for evidence-aware memory and context assembly.**
 
 Mimir 0 is a small Python library that gives a language model a memory that behaves like a
