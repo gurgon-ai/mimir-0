@@ -380,14 +380,21 @@ class ProviderPool:
             try:
                 names = {m.name for m in _list_model_infos(endpoint.provider)}
             except Exception as exc:  # node down / can't list
-                log.warning("model: endpoint %s unreachable on refresh: %s", endpoint.name, exc)
                 with self._lock:
+                    was_reachable = endpoint.reachable
                     endpoint.reachable = False
                     endpoint.models = set()
+                # Log only the down *transition*, not every refresh while it stays down — a prober
+                # running each ~80s otherwise spams an identical WARNING for a node that's just off.
+                if was_reachable:
+                    log.warning("model: endpoint %s unreachable on refresh: %s", endpoint.name, exc)
                 continue
             with self._lock:
+                was_reachable = endpoint.reachable
                 endpoint.reachable = True
                 endpoint.models = names
+            if not was_reachable:  # came back — say so once (the down was logged once too)
+                log.info("model: endpoint %s reachable again", endpoint.name)
 
     def inventory_details(self) -> list[tuple[str, str, list[ModelInfo]]]:
         """(endpoint_name, endpoint_label, models) for each endpoint — for the fleet catalogue."""

@@ -303,6 +303,40 @@ def test_get_stats_reports_down_nodes() -> None:
     assert stats["down"] == ["B"]
 
 
+class TogglingProvider(FleetProvider):
+    """Inventory fails while ``.down`` is set — lets a test flip a node down and back up."""
+
+    def __init__(self, name: str, models: list[str]) -> None:
+        super().__init__(name, models)
+        self.down = False
+
+    def list_models(self) -> list[str]:
+        if self.down:
+            raise ProviderError(f"{self.name} unreachable", transient=True)
+        return super().list_models()
+
+
+def test_down_node_warns_once_not_every_refresh(caplog: pytest.LogCaptureFixture) -> None:
+    # A prober calls refresh() every ~80s; a node that's simply off must not spam an identical
+    # WARNING each cycle. Log only the down transition (and the recovery), not the steady state.
+    b = TogglingProvider("B", ["m"])
+    pool = ProviderPool([("B", b)], sleep=_noop_sleep)
+    b.down = True
+    with caplog.at_level("WARNING", logger="mimir.model"):
+        for _ in range(4):
+            pool.refresh()
+    warns = [r for r in caplog.records if "unreachable on refresh" in r.message]
+    assert len(warns) == 1                       # four refreshes while down → one WARNING
+    assert pool.get_stats()["nodes_up"] == 0
+
+    caplog.clear()
+    b.down = False
+    with caplog.at_level("INFO", logger="mimir.model"):
+        pool.refresh()
+    assert any("reachable again" in r.message for r in caplog.records)  # recovery noted once
+    assert pool.get_stats()["nodes_up"] == 1
+
+
 class TimeoutProvider(FleetProvider):
     """A dead/molasses node: every chat hits the time limit (transient + timeout)."""
 
