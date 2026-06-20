@@ -436,7 +436,8 @@ class _Handler(BaseHTTPRequestHandler):
         # memory) runs OFF the hot path and the next turn settles it (DESIGN §5a) — blocking the HTTP
         # response on it would add several model calls of latency (minutes on a small edge node).
         return {"reply": result.reply, "introspect": result.context.introspect(),
-                "library_sources": result.library_sources}
+                "library_sources": result.library_sources,
+                "actions": [a.as_dict() for a in result.actions]}
 
     def _establish(self, body: dict[str, Any]) -> dict[str, Any]:
         answers = body.get("answers") or {}
