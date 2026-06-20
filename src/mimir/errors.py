@@ -79,3 +79,9 @@ class IngestError(MimirError):
     optional extractor (e.g. PDF support needs the ``[documents]`` extra). Raised loud with
     an instruction, never a silent skip.
     """
+
+
+class NotebookError(MimirError):
+    """A notebook operation could not proceed — e.g. editing a notebook that doesn't exist, or
+    creating one past the self-grooming soft cap. Surfaced, never silently dropped (§10).
+    """

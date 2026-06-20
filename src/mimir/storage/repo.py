@@ -21,6 +21,7 @@ from .models import (
     LibraryPage,
     Memory,
     MemoryKind,
+    Notebook,
     Procedure,
     Triple,
     blob_to_embedding,
@@ -264,6 +265,90 @@ def prune_forum_threads(gateway: StorageGateway, keep: int) -> int:
         conn.execute(f"DELETE FROM forum_posts WHERE thread_id IN ({marks})", stale)
         conn.execute(f"DELETE FROM forum_threads WHERE id IN ({marks})", stale)
         return len(stale)
+
+    return gateway.submit(_write)
+
+
+# -- notebooks: lossless, name-addressable working memory (docs/EXTENSIBILITY.md) -----
+
+def _notebook_row(row: sqlite3.Row | tuple) -> Notebook:
+    return Notebook(notebook_id=row[0], owner=row[1], title=row[2], body_md=row[3],
+                    created_at=row[4], updated_at=row[5])
+
+
+_NB_COLS = "notebook_id, owner, title, body_md, created_at, updated_at"
+
+
+def upsert_notebook(
+    gateway: StorageGateway, *, notebook_id: str, owner: str, title: str, body_md: str,
+) -> str:
+    """Create or replace a notebook keyed by ``(owner, title)``. An existing notebook keeps its id +
+    created_at and updates its body; a new one is inserted. Returns the (stable) notebook_id."""
+    ts = time.time()
+
+    def _write(conn: sqlite3.Connection) -> str:
+        row = conn.execute(
+            "SELECT notebook_id FROM notebooks WHERE owner = ? AND title = ?", (owner, title)
+        ).fetchone()
+        if row is not None:
+            conn.execute("UPDATE notebooks SET body_md = ?, updated_at = ? WHERE notebook_id = ?",
+                         (body_md, ts, row[0]))
+            return str(row[0])
+        conn.execute(
+            f"INSERT INTO notebooks ({_NB_COLS}) VALUES (?, ?, ?, ?, ?, ?)",
+            (notebook_id, owner, title, body_md, ts, ts),
+        )
+        return notebook_id
+
+    return gateway.submit(_write)
+
+
+def get_notebook(gateway: StorageGateway, owner: str, title: str) -> Notebook | None:
+    def _read(conn: sqlite3.Connection) -> Notebook | None:
+        row = conn.execute(
+            f"SELECT {_NB_COLS} FROM notebooks WHERE owner = ? AND title = ?", (owner, title)
+        ).fetchone()
+        return _notebook_row(row) if row else None
+
+    return gateway.read(_read)
+
+
+def list_notebooks(gateway: StorageGateway, owner: str | None = None) -> list[Notebook]:
+    def _read(conn: sqlite3.Connection) -> list[Notebook]:
+        if owner is None:
+            rows = conn.execute(f"SELECT {_NB_COLS} FROM notebooks ORDER BY updated_at DESC")
+        else:
+            rows = conn.execute(
+                f"SELECT {_NB_COLS} FROM notebooks WHERE owner = ? ORDER BY updated_at DESC",
+                (owner,),
+            )
+        return [_notebook_row(r) for r in rows.fetchall()]
+
+    return gateway.read(_read)
+
+
+def delete_notebook(gateway: StorageGateway, owner: str, title: str) -> bool:
+    def _write(conn: sqlite3.Connection) -> bool:
+        cur = conn.execute("DELETE FROM notebooks WHERE owner = ? AND title = ?", (owner, title))
+        return cur.rowcount > 0
+
+    return gateway.submit(_write)
+
+
+def rename_notebook(gateway: StorageGateway, owner: str, title: str, new_title: str) -> bool:
+    """Rename in place (the id stays stable). No-op + False if the source is missing or the target
+    name is already taken for this owner (UNIQUE(owner, title))."""
+    ts = time.time()
+
+    def _write(conn: sqlite3.Connection) -> bool:
+        if conn.execute("SELECT 1 FROM notebooks WHERE owner = ? AND title = ?",
+                        (owner, new_title)).fetchone() is not None:
+            return False
+        cur = conn.execute(
+            "UPDATE notebooks SET title = ?, updated_at = ? WHERE owner = ? AND title = ?",
+            (new_title, ts, owner, title),
+        )
+        return cur.rowcount > 0
 
     return gateway.submit(_write)
 

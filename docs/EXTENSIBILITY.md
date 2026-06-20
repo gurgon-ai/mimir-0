@@ -137,6 +137,18 @@ conversation through a surface — the "the world interrupted" path, reusing the
 
 ---
 
+## Worked example built on the ports: the Notebook **[built]**
+
+The **Notebook** (`cognition/notebook.py`, schema v23) is the first real cognition primitive built on
+these ports, and it dogfoods two of them: lossless, name-addressable working memory the model curates
+itself (markdown with `##` sections; SQLite via the gateway; decay-exempt — *memory is what it knows,
+a notebook is what it's working on*). It attaches as a **`notebook` tool** on the motor port
+(non-actuating — its own notes, so `state_changing=False`, safe always) and an **ambient catalog
+section** on the sensory port (titles only, never bodies). Its signature mechanism is **read = RAG
+re-trigger** (`read_with_memory`): a cold re-read runs the note back through recall so it reconnects
+to current memory instead of being an orphaned clipping. `[notebook]`-gated; off-by-cap grooming
+surfaces (never silently drops). This is the template a third-party connector follows.
+
 ## How connectors attach — three tiers
 
 1. **Library injection** (the clean default, Phase 1) — `Mimir(config, provider=…, embedder=…,

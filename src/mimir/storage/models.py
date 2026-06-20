@@ -192,6 +192,20 @@ class LibraryPage:
 
 
 @dataclass(slots=True)
+class Notebook:
+    """A lossless, name-addressable notebook the model curates itself (docs/EXTENSIBILITY.md) — a
+    markdown doc with ``##`` sections, owned by the assistant (``__self__``) or a specific user.
+    Distinct from the lossy memory store: never decayed/deduped/archived; edited deliberately."""
+
+    notebook_id: str
+    owner: str
+    title: str
+    body_md: str = ""
+    created_at: float = 0.0
+    updated_at: float = 0.0
+
+
+@dataclass(slots=True)
 class CatalogueEntry:
     """One (node, model) row of the fleet catalogue (DESIGN §5).
 

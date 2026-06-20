@@ -174,6 +174,12 @@ class Config:
     deep_idle_after_s: float = 1800.0          # only after the quiet has run this long (~30 min)
     deep_idle_cooldown_s: float = 3600.0       # at most one dialogue this often (~1 hour)
     deep_idle_max_turns: int = 4               # voices per dialogue (opening + challenge/defend)
+    # Notebook (docs/EXTENSIBILITY.md): lossless, name-addressable working memory the model curates
+    # itself (a `notebook` tool + an ambient index section). Distinct from the lossy memory store.
+    notebook_enabled: bool = True
+    notebook_self_soft_cap: int = 15           # nudge the model to groom (rename/merge) past this
+    notebook_inject_index: bool = True         # ambient [notebooks] catalog section (titles only)
+    notebook_read_rag: bool = True             # a notebook read re-triggers recall (reconnects it)
     # Entity-graph traversal: how many hops from the query's entities, and the max connected
     # facts to inject. hops=0 disables graph retrieval (triples are still extracted/stored).
     graph_hops: int = 2
@@ -416,6 +422,10 @@ def load_config(path: str | Path) -> Config:
         deep_idle_after_s=float(raw.get("deep_idle", {}).get("after_s", 1800.0)),
         deep_idle_cooldown_s=float(raw.get("deep_idle", {}).get("cooldown_s", 3600.0)),
         deep_idle_max_turns=int(raw.get("deep_idle", {}).get("max_turns", 4)),
+        notebook_enabled=bool(raw.get("notebook", {}).get("enabled", True)),
+        notebook_self_soft_cap=int(raw.get("notebook", {}).get("self_soft_cap", 15)),
+        notebook_inject_index=bool(raw.get("notebook", {}).get("inject_index", True)),
+        notebook_read_rag=bool(raw.get("notebook", {}).get("read_rag", True)),
         graph_hops=int(raw.get("entity_graph", {}).get("hops", 2)),
         graph_max_facts=int(raw.get("entity_graph", {}).get("max_facts", 8)),
         sleep_every=int(raw.get("sleep", {}).get("every", 0)),

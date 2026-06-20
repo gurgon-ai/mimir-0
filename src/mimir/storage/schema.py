@@ -381,6 +381,26 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "ALTER TABLE model_catalogue ADD COLUMN vision REAL",
         ],
     ),
+    (
+        23,
+        [
+            # Notebooks (docs/EXTENSIBILITY.md): lossless, name-addressable working memory the model
+            # curates itself — deliberate and self-owned, distinct from the lossy content-addressed
+            # memory store (memory is what it knows; a notebook is what it's working on). One row
+            # per notebook; full markdown in body_md (``##`` sections parsed on read). Owned by the
+            # assistant (``__self__``) or a user. Epoch-UTC REAL timestamps like every other table.
+            "CREATE TABLE notebooks ("
+            "  notebook_id TEXT PRIMARY KEY,"
+            "  owner TEXT NOT NULL DEFAULT '__self__',"
+            "  title TEXT NOT NULL,"
+            "  body_md TEXT NOT NULL DEFAULT '',"
+            "  created_at REAL NOT NULL,"
+            "  updated_at REAL NOT NULL,"
+            "  UNIQUE(owner, title)"
+            ")",
+            "CREATE INDEX idx_nb_owner ON notebooks(owner)",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -465,4 +485,5 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
     },
     "library_pages": {"id", "path", "title", "summary", "content_hash", "created_at", "updated_at"},
     "library_page_claims": {"page_id", "claim_id"},
+    "notebooks": {"notebook_id", "owner", "title", "body_md", "created_at", "updated_at"},
 }

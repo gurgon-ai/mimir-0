@@ -80,6 +80,7 @@ from .cognition.inner_life import (
 )
 from .cognition.library import compose_page, extract_claims, render_claims, retrieve_claims
 from .cognition.narratives import render_recent_history, run_narrative_cycle
+from .cognition.notebook import make_index_source, make_notebook_tool
 from .cognition.onboarding import (
     onboarding_profile,
     pending_onboarding,
@@ -349,6 +350,16 @@ class Mimir:
         # Fail-loud visibility: announce the active embedding mode so no one mistakes the
         # cheap bootstrap path for poor memory (DESIGN §10; kickoff decision).
         log.info("Mimir online | embeddings: %s", self._embedder.mode.banner())
+
+        # Notebook (docs/EXTENSIBILITY.md): a core cognition primitive that dogfoods the ports — its
+        # ambient index registers on the sensory port, its `notebook` tool on the motor port. Both
+        # gated by config; needs the embedder (read = RAG re-trigger), so it's wired here.
+        if config.notebook_enabled:
+            if config.notebook_inject_index:
+                self.register_context_source(make_index_source(self._storage))
+            self.register_tool(make_notebook_tool(
+                self._storage, self._embedder, soft_cap=config.notebook_self_soft_cap,
+                read_rag=config.notebook_read_rag))
 
         self._last_sentinel_error: BaseException | None = None
         self._turn_count = 0
