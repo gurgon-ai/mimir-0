@@ -7,7 +7,7 @@ bot, an agent framework, or a middle layer that lets **two Mimirs talk to each o
 
 Two ways in:
 
-- **Library** — `from mimir import Mimir; m.turn("hello", user="greg")`. The cleanest "system in/out"
+- **Library** — `from mimir import Mimir; m.turn("hello", user="alex")`. The cleanest "system in/out"
   if you're in Python. Everything below is just the HTTP adapter over this.
 - **HTTP** — `python -m mimir.server --config mimir.toml` serves the reference web UI *and* the API
   on the same port. The API is what you integrate against.
@@ -69,11 +69,11 @@ assembly, generation, then async bake/sentinel).
 
 Request:
 ```json
-{ "text": "what did I tell you about the garden?", "user": "greg", "speaker_kind": "human" }
+{ "text": "what did I tell you about the garden?", "user": "alex", "speaker_kind": "human" }
 ```
 - `text` (required) — the message.
 - `user` (optional) — **the speaker's identity.** This is the seam for multi-speaker and
-  **agent-to-agent**: set it to whoever is talking (`"greg"`, `"mimir-home"`, …). Memory and
+  **agent-to-agent**: set it to whoever is talking (`"alex"`, `"mimir-home"`, …). Memory and
   recency are tracked per speaker.
 - `speaker_kind` (optional, default `"human"`) — **what kind of speaker this is**: `"human"` or
   `"ai_peer"`. A human's statements are believed per the trust policy below; a peer AI's are baked at
@@ -81,6 +81,15 @@ Request:
   AI-sourced, because they're generated text, not observation. So if you build your own interface,
   leave it `"human"`; if another agent is talking to this one, send `"ai_peer"`. (Alias: `"kind"`.)
   An unknown value is rejected with 400 — the policy never resolves ambiguity by elevating a caller.
+
+> **Security note — `user` is a *claim*, not an authenticated identity.** The API token authenticates
+> the *connection*, not the *speaker*: a caller can send any `user` (and `speaker_kind="human"`) and
+> have its statements baked at that speaker's tier — so an exposed endpoint lets any authenticated
+> caller assert the primary user's identity and write top-tier memories. (`speaker_kind` still can't be
+> laundered — a peer AI can never reach a human tier by renaming; the gap is purely the *identity*
+> claim.) For single-operator localhost use this is a non-issue. If you expose the API, **bind identity
+> at your integration layer** — terminate auth in a reverse proxy that sets `user` from the
+> authenticated principal and ignores the client's value, or run one instance per speaker.
 
 Response:
 ```json
@@ -112,14 +121,14 @@ frontends. (Send the `Authorization` header here too.)
 curl -s http://127.0.0.1:8765/api/turn \
   -H "Authorization: Bearer $MIMIR_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"text":"hello","user":"greg"}'
+  -d '{"text":"hello","user":"alex"}'
 ```
 
 ```python
 import requests
 r = requests.post("http://127.0.0.1:8765/api/turn",
                   headers={"Authorization": f"Bearer {TOKEN}"},
-                  json={"text": "hello", "user": "greg"})
+                  json={"text": "hello", "user": "alex"})
 print(r.json()["reply"])
 ```
 
@@ -149,7 +158,7 @@ The `user` field is the speaker's **identity** and `speaker_kind` is its **kind*
 How much that speaker is **believed** is **server-side config**, not the caller's to declare (so an
 exposed endpoint can't inject top-tier "facts"). The policy (`[identity]` in `mimir.toml`):
 
-- `primary_user = "greg"` → that (human) speaker's statements bake at the top evidence tier (1.30).
+- `primary_user = "alex"` → that (human) speaker's statements bake at the top evidence tier (1.30).
 - `trusted_users = ["julien"]` → trusted tier (1.20).
 - **any other named human** (an unknown caller, a guest) → attributed but baked at **CONVERSATION**
   tier (1.00) — recorded as "X said it," never as established fact.
