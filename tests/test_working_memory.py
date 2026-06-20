@@ -74,9 +74,9 @@ def test_build_context_places_working_memory_before_sentinel() -> None:
 
 
 def test_brain_carries_recent_context_forward(brain: Mimir) -> None:
-    brain.turn("My favorite color is teal.", user="greg")
+    brain.turn("My favorite color is teal.", user="alex")
     brain.wait_for_sentinel()
-    r2 = brain.turn("Tell me more.", user="greg")
+    r2 = brain.turn("Tell me more.", user="alex")
     wm = next((s for s in r2.context.sections if s.name == "working_memory"), None)
     assert wm is not None
     assert "teal" in wm.body.lower()  # the prior exchange is carried into this turn

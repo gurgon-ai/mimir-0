@@ -127,8 +127,8 @@ def test_archives_low_salience_provisionals_only(brain: Mimir) -> None:
 
 
 def test_resolves_functional_contradiction(brain: Mimir) -> None:
-    store_triples(brain._storage, [["Greg", "lives in", "Colorado"]], user="g", confidence=0.8)
-    store_triples(brain._storage, [["Greg", "lives in", "Texas"]], user="g", confidence=0.9)
+    store_triples(brain._storage, [["Alex", "lives in", "Colorado"]], user="g", confidence=0.8)
+    store_triples(brain._storage, [["Alex", "lives in", "Texas"]], user="g", confidence=0.9)
     report = consolidate(brain._storage)
     assert report.contradictions_resolved == 1
     objects = [t.object for t in browse_triples(brain._storage) if t.relation == "lives in"]
@@ -137,7 +137,7 @@ def test_resolves_functional_contradiction(brain: Mimir) -> None:
 
 def test_leaves_nonfunctional_relations_alone(brain: Mimir) -> None:
     store_triples(
-        brain._storage, [["Greg", "likes", "tea"], ["Greg", "likes", "coffee"]], user="g"
+        brain._storage, [["Alex", "likes", "tea"], ["Alex", "likes", "coffee"]], user="g"
     )
     consolidate(brain._storage)
     likes = sorted(t.object for t in browse_triples(brain._storage) if t.relation == "likes")

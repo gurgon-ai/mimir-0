@@ -50,11 +50,13 @@ No Ollama, no GPU, no network needed — Mimir ships a mock provider and a stdli
 embedder so the core loop boots on literally Python + SQLite. For a real conversation with a
 local model, see [`docs/SETUP.md`](docs/SETUP.md).
 
-**Recommended models** (any model works — Mimir benchmarks your fleet and picks per role
-automatically; this is just a good first `ollama pull`): on **small / edge hardware**,
-**`gemma4:e2b`** is the standout — fast, vision-capable, and the strongest small-model epistemics
-measured here. Mid-range: `gemma3:12b` or `qwen2.5:14b`. On a capable box, `gemma4:26b` and
-`qwen3.5:27b` top the board.
+**Recommended models** — *empirical, not prescriptive.* Mimir is **model-agnostic**: it benchmarks
+whatever fleet you install and picks the best per role automatically, so the right answer is always
+"measure your own." The list below is simply **what scored well on my hardware** (edge nodes hanging
+off an RTX box) — a good first `ollama pull`, never a requirement, and your mileage will differ. On
+**small / edge hardware**, **`gemma4:e2b`** was the standout here — fast, vision-capable, the
+strongest small-model epistemics I measured. Mid-range: `gemma3:12b` or `qwen2.5:14b`. On a capable
+box, `gemma4:26b` and `qwen3.5:27b` topped my board. Pull anything; let the benchmark decide.
 
 Prefer a browser? Point it at a local model and run the **reference web UI** (stdlib, zero deps —
 chat, the identity interview, and document ingest):

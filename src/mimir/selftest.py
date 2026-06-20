@@ -1,9 +1,9 @@
 """The §6 acceptance loop, runnable as a self-test (DESIGN §6, §10).
 
 "No bake / no recall / no sentinel" is a *fault*, not a quiet state. This module runs the
-whole loop against the deterministic mock provider and asserts each stage happened. It is
-wired to run at startup and on a schedule by deployments, and is exposed as
-``python -m mimir.selftest`` for humans and CI.
+whole loop against the deterministic mock provider and asserts each stage happened. The reference
+server runs it at **startup** (`mimir.server.main`, skippable with ``--no-selftest``) so a broken
+cognition core refuses to boot; it is also exposed as ``python -m mimir.selftest`` for CI + humans.
 
 It ships a **canary**: a negative control query that must NOT recall the planted fact. If the
 canary inverts (everything matches everything), retrieval is degenerate and the self-test would

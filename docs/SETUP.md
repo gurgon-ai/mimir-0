@@ -146,7 +146,9 @@ HTTP — no extra Python deps.
    > is safer than `"auto"`, which remembers the alphabetically-first reachable embed model on first
    > boot and stays pinned to it even if it later goes away.
 
-   **Recommended models (a starting point, not a whitelist).** Mimir ships a curated, versioned
+   **Recommended models (empirical, a starting point — not a whitelist).** Mimir is model-agnostic:
+   the registry below is just families that scored well in *my own* testing, never a requirement —
+   it measures whatever you install and the measured scores win. Mimir ships a curated, versioned
    registry (`src/mimir/cognition/recommended_models.toml`) of families it has tested — currently
    **gemma** (gemma4 e2b/e4b, gemma3:12b — *not* gemma3:4b), **qwen** (2.5/3/3.5), **llama** (3.x),
    **phi**, **mistral**, **command-r**, **deepseek**, **granite**, **internlm**. If you set a role to

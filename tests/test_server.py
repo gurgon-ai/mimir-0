@@ -76,9 +76,9 @@ def _sse(url: str, body: dict) -> tuple[str, dict | None]:
 
 
 def test_turn_stream_sse_recalls(base_url: str) -> None:
-    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "greg"})
+    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "alex"})
     text, introspect = _sse(
-        base_url + "/api/turn/stream", {"text": "What is my favorite color?", "user": "greg"}
+        base_url + "/api/turn/stream", {"text": "What is my favorite color?", "user": "alex"}
     )
     assert "teal" in text.lower()  # streamed tokens reconstruct the reply
     assert introspect is not None and introspect["source_count"] >= 1
@@ -111,9 +111,9 @@ def test_identity_establish_over_http(base_url: str) -> None:
 
 
 def test_turn_bakes_and_recalls_over_http(base_url: str) -> None:
-    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "greg"})
+    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "alex"})
     status, data = _json(
-        "POST", base_url + "/api/turn", {"text": "What is my favorite color?", "user": "greg"}
+        "POST", base_url + "/api/turn", {"text": "What is my favorite color?", "user": "alex"}
     )
     assert status == 200
     assert "teal" in data["reply"].lower()
@@ -129,7 +129,7 @@ def test_ingest_over_http(base_url: str, tmp_path: Path) -> None:
 
 
 def test_mind_endpoint_reports_state(base_url: str) -> None:
-    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "greg"})
+    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "alex"})
     status, data = _json("GET", base_url + "/api/mind")
     assert status == 200
     assert data["stats"]["total"] >= 1
@@ -146,7 +146,7 @@ def test_mind_endpoint_reports_state(base_url: str) -> None:
 
 
 def test_memories_browser_lists_and_searches(base_url: str) -> None:
-    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "greg"})
+    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "alex"})
 
     status, data = _json("GET", base_url + "/api/memories?kind=memory")
     assert status == 200
@@ -160,7 +160,7 @@ def test_memories_browser_lists_and_searches(base_url: str) -> None:
 
 
 def test_graph_endpoint_lists_connections(base_url: str) -> None:
-    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "greg"})
+    _json("POST", base_url + "/api/turn", {"text": "My favorite color is teal.", "user": "alex"})
     status, data = _json("GET", base_url + "/api/graph")
     assert status == 200
     assert any(t["object"].lower() == "teal" for t in data["triples"])
@@ -552,7 +552,7 @@ def test_local_ui_exempt_from_token_by_default(token_local_url: str) -> None:
     # Token set + secure_ui off → a same-machine request needs no token (first run isn't blocked).
     assert _req("GET", token_local_url + "/api/state")[0] == 200
     assert _json("POST", token_local_url + "/api/turn",
-                 {"text": "hi", "user": "greg"})[0] == 200
+                 {"text": "hi", "user": "alex"})[0] == 200
 
 
 def _req(method: str, url: str, headers: dict | None = None) -> tuple[int, dict]:

@@ -83,6 +83,10 @@ every = 0
 # opened gets grounded, not just what you asked. Excludes facts just baked from that reply.
 enabled = true
 top_k = 3
+# Self-correction: if the reply contradicts a fact that OUTRANKS it (a primary-user/trusted/document
+# fact in the retrieved context), a cheap background check flags it and a tentative correction
+# surfaces next turn — the system catching its own drift from what it knows.
+self_check = true
 
 [draft_rag]
 # Synchronous two-pass recall: draft a short answer first, re-retrieve memory against that draft
@@ -113,6 +117,17 @@ enabled = false              # opt in to let it think during idle time
 cadence_s = 300              # at most one thought this often (~5 min); lower it if you have GPU to spare
 idle_floor_s = 30            # stay quiet at least this long after a turn before musing
 check_interval_s = 20        # daemon wake cadence (it self-gates on cadence_s)
+
+[deep_idle]
+# Deep-idle dialogue (DESIGN §5a, inner-life Slice 3): when the quiet runs LONG, instead of a single
+# musing the system occasionally holds a short two-voice dialogue with itself — a reflective voice
+# proposes, a skeptical voice presses (it can't see the recent context, so it forces the reflection to
+# ground its claims in stored memory), then one insight is distilled. Rarer and a few calls per run, so
+# OFF by default; needs inner_life on too. Toggle + "Deep think now" are also in the Sleep tab.
+enabled = false              # opt in to the deeper, rarer dialogue
+after_s = 1800               # only once the quiet has run this long (~30 min)
+cooldown_s = 3600            # at most one dialogue this often (~1 hour)
+max_turns = 4                # voices per dialogue (opening + challenge/defend) — the cost cap
 
 [server]
 # Reference web server / integration API (see docs/API.md). Auth is off by default (open localhost).
