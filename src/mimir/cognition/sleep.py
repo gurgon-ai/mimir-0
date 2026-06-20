@@ -41,6 +41,7 @@ from ..storage.repo import (
     prune_forum_threads,
     prune_kind,
 )
+from .temporal_registry import reconcile as reconcile_milestones_pass
 
 log = logging.getLogger("mimir.sleep")
 
@@ -69,11 +70,14 @@ class SleepReport:
     contradictions_resolved: int = 0
     pruned: int = 0  # stale single-latest-wins rows (working-memory/self-model versions) tidied
     forum_pruned: int = 0  # old council deliberations trimmed from the browsable forum
+    milestones_demoted: int = 0   # stale-state memories the Temporal Registry superseded
+    milestones_protected: int = 0  # current-state memories lifted above the archive floor
 
     @property
     def total_changes(self) -> int:
         return (self.deduped + self.decayed + self.archived
-                + self.contradictions_resolved + self.pruned + self.forum_pruned)
+                + self.contradictions_resolved + self.pruned + self.forum_pruned
+                + self.milestones_demoted + self.milestones_protected)
 
 
 # Working-memory, self-model, and sentinel-note rows accumulate one-per-turn/synthesis but only the
@@ -91,11 +95,16 @@ def _norm(text: str) -> str:
     return " ".join(text.lower().split())
 
 
-def consolidate(storage: StorageGateway, *, now: float | None = None) -> SleepReport:
+def consolidate(storage: StorageGateway, *, now: float | None = None,
+                reconcile_milestones: bool = True) -> SleepReport:
     """Run a full consolidation pass and return what changed. Safe to run any time; idempotent-ish.
 
     A second run with no new activity is a near no-op: duplicates are gone, decay re-converges,
     archived stay archived. Never advances any external bookmark (DESIGN §10 governor fail-safe).
+
+    The Temporal Registry's authority pass runs between decay and archive (so a superseded planning
+    memory is demoted before the archive decision, and a confirmed current-state memory is protected
+    above the floor); set ``reconcile_milestones=False`` to skip it.
     """
     clock = time.time() if now is None else now
     report = SleepReport()
@@ -103,6 +112,11 @@ def consolidate(storage: StorageGateway, *, now: float | None = None) -> SleepRe
     report.deduped = _dedup(storage)
     memories = list_memories(storage, user=None, kind=MemoryKind.MEMORY)
     report.decayed = _decay(storage, memories, clock)  # mutates salience/confidence in-memory
+    if reconcile_milestones:
+        rr = reconcile_milestones_pass(storage)
+        report.milestones_demoted, report.milestones_protected = rr.demoted, rr.protected
+        if rr.demoted or rr.protected:  # refresh so the archive step sees the reconciled salience
+            memories = list_memories(storage, user=None, kind=MemoryKind.MEMORY)
     report.archived = _archive(storage, memories)
     report.contradictions_resolved = _resolve_contradictions(storage)
     report.pruned = (
@@ -113,13 +127,16 @@ def consolidate(storage: StorageGateway, *, now: float | None = None) -> SleepRe
     report.forum_pruned = prune_forum_threads(storage, FORUM_THREAD_KEEP)
 
     log.info(
-        "sleep: deduped=%d decayed=%d archived=%d contradictions=%d pruned=%d forum_pruned=%d",
+        "sleep: deduped=%d decayed=%d archived=%d contradictions=%d pruned=%d forum_pruned=%d "
+        "milestones_demoted=%d milestones_protected=%d",
         report.deduped,
         report.decayed,
         report.archived,
         report.contradictions_resolved,
         report.pruned,
         report.forum_pruned,
+        report.milestones_demoted,
+        report.milestones_protected,
     )
     return report
 

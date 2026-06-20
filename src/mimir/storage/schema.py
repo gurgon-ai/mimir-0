@@ -401,6 +401,32 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "CREATE INDEX idx_nb_owner ON notebooks(owner)",
         ],
     ),
+    (
+        24,
+        [
+            # Milestones — the Temporal Registry (docs/EXTENSIBILITY.md). Separates STATE ("what is
+            # true now") from NARRATIVE (the mixed-tense memory store). A dated, status-tagged,
+            # decay-exempt ledger of durable state facts; consulted for status questions and the
+            # authority that reconciles stale-state memories in the sleep pass. A distinct table, so
+            # it is inherently exempt from the memory salience/decay/archival machinery.
+            "CREATE TABLE milestones ("
+            "  milestone_id TEXT PRIMARY KEY,"
+            "  title TEXT NOT NULL,"
+            "  statement TEXT NOT NULL,"
+            "  status TEXT NOT NULL,"              # planned | in_progress | done | abandoned
+            "  is_current_config INTEGER NOT NULL DEFAULT 0,"
+            "  occurred_at REAL,"                  # reached-this-status epoch-UTC (nullable)
+            "  superseded_by TEXT,"                # milestone_id that replaced it (NULL = live)
+            "  distinctive_tokens TEXT NOT NULL DEFAULT '[]',"  # JSON: proper-noun/number tokens
+            "  provenance TEXT NOT NULL DEFAULT '',"
+            "  confidence REAL NOT NULL DEFAULT 0.9,"
+            "  created_at REAL NOT NULL,"
+            "  updated_at REAL NOT NULL"
+            ")",
+            "CREATE INDEX idx_ms_status ON milestones(status)",
+            "CREATE INDEX idx_ms_current ON milestones(is_current_config)",
+        ],
+    ),
 ]
 
 # Derived, never hand-edited: the version this code expects an opened DB to be at.
@@ -486,4 +512,9 @@ EXPECTED_SHAPE: dict[str, set[str]] = {
     "library_pages": {"id", "path", "title", "summary", "content_hash", "created_at", "updated_at"},
     "library_page_claims": {"page_id", "claim_id"},
     "notebooks": {"notebook_id", "owner", "title", "body_md", "created_at", "updated_at"},
+    "milestones": {
+        "milestone_id", "title", "statement", "status", "is_current_config", "occurred_at",
+        "superseded_by", "distinctive_tokens", "provenance", "confidence", "created_at",
+        "updated_at",
+    },
 }

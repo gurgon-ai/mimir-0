@@ -139,6 +139,19 @@ self_soft_cap = 15           # nudge the model to groom (rename/merge/delete) pa
 inject_index = true          # ambient [notebooks] catalog section (titles only, never bodies)
 read_rag = true              # a notebook read re-triggers recall, reconnecting it to live memory
 
+[temporal_registry]
+# Temporal Registry (docs\EXTENSIBILITY.md): a small, dated, status-tagged ledger of durable STATE
+# milestones (what is true *now*) beside the mixed-tense narrative memory store. It answers status
+# questions from current state (a high-attention [Timeline] block), pins current-config milestones
+# into the self-model, and in the sleep pass reconciles narrative memories it supersedes (demoting a
+# stale planning note once its milestone is done; protecting a faded note a current milestone
+# confirms). Guarded by distinctive tokens, so it never touches a memory sharing only a generic word.
+# A `record_milestone` tool lets the model log a state change the operator states. It writes only the
+# brain's own ledger (not the world), so it is non-actuating and safe always.
+enabled = true
+timeline_max = 12            # milestones shown in the [Timeline] block
+reconcile_in_sleep = true    # run the authority pass during consolidation
+
 [server]
 # Reference web server / integration API (see docs/API.md). Auth is off by default (open localhost).
 # Set a token to require `Authorization: Bearer <token>` on every /api/* route — or use the env var

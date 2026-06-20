@@ -206,6 +206,26 @@ class Notebook:
 
 
 @dataclass(slots=True)
+class Milestone:
+    """A durable STATE fact in the Temporal Registry (docs/EXTENSIBILITY.md) — what is true *now*,
+    with a lifecycle status and a date, as opposed to the mixed-tense narrative memory store. Lives
+    in its own table, so it's inherently exempt from memory decay/archival."""
+
+    milestone_id: str
+    title: str
+    statement: str
+    status: str = "planned"  # planned | in_progress | done | abandoned
+    is_current_config: bool = False
+    occurred_at: float | None = None
+    superseded_by: str | None = None
+    distinctive_tokens: list[str] = field(default_factory=list)
+    provenance: str = "stated"
+    confidence: float = 0.9
+    created_at: float = 0.0
+    updated_at: float = 0.0
+
+
+@dataclass(slots=True)
 class CatalogueEntry:
     """One (node, model) row of the fleet catalogue (DESIGN §5).
 

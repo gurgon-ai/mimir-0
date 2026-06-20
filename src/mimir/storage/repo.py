@@ -21,6 +21,7 @@ from .models import (
     LibraryPage,
     Memory,
     MemoryKind,
+    Milestone,
     Notebook,
     Procedure,
     Triple,
@@ -125,9 +126,11 @@ def delete_memory(gateway: StorageGateway, memory_id: int) -> None:
 def update_memory(
     gateway: StorageGateway, memory_id: int, *,
     text: str | None = None, salience: float | None = None, confidence: float | None = None,
+    meta: dict[str, str] | None = None,
 ) -> None:
-    """Edit a memory's text, salience, and/or confidence in place (user-governed review e.g. the
-    graph editor; or the deep-idle convergence boost — a re-derived insight earns belief).
+    """Edit a memory's text, salience, confidence, and/or meta in place (user-governed review e.g.
+    the graph editor; the deep-idle convergence boost; or the Temporal Registry's reconcile flagging
+    a memory superseded).
 
     Only the provided fields change. ``embedding`` is left as-is; a re-embed on text change is a
     later refinement (recall still works on the old vector + keyword overlap)."""
@@ -141,6 +144,9 @@ def update_memory(
     if confidence is not None:
         sets.append("confidence = ?")
         params.append(confidence)
+    if meta is not None:
+        sets.append("meta = ?")
+        params.append(json.dumps(meta))
     if not sets:
         return
     params.append(memory_id)
@@ -351,6 +357,84 @@ def rename_notebook(gateway: StorageGateway, owner: str, title: str, new_title: 
         return cur.rowcount > 0
 
     return gateway.submit(_write)
+
+
+# -- milestones: the Temporal Registry / STATE ledger (docs/EXTENSIBILITY.md) ---------
+
+_MS_COLS = ("milestone_id, title, statement, status, is_current_config, occurred_at, "
+            "superseded_by, distinctive_tokens, provenance, confidence, created_at, updated_at")
+
+
+def _milestone_row(row: sqlite3.Row | tuple) -> Milestone:
+    return Milestone(
+        milestone_id=row[0], title=row[1], statement=row[2], status=row[3],
+        is_current_config=bool(row[4]), occurred_at=row[5], superseded_by=row[6],
+        distinctive_tokens=json.loads(row[7]), provenance=row[8], confidence=row[9],
+        created_at=row[10], updated_at=row[11],
+    )
+
+
+def upsert_milestone(gateway: StorageGateway, m: Milestone) -> str:
+    """Persist a milestone (full replace by id). The model layer handles supersession + created_at
+    preservation before calling — this is pure storage."""
+
+    def _write(conn: sqlite3.Connection) -> str:
+        conn.execute(
+            f"INSERT OR REPLACE INTO milestones ({_MS_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (m.milestone_id, m.title, m.statement, m.status, 1 if m.is_current_config else 0,
+             m.occurred_at, m.superseded_by, json.dumps(m.distinctive_tokens), m.provenance,
+             m.confidence, m.created_at, m.updated_at),
+        )
+        return m.milestone_id
+
+    return gateway.submit(_write)
+
+
+def get_milestone(gateway: StorageGateway, milestone_id: str) -> Milestone | None:
+    def _read(conn: sqlite3.Connection) -> Milestone | None:
+        row = conn.execute(
+            f"SELECT {_MS_COLS} FROM milestones WHERE milestone_id = ?", (milestone_id,)
+        ).fetchone()
+        return _milestone_row(row) if row else None
+
+    return gateway.read(_read)
+
+
+def get_milestone_by_title(gateway: StorageGateway, title: str) -> Milestone | None:
+    def _read(conn: sqlite3.Connection) -> Milestone | None:
+        row = conn.execute(
+            f"SELECT {_MS_COLS} FROM milestones WHERE title = ? ORDER BY created_at LIMIT 1",
+            (title,),
+        ).fetchone()
+        return _milestone_row(row) if row else None
+
+    return gateway.read(_read)
+
+
+def list_milestones(
+    gateway: StorageGateway, *, statuses: tuple[str, ...] | None = None,
+    current_only: bool = False, include_superseded: bool = False,
+) -> list[Milestone]:
+    """Milestones, newest-state first. By default excludes superseded ones; ``current_only`` keeps
+    only the live current-config set; ``statuses`` filters by lifecycle status."""
+    clauses, params = [], []
+    if not include_superseded:
+        clauses.append("superseded_by IS NULL")
+    if current_only:
+        clauses.append("is_current_config = 1")
+    if statuses:
+        clauses.append(f"status IN ({','.join('?' * len(statuses))})")
+        params.extend(statuses)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    def _read(conn: sqlite3.Connection) -> list[Milestone]:
+        rows = conn.execute(
+            f"SELECT {_MS_COLS} FROM milestones{where} "
+            "ORDER BY COALESCE(occurred_at, updated_at) DESC", tuple(params)
+        ).fetchall()
+        return [_milestone_row(r) for r in rows]
+
+    return gateway.read(_read)
 
 
 def list_forum_threads(gateway: StorageGateway) -> list[dict[str, Any]]:

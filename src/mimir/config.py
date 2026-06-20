@@ -180,6 +180,11 @@ class Config:
     notebook_self_soft_cap: int = 15           # nudge the model to groom (rename/merge) past this
     notebook_inject_index: bool = True         # ambient [notebooks] catalog section (titles only)
     notebook_read_rag: bool = True             # a notebook read re-triggers recall (reconnects it)
+    # Temporal Registry (docs/EXTENSIBILITY.md): a dated, status-tagged STATE ledger of milestones,
+    # injected high-attention; the authority that reconciles stale-state memories during sleep.
+    temporal_registry_enabled: bool = True
+    temporal_registry_timeline_max: int = 12   # milestones in the [Timeline] section
+    temporal_registry_reconcile_in_sleep: bool = True  # the authority pass during consolidation
     # Entity-graph traversal: how many hops from the query's entities, and the max connected
     # facts to inject. hops=0 disables graph retrieval (triples are still extracted/stored).
     graph_hops: int = 2
@@ -426,6 +431,11 @@ def load_config(path: str | Path) -> Config:
         notebook_self_soft_cap=int(raw.get("notebook", {}).get("self_soft_cap", 15)),
         notebook_inject_index=bool(raw.get("notebook", {}).get("inject_index", True)),
         notebook_read_rag=bool(raw.get("notebook", {}).get("read_rag", True)),
+        temporal_registry_enabled=bool(raw.get("temporal_registry", {}).get("enabled", True)),
+        temporal_registry_timeline_max=int(
+            raw.get("temporal_registry", {}).get("timeline_max", 12)),
+        temporal_registry_reconcile_in_sleep=bool(
+            raw.get("temporal_registry", {}).get("reconcile_in_sleep", True)),
         graph_hops=int(raw.get("entity_graph", {}).get("hops", 2)),
         graph_max_facts=int(raw.get("entity_graph", {}).get("max_facts", 8)),
         sleep_every=int(raw.get("sleep", {}).get("every", 0)),

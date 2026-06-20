@@ -106,6 +106,11 @@ from .cognition.temporal import (
     resolve_timezone,
     time_prefix,
 )
+from .cognition.temporal_registry import (
+    current_config_statements,
+    make_milestone_tool,
+    timeline_text,
+)
 from .cognition.tools import (
     ActionContext,
     Tool,
@@ -360,6 +365,10 @@ class Mimir:
             self.register_tool(make_notebook_tool(
                 self._storage, self._embedder, soft_cap=config.notebook_self_soft_cap,
                 read_rag=config.notebook_read_rag))
+        # Temporal Registry: the [Timeline] is computed per-turn (top-attention current state); the
+        # `record_milestone` tool lets the model log a state change the operator states.
+        if config.temporal_registry_enabled:
+            self.register_tool(make_milestone_tool(self._storage))
 
         self._last_sentinel_error: BaseException | None = None
         self._turn_count = 0
@@ -800,6 +809,18 @@ class Mimir:
                 out.append(section)
         return out
 
+    def _timeline_text(self) -> str:
+        """The Temporal Registry's authoritative current-state block, or "" when disabled/empty."""
+        if not self.config.temporal_registry_enabled:
+            return ""
+        return timeline_text(self._storage, self.config.temporal_registry_timeline_max)
+
+    @property
+    def _reconcile_in_sleep(self) -> bool:
+        """Whether the Temporal Registry's authority pass runs in consolidation."""
+        return (self.config.temporal_registry_enabled
+                and self.config.temporal_registry_reconcile_in_sleep)
+
     # -- the turn ---------------------------------------------------------------------
 
     def turn(self, text: str, user: str | None = None, *,
@@ -878,6 +899,7 @@ class Mimir:
                 ([], 0, None)) if include_library else ([], 0, None)
             wiki = _enrich("wiki", lambda: self._wiki_context(text), None) if include_wiki else None
             extra_sections = self._build_context_sections(text, user)  # the sensory port
+            timeline = _enrich("timeline", self._timeline_text, "") or None  # authoritative STATE
 
             # 2. Assemble the prompt (a closure so draft-RAG can rebuild with more recall).
             def assemble(rset: list) -> ContextBundle:
@@ -885,6 +907,7 @@ class Mimir:
                     query=text, user=user, identity=self.config.identity, retrieved=rset,
                     sentinel_note=note, embed_mode=self._embedder.mode,
                     budget_tokens=self.config.context_budget_tokens, self_knowledge=self_knowledge,
+                    timeline=timeline,
                     working_memory=working_memory, graph_facts=graph_facts, procedures=procedures,
                     time_context=self._time_context(), temporal_awareness=awareness,
                     recent_history=self._recent_history(),
@@ -1025,12 +1048,14 @@ class Mimir:
                 ([], 0, None)) if include_library else ([], 0, None)
             wiki = _enrich("wiki", lambda: self._wiki_context(text), None) if include_wiki else None
             extra_sections = self._build_context_sections(text, user)  # the sensory port
+            timeline = _enrich("timeline", self._timeline_text, "") or None  # authoritative STATE
 
             def assemble(rset: list) -> ContextBundle:
                 return build_context(
                     query=text, user=user, identity=self.config.identity, retrieved=rset,
                     sentinel_note=note, embed_mode=self._embedder.mode,
                     budget_tokens=self.config.context_budget_tokens, self_knowledge=self_knowledge,
+                    timeline=timeline,
                     working_memory=working_memory, graph_facts=graph_facts, procedures=procedures,
                     time_context=self._time_context(), temporal_awareness=awareness,
                     recent_history=self._recent_history(),
@@ -1193,7 +1218,15 @@ class Mimir:
         """
         anchors_text = render_anchors(current_anchors(self._storage))
         self_model = latest_self_model(self._storage)
-        parts = [p for p in (anchors_text, self_model.text if self_model else None) if p]
+        # Pin the Temporal Registry's current-config milestones into the self-model so "how am I set
+        # up" is answered from authoritative STATE, not a stale planning memory (DESIGN §3a).
+        config_text = None
+        if self.config.temporal_registry_enabled:
+            stmts = current_config_statements(self._storage)
+            if stmts:
+                config_text = "Current configuration:\n" + "\n".join(f"- {s}" for s in stmts)
+        parts = [p for p in (anchors_text, config_text,
+                             self_model.text if self_model else None) if p]
         return "\n\n".join(parts) if parts else None
 
     # -- self-model -------------------------------------------------------------------
@@ -1337,7 +1370,7 @@ class Mimir:
     def _sleep_task(self, ctx: ResponseContext) -> Callable[[], BurstResult]:
         def run() -> BurstResult:
             try:
-                consolidate(self._storage)
+                consolidate(self._storage, reconcile_milestones=self._reconcile_in_sleep)
                 run_narrative_cycle(
                     self._model, self._storage, now=local_now(self._tz())
                 )
@@ -1351,7 +1384,7 @@ class Mimir:
     def sleep(self) -> SleepReport:
         """Run a consolidation pass now (dedup, decay, archive, contradiction resolution) + write
         the period's temporal narratives (daily entry, weekly/monthly roll-up; DESIGN §3a/§3e)."""
-        report = consolidate(self._storage)
+        report = consolidate(self._storage, reconcile_milestones=self._reconcile_in_sleep)
         try:
             self.generate_narratives()
         except Exception as exc:  # narratives are enrichment — never fail consolidation (§10)
@@ -1513,7 +1546,8 @@ class Mimir:
         """The maintenance phases, in order. Consolidation is fast (mostly deterministic, no model);
         narratives make LLM calls, so it needs a bigger slice on a slow box."""
         def _consolidate() -> SleepReport:
-            self._last_sleep_report = consolidate(self._storage)
+            self._last_sleep_report = consolidate(
+                self._storage, reconcile_milestones=self._reconcile_in_sleep)
             return self._last_sleep_report
 
         return [

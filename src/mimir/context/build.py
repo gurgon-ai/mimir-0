@@ -162,6 +162,7 @@ def build_context(
     embed_mode: EmbeddingMode,
     budget_tokens: int,
     self_knowledge: str | None = None,
+    timeline: str | None = None,
     working_memory: str | None = None,
     graph_facts: list[str] | None = None,
     procedures: list[str] | None = None,
@@ -200,6 +201,18 @@ def build_context(
             admitted_tokens=estimate_tokens(self_knowledge),
         )
         sections.append(self_model_section)
+
+    # 1-bis. Timeline — authoritative current STATE (the Temporal Registry), high tier near the top
+    #        so a status question is answered from what's true *now*, not a stale planning memory.
+    if timeline:
+        sections.append(Section(
+            name="timeline",
+            title="",
+            body=timeline,
+            tier=SectionTier.HIGH,
+            requested_tokens=estimate_tokens(timeline),
+            admitted_tokens=estimate_tokens(timeline),
+        ))
 
     # 2. Identity / persona — the authored seed, always-on, high tier (DESIGN §3a, §3e).
     identity_section = Section(
