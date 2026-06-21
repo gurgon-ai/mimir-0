@@ -66,3 +66,11 @@ python_version = "3.11"
 strict = true
 files = ["src/mimir"]
 warn_unused_ignores = true
+
+# The optional [documents] extra (pypdf, python-docx) is not installed in the lint/type CI job — core
+# is zero-dependency, and these imports are runtime-guarded behind try/except ImportError. Tell mypy
+# to treat them as untyped rather than fail on the missing stubs (it would otherwise pass locally,
+# where the extra happens to be installed, and fail in CI).
+[[tool.mypy.overrides]]
+module = ["pypdf", "pypdf.*", "docx", "docx.*"]
+ignore_missing_imports = true
