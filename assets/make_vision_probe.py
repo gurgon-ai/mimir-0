@@ -1,8 +1,8 @@
 """Generate the deterministic vision-benchmark probe image (assets/vision_probe.png).
 
 Run: ``python assets/make_vision_probe.py``. Needs Pillow (a dev-only dependency — the committed PNG
-is the artifact; the runtime never imports this). The content must match assets/vision_probe.README.md
-and the scorer in cognition/benchmark.py exactly: the word GLYPHON + three red circles on white.
+is the artifact; the runtime never imports this). The content must match vision_probe.README.md and
+the scorer in cognition/benchmark.py exactly: the word GLYPHON + three red circles on white.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def main() -> None:
     # The word: large, bold, black, centred horizontally in the upper third.
     font = _font(96)
     box = d.textbbox((0, 0), WORD, font=font)
-    w, h = box[2] - box[0], box[3] - box[1]
+    w = box[2] - box[0]
     d.text(((SIZE - w) / 2 - box[0], SIZE * 0.18 - box[1]), WORD, fill="black", font=font)
 
     # Exactly N solid red circles, equal size, evenly spaced in one row across the lower half.

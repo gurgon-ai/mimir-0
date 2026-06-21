@@ -346,9 +346,10 @@ def roster_for(
     qualifies yet (run a benchmark) — an empty roster, never a silent stub. Unknown role raises.
     """
     if role in _POOL_ROLES:
-        return council_roster(
+        roster: list[dict[str, Any]] = council_roster(
             storage, size=n, disabled=disabled, disabled_nodes=disabled_nodes
         )["roster"]
+        return roster
     if role not in ROLE_NEEDS:
         raise ValueError(f"unknown role {role!r}; known: {sorted(ROLE_NEEDS)}")
     by_model = _collapse_by_model(storage, disabled or set(), disabled_nodes or set())

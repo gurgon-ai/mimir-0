@@ -26,6 +26,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Any
 
 log = logging.getLogger("mimir.sleep_cycle")
 
@@ -96,8 +97,8 @@ def run_cycle(
     clock: Callable[[], datetime],
     window_start: str,
     window_end: str,
-    load_state: Callable[[], dict],
-    save_state: Callable[[dict], None],
+    load_state: Callable[[], dict[str, Any]],
+    save_state: Callable[[dict[str, Any]], None],
     is_busy: Callable[[], bool] = lambda: False,
     force: bool = False,
 ) -> CycleReport:
@@ -121,7 +122,7 @@ def run_cycle(
         save_state(state)
 
     report = CycleReport(date=today)
-    phase_status: dict = state.setdefault("phases", {})
+    phase_status: dict[str, Any] = state.setdefault("phases", {})
 
     for phase in phases:
         if phase_status.get(phase.name) == "completed":

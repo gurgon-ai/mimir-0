@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from ..embed.base import Embedder, cosine
 from ..model.gateway import ModelGateway
 from ..storage.gateway import StorageGateway
-from ..storage.models import EvidenceTier, MemoryKind
+from ..storage.models import EvidenceTier, MemoryKind, Triple
 from ..storage.repo import browse_triples, list_memories
 from .sleep import FUNCTIONAL_RELATIONS, NEAR_DUP_COSINE
 
@@ -96,7 +96,7 @@ def _is_additive(relation: str) -> bool:
 
 def _graph_conflicts(storage: StorageGateway) -> list[Conflict]:
     triples = browse_triples(storage, limit=10_000)
-    groups: dict[tuple[str, str, str], list] = {}
+    groups: dict[tuple[str, str, str], list[Triple]] = {}
     for triple in triples:
         relation = _norm(triple.relation)
         if relation in FUNCTIONAL_RELATIONS:

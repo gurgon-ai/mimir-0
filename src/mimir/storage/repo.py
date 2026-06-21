@@ -134,7 +134,8 @@ def update_memory(
 
     Only the provided fields change. ``embedding`` is left as-is; a re-embed on text change is a
     later refinement (recall still works on the old vector + keyword overlap)."""
-    sets, params = [], []
+    sets: list[str] = []
+    params: list[Any] = []
     if text is not None:
         sets.append("text = ?")
         params.append(text)
@@ -277,7 +278,7 @@ def prune_forum_threads(gateway: StorageGateway, keep: int) -> int:
 
 # -- notebooks: lossless, name-addressable working memory (docs/EXTENSIBILITY.md) -----
 
-def _notebook_row(row: sqlite3.Row | tuple) -> Notebook:
+def _notebook_row(row: sqlite3.Row | tuple[Any, ...]) -> Notebook:
     return Notebook(notebook_id=row[0], owner=row[1], title=row[2], body_md=row[3],
                     created_at=row[4], updated_at=row[5])
 
@@ -365,7 +366,7 @@ _MS_COLS = ("milestone_id, title, statement, status, is_current_config, occurred
             "superseded_by, distinctive_tokens, provenance, confidence, created_at, updated_at")
 
 
-def _milestone_row(row: sqlite3.Row | tuple) -> Milestone:
+def _milestone_row(row: sqlite3.Row | tuple[Any, ...]) -> Milestone:
     return Milestone(
         milestone_id=row[0], title=row[1], statement=row[2], status=row[3],
         is_current_config=bool(row[4]), occurred_at=row[5], superseded_by=row[6],
@@ -417,7 +418,8 @@ def list_milestones(
 ) -> list[Milestone]:
     """Milestones, newest-state first. By default excludes superseded ones; ``current_only`` keeps
     only the live current-config set; ``statuses`` filters by lifecycle status."""
-    clauses, params = [], []
+    clauses: list[str] = []
+    params: list[Any] = []
     if not include_superseded:
         clauses.append("superseded_by IS NULL")
     if current_only:
