@@ -23,6 +23,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from ..storage.gateway import StorageGateway
 from ..storage.models import MemoryKind, Milestone
@@ -203,7 +204,7 @@ def reconcile(storage: StorageGateway, *, dry_run: bool = False) -> ReconcileRep
     return report
 
 
-def make_timeline_source(storage: StorageGateway):
+def make_timeline_source(storage: StorageGateway) -> str:
     """Kept for symmetry/testing; the brain injects the timeline as a top-attention section directly
     (it's authoritative current state, not an ambient connector section)."""
     return timeline_text(storage)
@@ -214,7 +215,7 @@ def make_milestone_tool(storage: StorageGateway) -> Tool:
     ("we finished the migration today"). Non-actuating (it writes the brain's own STATE ledger, not
     the world), so safe under the no-hands rule (`state_changing=False`)."""
 
-    def _handle(args: dict, ctx: object) -> str:
+    def _handle(args: dict[str, Any], ctx: object) -> str:
         title = str(args.get("title", "")).strip()
         statement = str(args.get("statement", "")).strip()
         status = str(args.get("status", "done")).strip().lower()

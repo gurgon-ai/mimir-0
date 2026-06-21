@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
-# A chat message: {"role": "system"|"user"|"assistant", "content": "..."}.
-Message = dict[str, str]
+# A chat message: {"role": "system"|"user"|"assistant", "content": "..."}. Values are usually str,
+# but a vision turn carries "images": [b64, ...] (a list), so the value type is widened to Any.
+Message = dict[str, Any]
 
 _PARAMS_RE = re.compile(r"([\d.]+)\s*[bB]")
 

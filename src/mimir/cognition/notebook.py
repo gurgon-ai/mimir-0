@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from ..context.sections import ContextSource, Section, SectionTier, estimate_tokens
 from ..embed.base import Embedder
@@ -211,7 +212,7 @@ def make_notebook_tool(
     notebooks. **Non-actuating** (read/think/note — its own store, not the world), so it's safe
     under the no-hands rule (`state_changing=False`). Reads re-trigger recall when ``read_rag``."""
 
-    def _handle(args: dict, ctx: object) -> str:
+    def _handle(args: dict[str, Any], ctx: object) -> str:
         op = str(args.get("op", "")).strip().lower()
         if op in ("", "list", "index"):
             return index(storage, SELF) or "(no notebooks yet)"

@@ -15,6 +15,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from ..errors import IngestError
 
@@ -141,7 +142,7 @@ def _docx_block_items(parent: object) -> list[object]:
     return items
 
 
-def _docx_table_lines(table: object, seen: set) -> list[str]:
+def _docx_table_lines(table: object, seen: set[Any]) -> list[str]:
     """Render a table as readable rows — non-empty cells joined by ' | ', one line per row. Merged
     cells (which python-docx repeats per grid position) are de-duped via ``seen``; nested tables in
     a cell are recursed into.

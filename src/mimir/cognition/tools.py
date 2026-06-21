@@ -22,6 +22,7 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 log = logging.getLogger("mimir.tools")
 
@@ -47,8 +48,8 @@ class Tool:
 
     name: str
     description: str
-    handler: Callable[[dict, ActionContext], str]
-    schema: dict[str, dict] = field(default_factory=dict)  # {param: {"required": bool}}
+    handler: Callable[[dict[str, Any], ActionContext], str]
+    schema: dict[str, dict[str, Any]] = field(default_factory=dict)  # {param: {"required": bool}}
     state_changing: bool = False   # actuates the world → trust-gated (vs a read-only lookup)
     keywords: tuple[str, ...] = ()  # cheap pre-selection; empty = only offered if `always`
     always: bool = False            # offered every turn regardless of keywords
@@ -59,11 +60,11 @@ class ToolCall:
     """One invocation + its outcome — surfaced to the caller via ``TurnResult.actions``."""
 
     tool: str
-    args: dict
+    args: dict[str, Any]
     result: str = ""
     status: str = "ok"  # ok | unknown | error | blocked
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, Any]:
         return {"tool": self.tool, "args": self.args, "result": self.result, "status": self.status}
 
 
@@ -93,7 +94,7 @@ class ToolRegistry:
         return chosen[:limit]
 
 
-def validate_args(tool: Tool, args: dict) -> str | None:
+def validate_args(tool: Tool, args: dict[str, Any]) -> str | None:
     """A light schema check — required keys present. Returns an error message, or ``None`` if OK."""
     missing = [p for p, spec in tool.schema.items() if spec.get("required") and p not in args]
     return f"missing required arg(s): {', '.join(missing)}" if missing else None

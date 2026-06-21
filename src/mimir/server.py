@@ -35,7 +35,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
 from .brain import Mimir
@@ -273,7 +273,7 @@ class _Handler(BaseHTTPRequestHandler):
             elif route == "/api/documents":
                 folder = self.server.brain.config.documents_folder
                 abs_path = str(Path(folder).resolve()) if folder else None
-                exists = bool(folder) and Path(folder).is_dir()
+                exists = bool(folder and Path(folder).is_dir())
                 self._send_json({"folder": folder, "folder_abs": abs_path,
                                  "folder_exists": exists,
                                  "documents": self.server.brain.documents()})  # lock-free (kv read)
@@ -456,14 +456,14 @@ class _Handler(BaseHTTPRequestHandler):
             limit = max(1, min(200, int((params.get("limit") or ["50"])[0])))
         except ValueError:
             limit = 50
-        session = (params.get("session") or [None])[0] or None
+        session = (params.get("session") or [""])[0] or None
         return {"turns": self.server.brain.history(
             user="operator", limit=limit, session_id=session)}
 
     def _memory_action(self, body: dict[str, Any]) -> dict[str, Any]:
         """Edit or delete one memory from the graph viewer."""
         try:
-            mem_id = int(body.get("id"))
+            mem_id = int(cast("str | int", body.get("id")))
         except (TypeError, ValueError) as exc:
             raise ValueError("'id' (integer) is required") from exc
         action = str(body.get("action", "update")).strip()

@@ -80,7 +80,8 @@ class WikiSource:
 
     def _http_get(self, path: str) -> bytes:
         with urllib.request.urlopen(self._url + path, timeout=self._timeout) as resp:
-            return resp.read()
+            data: bytes = resp.read()
+        return data
 
     def search(self, query: str) -> list[dict[str, str]]:
         """Top articles for ``query`` as ``[{title, text}]`` — fail-open (``[]`` on any error).

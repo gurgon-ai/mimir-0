@@ -52,7 +52,11 @@ class EmbeddingMode(Enum):
 class Embedder(Protocol):
     """Anything that can turn text into a retrieval vector — or decline to (degraded)."""
 
-    mode: EmbeddingMode
+    @property
+    def mode(self) -> EmbeddingMode:
+        """The embedder's mode (bootstrap/endpoint/degraded). A property so both plain-attribute
+        and @property implementers satisfy the protocol (e.g. the ResilientEmbedder wrapper)."""
+        ...
 
     def embed(self, text: str) -> list[float] | None:
         """Return a vector for ``text``, or ``None`` if this embedder produces no vectors."""

@@ -320,7 +320,7 @@ _VISION_PROBE = Path(__file__).resolve().parents[3] / "assets" / "vision_probe.p
 # be guessed) and carries most weight; counting the shapes is lighter (a text model could guess it).
 # Passing EITHER case counts as having vision — the board bands it 🟡 (partial) and the vision role
 # admits it (see `_VISION_FLOOR`); both cases → ✅. A text model that sees nothing scores 0 → ❌.
-_VISION_CASES = [
+_VISION_CASES: list[tuple[str, Callable[[str], bool], float]] = [
     ("What single word is written in this image? Reply with just the word.",
      lambda out: "glyphon" in out.lower(), 0.6),
     ("How many red circles are in this image? Reply with only the number.",
@@ -493,10 +493,11 @@ def benchmark_model(
                     else {"num_ctx": num_ctx, "temperature": temp})
             return lambda messages: scorer.chat(model_name, messages, dict(opts))
 
-        def timed_latency(messages: list[Message]) -> tuple[str, int, int]:
+        def _timed(messages: list[Message]) -> tuple[str, int, int]:
             # Greedy + Ollama's own decode metrics → load-immune TPS (DESIGN §4).
             return scorer.chat_timed(
                 model_name, messages, {"num_ctx": num_ctx, "temperature": 0.0})
+        timed_latency: Callable[[list[Message]], tuple[str, int, int]] | None = _timed
 
         def _warm() -> None:
             warmer.chat(model_name, [{"role": "user", "content": "ok"}],
@@ -842,7 +843,7 @@ def benchmark_fleet(
         elif chosen is None:
             order = []
         else:
-            order = [chosen] + [n for n in cands if n != chosen]
+            order = [chosen, *(n for n in cands if n != chosen)]
 
         if progress is not None:   # the model NOW entering scoring (not one that just finished)
             with state_lock:

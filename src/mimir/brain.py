@@ -26,7 +26,7 @@ from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .cognition import notebook as notebook_mod
 from .cognition.bake import bake, normalize_speaker_kind
@@ -149,7 +149,7 @@ from .prompts import (
     OUTPUT_CHECK_SYSTEM,
     VISION_DESCRIBE_SYSTEM,
 )
-from .retrieval.hybrid import retrieve
+from .retrieval.hybrid import ScoredMemory, retrieve
 from .sanitize import StreamTagStripper, strip_epistemic_tags
 from .storage.gateway import StorageGateway
 from .storage.models import (
@@ -236,7 +236,7 @@ def _latency_staleness(info: dict[str, object] | None) -> float:
     if info is None or not info.get("samples"):
         return float("inf")
     age = info.get("age_s")
-    return float(age) if age is not None else float("inf")
+    return float(cast(float, age)) if age is not None else float("inf")
 
 
 @dataclass(slots=True)
@@ -563,7 +563,8 @@ class Mimir:
             if e.node in nodes and "embed" not in e.model.lower():
                 by_node.setdefault(e.node, []).append(e.model)
         ctx = self.config.backend.benchmark_num_ctx if self.config.backend else 24576
-        params = {"num_ctx": ctx, "max_tokens": _PROBE_PREDICT, "__timeout_s__": _PROBE_TIMEOUT_S}
+        params: dict[str, object] = {
+            "num_ctx": ctx, "max_tokens": _PROBE_PREDICT, "__timeout_s__": _PROBE_TIMEOUT_S}
         for node, models in by_node.items():
             target = max(models, key=lambda m: _latency_staleness(snapshot.get((node, m))))
             self._model.probe_latency(node, target, _PROBE_PROMPT, params)
@@ -575,7 +576,8 @@ class Mimir:
         written — a mere seed never overwrites the qualification number it came from."""
         for (node, model), info in self._model.latency_snapshot().items():
             if info.get("samples", 0) and info.get("return_time") is not None:
-                update_catalogue_speed(self._storage, node, model, float(info["return_time"]))
+                update_catalogue_speed(
+                    self._storage, node, model, float(cast(float, info["return_time"])))
 
     def catalogue_speeds(self) -> dict[str, dict[str, float]]:
         """Per-model, per-node measured latency from the catalogue (the speed-test's output), as
@@ -653,7 +655,8 @@ class Mimir:
             return None
         return self._wiki.context(text)
 
-    def _history_messages(self, user: str | None, session_id: str) -> list[dict[str, str]]:
+    def _history_messages(self, user: str | None,
+                          session_id: str | None) -> list[dict[str, str]]:
         """The current session's recent exchanges as real chat messages, so the model has genuine
         continuity (not just summarized text) — scoped to this conversation so a new one starts
         clean (DESIGN §3a)."""
@@ -903,7 +906,7 @@ class Mimir:
             timeline = _enrich("timeline", self._timeline_text, "") or None  # authoritative STATE
 
             # 2. Assemble the prompt (a closure so draft-RAG can rebuild with more recall).
-            def assemble(rset: list) -> ContextBundle:
+            def assemble(rset: list[ScoredMemory]) -> ContextBundle:
                 return build_context(
                     query=text, user=user, identity=self.config.identity, retrieved=rset,
                     sentinel_note=note, embed_mode=self._embedder.mode,
@@ -1051,7 +1054,7 @@ class Mimir:
             extra_sections = self._build_context_sections(text, user)  # the sensory port
             timeline = _enrich("timeline", self._timeline_text, "") or None  # authoritative STATE
 
-            def assemble(rset: list) -> ContextBundle:
+            def assemble(rset: list[ScoredMemory]) -> ContextBundle:
                 return build_context(
                     query=text, user=user, identity=self.config.identity, retrieved=rset,
                     sentinel_note=note, embed_mode=self._embedder.mode,
@@ -1074,10 +1077,10 @@ class Mimir:
             # epistemic tags are stripped as we go (a tag may straddle deltas) inside the helper.
             reply = yield from self._stream_chat_with_fetch(bundle, lib_refs, user, sid, text)
             # Citation guard: append a fail-loud note (and stream it) if a cited source is unknown.
-            note = self._citation_note(reply)
-            if note:
-                yield note
-                reply += note
+            cite_note = self._citation_note(reply)
+            if cite_note:
+                yield cite_note
+                reply += cite_note
 
             record_access(self._storage, bundle.retrieved_ids)
             bake(
@@ -1561,16 +1564,17 @@ class Mimir:
             SleepPhase("health", min_minutes=1.0, run=self.digest_errors),  # cheap, no model
         ]
 
-    def _load_sleep_state(self) -> dict:
+    def _load_sleep_state(self) -> dict[str, Any]:
         raw = kv_get(self._storage, self._SLEEP_STATE_KEY)
         if not raw:
             return {}
         try:
-            return json.loads(raw)
+            data: dict[str, Any] = json.loads(raw)
+            return data
         except (ValueError, TypeError):  # corrupt checkpoint — start fresh, don't crash the cycle
             return {}
 
-    def _save_sleep_state(self, state: dict) -> None:
+    def _save_sleep_state(self, state: dict[str, Any]) -> None:
         kv_set(self._storage, self._SLEEP_STATE_KEY, json.dumps(state))
 
     def run_sleep_cycle(self, force: bool = False) -> CycleReport:
@@ -2007,7 +2011,7 @@ class Mimir:
 
     def pool_health(self) -> dict[str, Any]:
         """Backend pool health for the UI: nodes up, down, saturated, and per-node speeds."""
-        stats = self._model.get_stats()
+        stats: dict[str, Any] = self._model.get_stats()
         endpoints = list(stats.get("endpoints", []))
         return {
             "nodes": len(endpoints),
@@ -2622,9 +2626,9 @@ class Mimir:
         return out
 
     def _draft_rag(
-        self, bundle: ContextBundle, candidates: list[Memory], retrieved: list,
+        self, bundle: ContextBundle, candidates: list[Memory], retrieved: list[ScoredMemory],
         user: str | None, sid: str | None, text: str,
-    ) -> list:
+    ) -> list[ScoredMemory]:
         """Draft-RAG (synchronous two-pass recall). Generate a cheap, SHORT draft answer, then
         re-retrieve memory against *that draft* — it names what the reply is about, which the user's
         wording alone may miss — and fold the new hits into the recall set. Two LLM calls per turn
@@ -2676,7 +2680,7 @@ class Mimir:
                               top_k=max(1, self.config.library_claims_top_k))
         if not top:
             return None, [], 0
-        titles = {d.id: d.title for d in list_library_documents(self._storage)}
+        titles = {d.id: d.title for d in list_library_documents(self._storage) if d.id is not None}
         text = render_claims(top, titles) or None
         # After-reply Load chips: only the composite page(s) of *clearly relevant* claims — a weak
         # off-topic claim that merely cleared the recall floor shouldn't offer its book to load.
@@ -2839,7 +2843,8 @@ class Mimir:
     def library_overview(self) -> dict[str, Any]:
         """The Library for the UI: source documents (with claim counts) + composite pages."""
         docs = list_library_documents(self._storage)
-        counts = {d.id: len(claims_for_document(self._storage, d.id)) for d in docs}
+        counts = {d.id: len(claims_for_document(self._storage, d.id))
+                  for d in docs if d.id is not None}
         disabled = self._disabled_documents()
         timings = self._library_timings()
         ledger = self._load_docs_ledger()
@@ -2849,7 +2854,8 @@ class Mimir:
         for d in docs:
             by_path[d.path] = {
                 "id": d.id, "filename": d.filename, "title": d.title, "path": d.path,
-                "size_bytes": d.size_bytes, "claims": counts.get(d.id, 0),
+                "size_bytes": d.size_bytes,
+                "claims": counts.get(d.id, 0) if d.id is not None else 0,
                 "ingested_at": d.ingested_at, "enabled": d.path not in disabled,
                 "index_seconds": timings.get(d.path),
                 "chunks": None, "summary": None, "ingest_seconds": None,
@@ -2868,7 +2874,7 @@ class Mimir:
         return {
             "source_folder": folder,
             "source_folder_abs": str(Path(folder).resolve()) if folder else None,
-            "source_folder_exists": bool(folder) and Path(folder).is_dir(),
+            "source_folder_exists": bool(folder and Path(folder).is_dir()),
             "compose_folder": self.config.library_folder,
             "vision_model": self._vision_model() if self.config.vision_describe_images else None,
             "documents": sorted(by_path.values(), key=lambda r: (r.get("filename") or "").lower()),
@@ -2890,7 +2896,7 @@ class Mimir:
         except OSError as exc:  # missing/renamed file → a noted gap, never a crash (§10)
             log.warning("library: cannot load composite %s: %s", page.path, exc)
             markdown = page.summary
-        titles = {d.id: d.title for d in list_library_documents(self._storage)}
+        titles = {d.id: d.title for d in list_library_documents(self._storage) if d.id is not None}
         citations = [
             {"text": c.text, "title": titles.get(c.document_id, ""), "locator": c.locator}
             for c in claims_for_page(self._storage, page_id)
@@ -2917,7 +2923,8 @@ class Mimir:
         if not raw:
             return None
         try:
-            return json.loads(raw)
+            digest: dict[str, Any] = json.loads(raw)
+            return digest
         except (ValueError, TypeError):
             return None
 
