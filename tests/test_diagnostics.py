@@ -103,11 +103,10 @@ def test_backend_health_single_provider_is_quiet(brain: Mimir) -> None:
 
 
 def test_backend_degraded_surfaces_in_context(brain: Mimir) -> None:
-    from tests.test_model_pool import DownProvider, FleetProvider
-
     from mimir.config import RoleSpec
     from mimir.model.gateway import ModelGateway
     from mimir.model.pool import ProviderPool
+    from tests.test_model_pool import DownProvider, FleetProvider
 
     a = FleetProvider("A", ["m"])
     b = DownProvider("B", ["m"])
