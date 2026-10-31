@@ -36,6 +36,44 @@ much larger UI). Schema v9 → v24.
   `max_model_size_b` defaults to 30; `DEFAULT_TOP_K` 6 → 10; `[library] claims_top_k` 5 → 8; output-RAG
   and the citation guard are on by default.
 
+### Added (2026-10-31, from the production system's incident record)
+- `cognition/generation.py`: a guard at every store boundary. Sentinel, self-model and council refuse
+  to store an empty or placeholder generation; a council voice that failed is not answered,
+  synthesised or filed as a position.
+- Working memory is rebuilt from sources: the fold ARCHIVES the exchanges it summarises (kept out of
+  recall) and writes the summary from the last `SOURCE_WINDOW` of them, never from its own previous
+  text. A rejected fold saves nothing and archives nothing (it used to save an empty summary and
+  delete the exchanges).
+- `cognition/ledger.py`: the capability ledger. Every tool, burst task, sleep phase and idle loop is
+  registered at boot and touched when it runs (kv-persisted); never-fired, stale and always-failing
+  capabilities are findings in the system-health prompt section and the nightly digest;
+  `Mimir.capability_report()`.
+- Tools on the streaming path: `turn_stream` / `POST /api/turn/stream` offer tools, hold back the
+  marker, run the round and stream the final answer; `actions` ride on `done.introspect`.
+- `actions_followup` burst task: a refused or crashed tool call is put in front of the model on the
+  next turn as an unkept promise; only status `ok` counts as done. A handler's `refused:` result is
+  reported as `blocked`.
+- `Mimir.in_conversation()` and `[cognition] chat_window_s` (300): the sleep scheduler and the idle
+  latency prober stay clear for a window after the last turn, not just during one.
+- `cognition/names.py` and `[identity] known_names` / `name_variants` / `snap_names`: heard or
+  mistyped names snap to the household roster at the turn, before bake, graph or recall.
+- Ollama: `keep_alive` is a top-level field a role may set (`-1` = always warm); an empty body with
+  `done_reason == "length"` under thinking is retried once with thinking off; embeddings go in
+  batches of 128 and are shape-checked (a short or `None` batch raises instead of blanking).
+- `storage.models.is_system_generated`: the system's own musings, verdicts and reflections are kept
+  out of a narrative's facts, the self-model's knowledge counts (reported apart) and output-RAG
+  grounding.
+- The operational `num_ctx` now reaches `chat_with_model` / `chat_on_node` (council and background
+  calls), so no caller can force a warm model to reload with a different window.
+- The time intercept counts by position: the question must open the turn (after a short lead-in).
+- The notebook tool refuses an empty `write` (it would have wiped the note) and, with the milestone
+  tool, refuses mutations from a peer AI; `record_milestone` accepts `current_config` and
+  `is_current_config`.
+- `recent_by_kind` / `count_memories` exclude archived rows unless asked; `prune_kind` prunes only
+  live rows; `prune_archived` bounds the archived window.
+- Public-clean pass: employer document names, LAN addresses, a machine nickname and private paths
+  removed from code, tests and docs.
+
 ### Security
 - Integration API auth: `[server] api_token` / `MIMIR_API_TOKEN` (renamable via `api_token_env`) gates
   `/api/*` with a constant-time Bearer check; `cors_origins` for browser front-ends on other origins.
@@ -115,7 +153,7 @@ much larger UI). Schema v9 → v24.
 ### Validation
 - End-to-end on a live multi-node LAN Ollama fleet: document ingest → recall with provenance, a multi-family
   council verdict, clean consolidation, a full fleet benchmark. 501 tests; `python -m mimir.selftest` passes
-  on the mock provider with no model installed.
+  on the mock provider with no model installed. (523 tests as of the 2026-10-31 additions.)
 
 ## [0.1.0] — pre-alpha, feature-complete
 

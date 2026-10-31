@@ -493,6 +493,9 @@ peer_agents = ["mimir-home"]    # optional; identities known to be peer AIs. The
                                 # if named above. Callers can also self-declare per turn with the
                                 # API field speaker_kind="ai_peer" (default "human").
 
+# known_names / name_variants / snap_names — the household roster that heard or mistyped names are
+# snapped to at the turn (see mimir.toml.example [identity] for the shape and the rule).
+
 [embeddings]
 mode = "bootstrap"              # "bootstrap" | "endpoint" | "degraded"
 dim = 256                       # bootstrap vector size (ignored in endpoint mode)
@@ -512,6 +515,9 @@ keep_recent = 4                 # raw exchanges kept verbatim after a fold (the 
 [entity_graph]
 hops = 2                        # how far to traverse from a turn's entities (1–2); 0 disables
 max_facts = 8                   # max connected facts injected per turn
+
+[cognition]                     # background work keeps clear of the person
+# chat_window_s = 300           # seconds after the last turn that still count as "in conversation"
 
 [sleep]                         # the sleep cycle: consolidation + narratives in a nightly window
 enabled = true                  # the wall-clock scheduler (recommended on)

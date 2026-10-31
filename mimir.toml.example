@@ -21,6 +21,15 @@ text = "You are Mimir, a local-first assistant with an evidence-aware memory. Yo
 # also self-declare per turn via the API field speaker_kind="ai_peer" (default "human"); this list
 # is the operator-side enforcement so a known peer can't avoid it.
 # peer_agents = ["mimir-home"]
+# The household's known names (people, pets, places) and the mis-hearings or misspellings you have
+# confirmed for them. A name heard wrong splits one individual into two in every store, so names are
+# snapped to this roster at the turn, before memory, graph or recall see them (cognition/names.py):
+# confirmed variants anywhere; otherwise only a capitalised, non-sentence-initial word whose sound
+# matches exactly one known name. The operator, trusted users, identity anchors and the interview's
+# household/pets answers are on the roster automatically. snap_names = false turns it off.
+# known_names = ["Caitlin", "Cole", "Pepper"]
+# name_variants = { Caitlin = ["Katelyn", "Kaitlyn"], Cole = ["Kohl"] }
+# snap_names = true
 
 # Foundational identity anchors. Set them here for a non-interactive deployment, or leave them
 # out and run the interview: `python -m mimir.interview --config mimir.toml` (add --revise to
@@ -61,6 +70,12 @@ keep_recent = 4
 # and the max connected facts to inject. hops = 0 disables retrieval (triples are still stored).
 hops = 2
 max_facts = 8
+
+[cognition]
+# How long after the last turn the system still counts as "in conversation" (seconds). The sleep
+# scheduler and the idle latency prober stay out of the way for this long, not just while a turn is
+# in flight: someone who pauses to think is still in the conversation.
+# chat_window_s = 300
 
 [sleep]
 # The sleep cycle: heavy maintenance (dedup, salience/confidence decay, archival of stale
@@ -258,6 +273,8 @@ host = "http://localhost:11434"
 # you want on your node(s) and it picks per role. Concrete names override auto.
 
 [roles.chat]
+# keep_alive = -1   # keep this role's model loaded forever (Ollama top-level field; -1 = never unload).
+                    # One always-warm daily driver beats swapping; a swap destroys the KV cache.
 model = "llama3.1:8b"  # or "auto" to let Mimir pick the best installed chat model (benchmark-ranked)
 temperature = 0.7
 num_ctx = 8192

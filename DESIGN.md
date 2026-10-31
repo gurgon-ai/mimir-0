@@ -396,8 +396,12 @@ models are acceptable for a role*; routing decides *which model on which node an
   — Gemma@A, then Qwen@B. A **pinned** model is honoured exactly: a pin is never substituted.
 - **Storage gateway** — one dedicated writer thread, priority queue, coalescing + batching. Reads
   stay direct (SQLite WAL allows many readers, one writer). Eliminates write-lock contention.
-- **Attention governor** — a generic "foreground beats background" scheduler driven by software
-  signals (chat-in-flight / consolidation-running / model-reload-pending / idle).
+- **Attention governor** — "foreground beats background". Built today as two signals: the
+  turn-in-flight flag (the burst worker and the inner life yield to it) and a *chat window*
+  (`Mimir.in_conversation()`, `[cognition] chat_window_s`, default 300 s after the last turn) that the
+  sleep scheduler and the idle latency prober respect, because someone who pauses to think is still
+  in the conversation. The richer governor (consolidation-running / model-reload-pending signals,
+  pre-emption of an in-flight background call) remains **[proposed]**.
 
 ### 5a. The idle window — burst cognition + bidirectional RAG  **[engine landed → extending]**
 
@@ -411,8 +415,9 @@ Reference design (proven in the parent system, to be rebuilt public-clean):
 > the two task classes, the slot cap, interruptibility (an injected `is_busy` predicate), and
 > surfaces. The brain routes all post-response cognition (sentinel, self-model, working memory,
 > sleep/narratives) through it instead of N raw threads; `turn()` signals it, the next turn settles
-> it. Output-triggered RAG and the live inner-life loop (the first step of idle-takeover continuous
-> mode) have since landed below; the deep-idle two-voice dialogue is still to come.
+> it. Output-triggered RAG, the live inner-life loop and the deep-idle two-voice dialogue
+> (`cognition/deep_idle.py`) have all landed since. Idle takeover (lifting the slot cap after a long
+> quiet) has not. Every burst task is registered in the capability ledger and touched when it runs.
 
 **The burst worker — the idle window as a first-class, scheduled resource pool.** After each
 response the engine fires a *burst window* and drains a queue of background tasks, with these
@@ -645,21 +650,24 @@ needs.
   settles)_, ~~session history~~ _(landed: a durable, restorable conversation log replayed to the model
   for real continuity, grouped into selectable sessions)_, ~~the visual memory graph~~ _(landed: the
   chat pane flips to a drifting force-directed galaxy of memory blobs + entities — importance to the
-  centre, click to review/edit)_. Output-triggered (bidirectional) RAG + idle-takeover are the open §5a
-  extensions.
+  centre, click to review/edit)_, ~~output-triggered (bidirectional) RAG~~ _(landed, on by default)_.
+  Idle takeover is the open §5a extension.
 - **Adapters (separate extras/packages):** ~~a reference HTTP server~~ _(landed: a stdlib,
   zero-dependency reference web server + single-page UI — chat, the identity interview, document
-  ingest; `python -m mimir.server`)_, streaming, an optional voice adapter, and example plugins
-  (home-automation, etc.) that show the extension pattern without being core dependencies.
+  ingest; `python -m mimir.server`)_, ~~streaming~~ _(landed: `turn_stream` / `POST /api/turn/stream`,
+  with the tool round and the library fetch on the streaming path too)_, an optional voice adapter,
+  and example plugins (home-automation, etc.) that show the extension pattern without being core
+  dependencies.
 
 ---
 
 ## 9. Extending Mimir 0
 
-Three extension points, each with a tiny end-to-end example:
-- **Tool** — give the model an action it can call.
+Four extension ports (`docs/EXTENSIBILITY.md`), each with a tiny end-to-end example:
+- **Tool** — give the model an action it can call, through one guarded, trust-gated dispatcher.
 - **Provider** — wrap any chat/embeddings backend behind the gateway.
 - **Context source** — contribute a typed section to `build_context()`.
+- **Background reflex** — register a task on the burst worker.
 
 A 30-line working example earns more trust than an architecture diagram.
 
@@ -709,10 +717,17 @@ be the least-fragile, loudest-failing, self-testing part of the system.
 - **Governor fail-safe** — if scheduling signals glitch, default to throttling background, never
   starving foreground. Background tasks are idempotent/resumable and never advance a bookmark on a
   skipped run.
-- **Routing golden-set** — a small fixed battery of inputs that must always route to a given role;
-  alert on drift. Thresholds live in versioned config, not inline constants.
-- **Commitment tracking** — when the model says it will do something, a tool call is recorded or a
-  structured pending-commitment is created; a promise is never silently lost.
+- **Routing golden-set [proposed]** — a small fixed battery of inputs that must always route to a
+  given role; alert on drift. Thresholds live in versioned config, not inline constants.
+- **Commitment tracking [partial]** — a tool call that was refused or crashed is put in front of the
+  model on the next turn by the `actions_followup` burst task, and only a call with status `ok`
+  counts as done. A promise made in prose with no call behind it is still not detected.
+- **The capability ledger (`cognition/ledger.py`) [built]** — every tool, burst task, sleep phase
+  and idle loop is registered at boot and touched when it runs; never-fired (after a grace period),
+  stale and always-failing capabilities are findings in the system-health section and the nightly
+  digest. Silent feature death was the dominant bug class in the parent system.
+- **A guard at every store boundary (`cognition/generation.py`) [built]** — an empty or placeholder
+  generation is never stored, folded on, or filed as an argument.
 - **Proactivity is an isolated plugin** — idle/proactive behavior runs as a plugin whose failure
   cannot touch the core turn→bake→recall loop, with a proactivity budget and an easy off-switch.
 
@@ -723,6 +738,9 @@ a defect.
 ---
 
 ## 11. Status
+
+**0.2.0, 2026-10-31. Pre-alpha; everything below is built and runs.** The text that follows is the
+history of how the architecture landed, kept because it says what was verified and when.
 
 Pre-alpha. **The v0 spine is alive and the §6 acceptance loop passes green** (boot → bake → recall
 with provenance & evidence tier → async sentinel note), verified under an automated self-test and
@@ -736,8 +754,8 @@ an entity graph (subject–relation–object triples with 1–2 hop traversal), 
 across auto-discovered models), and procedural memory (learned trigger→procedure habits). The
 model backend is now a **distributed fleet** (DESIGN §5): it auto-discovers Ollama nodes on the LAN
 (zero setup on them — just `ollama serve`), catalogues their models, and routes each request to a
-node that has the model, with active health checks and least-loaded selection — so the brain can
-run on a tiny box and borrow GPUs over the network. The **qualification battery** (DESIGN §4) is
+node that has the model, with active health checks and expected-wait routing (measured latency ×
+load) — so the brain can run on a tiny box and borrow GPUs over the network. The **qualification battery** (DESIGN §4) is
 layered on top: a benchmark scores each model on a deterministic capability "IQ test" (talk / tools /
 code / reasoning / discipline / epistemics, with empirically-chosen reasoning cases that actually
 discriminate) and speed-tests every `(model, node)` pairing — filling the catalogue so model→role
@@ -746,3 +764,11 @@ drives **per-role recommendations** ("for chat, use X on node Y"). The whole DES
 is now implemented end-to-end; it remains pre-alpha and unhardened, but the spine, every typed
 knowledge layer, the async cognition, and the distributed/qualified model fleet are all live and
 verified against a real multi-node LAN.
+
+Since then (0.2.0): the integration API and its trust policy; four extension ports with the
+notebook and the milestone ledger as reference connectors; the burst worker, the wall-clock sleep
+cycle, the inner life and deep idle, self-directed deliberation with a forum; documents, the
+three-tier library, Kiwix; the qualifying tournament and placement matrix; and, from the parent
+system's incident record, the store-boundary guard, working memory rebuilt from sources, the
+capability ledger, tools on the streaming path with an unkept-action follow-up, the chat window,
+and names snapped at the door. 523 tests; `mypy --strict` clean.

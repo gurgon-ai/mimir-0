@@ -8,14 +8,14 @@ from mimir.cognition.citations import (
     unverified_citations,
 )
 
-KNOWN = {"Example Co OHS Manual.docx", "Example Co Safe Work Practices.docx"}
+KNOWN = {"Acme Group OHS Manual Nov 2024.docx", "Acme Group Safe Work Practices Nov 2024.docx"}
 
 
 def test_real_citation_to_a_held_document_passes() -> None:
     # Both the heading-locator and the comma-locator citation forms the model actually emits.
     reply = (
-        "Report it to your supervisor [Example Co OHS Manual, Worker Rights]. "
-        "Bag soaked laundry [Example Co Safe Work Practices.docx:Bloodborne Pathogens]."
+        "Report it to your supervisor [Acme Group OHS Manual Nov 2024, Worker Rights]. "
+        "Bag soaked laundry [Acme Group Safe Work Practices Nov 2024.docx:Bloodborne Pathogens]."
     )
     assert unverified_citations(reply, KNOWN) == []
     assert annotate_unverified_citations(reply, KNOWN) == reply  # untouched

@@ -131,10 +131,11 @@ Response:
 
 `POST /api/turn/stream` — same request body, a **Server-Sent-Events** stream: `token` events as the
 reply generates, then a final `done` event carrying `introspect`. Use this for low-latency voice/chat
-frontends. (Send the `Authorization` header here too.) **Note:** the single-round tool loop runs on
-the non-streaming `POST /api/turn` path, so the streaming `done` event does **not** carry `actions`
-yet — use `/api/turn` when you need the model to call tools (streaming tool support is a tracked
-follow-up in [`EXTENSIBILITY.md`](EXTENSIBILITY.md)).
+frontends. (Send the `Authorization` header here too.) The streaming path runs the same single-round
+tool loop as `/api/turn`: a reply that opens with a `<TOOL …>` marker is held back, the tools run
+through the guarded dispatcher, and the final answer is streamed with the results in context. The
+`done` event's `introspect` carries `actions` (`[{tool, status, result}]`), and a call that was
+refused or crashed is surfaced to the model on its next turn as an unkept promise.
 
 ## Examples
 
@@ -241,7 +242,7 @@ synthesized understanding, fetched on demand). Built in idle from the `[document
   those composites is added to that turn's context (what the UI's pin-to-chat / Load chips send). The
   turn response includes `"library_sources": [{page_id,title}]` — the pages the answer drew on.
 - **Model-driven fetch** (opt-in `[library] model_fetch`): the model may reply `<FETCH id=N>` to open
-  a page itself; the turn loads it and re-answers (capped, off by default; non-streaming path).
+  a page itself; the turn loads it and re-answers (capped, off by default; both paths).
 
 - `GET /api/notebooks` — the model's self-curated notebooks (lossless working memory):
   `{notebooks:[{title, owner, sections:[…], size, updated_at, body}]}`, newest first. Read-only

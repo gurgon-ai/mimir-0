@@ -8,28 +8,28 @@ policy violation, or an engineered message - see Limitations.
 
 ## Isolation checklist (run in order, every session)
 
-1. Confirm AI_System / Mimir is fully stopped:
+1. Confirm the production system (the private home AI this core came from) is fully stopped:
    `Get-Process | Where-Object { $_.ProcessName -match 'ollama|python' }`
    should show no `mimir_mcp.py` and no pre-existing `ollama.exe` you didn't
    start yourself for this experiment.
 2. Start a fresh Ollama server with `OLLAMA_HOST`/`OLLAMA_ORIGINS` unset (so it
    binds to the default `127.0.0.1:11434`, localhost-only):
    `ollama serve`
-3. This project lives in its own folder (`D:\AI_Revolution_Gym`), outside
-   `AI_System`, with its own `.venv` and no Git repo. Nothing here imports
+3. This project lives in its own folder, outside
+   the production system's tree, with its own `.venv` and no Git repo. Nothing here imports
    Mimir modules, reads its SQLite database, or writes into any path it
    indexes or backs up.
 4. **A venv is not a security boundary.** It isolates Python packages, not
    filesystem or network access. Don't treat this setup as sandboxing beyond
-   "keeps experiment files and dependencies out of AI_System's way."
+   "keeps experiment files and dependencies out of the production system's way."
 5. When done, stop the experiment's `ollama serve` before restarting
-   AI_System/Mimir's own Ollama instance, to avoid the two ever pointing at
+   the production system's own Ollama instance, to avoid the two ever pointing at
    the same running server at the same time.
 
 ## Setup
 
 ```powershell
-# from D:\AI_Revolution_Gym, with PYTHONPATH cleared for this shell
+# from the experiment folder, with PYTHONPATH cleared for this shell
 # (a stray system-wide PYTHONPATH pointing at unrelated software has been
 # seen to break Python's own `encodings` import - if `python -c "print(1)"`
 # fails with "Fatal Python error: Failed to import encodings module", check
@@ -111,4 +111,4 @@ the parsed tool choice and reason, a validity flag, the error type if any
 Autonomous agent chains, inter-agent propagation, iterative passage
 optimization toward "boundary-crossing," real tool execution, networked
 retrieval, persistent model memory, and any automatic integration with
-AI_System/Mimir.
+the private production system.

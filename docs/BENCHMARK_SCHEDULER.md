@@ -35,7 +35,7 @@ This ordering is why we choose a correct work-stealing design over a quick-but-l
 
 The objective is **distributed compute, not "use every box."** An edge earns a role only by having
 the capability **and** meeting latency. On one-big-box-plus-weak-edges hardware it is *correct* for
-everything to land on the host — the scheduler must converge there naturally, not fight it.
+everything to land on the big box — the scheduler must converge there naturally, not fight it.
 
 ## 2. Hard constraints
 
@@ -111,8 +111,8 @@ to claim and nothing that could be requeued. Every state change (`done`, requeue
 mechanism.
 
 **Why it's distributed-compute-correct.** Fast nodes finish batteries sooner → claim more; a weak
-edge that probes a big model finds it over `TEST_BUDGET`, requeues it, and the host picks it up. On
-a one-big-box rig the host ends up doing ~everything and the edges contribute a few cheap probes —
+edge that probes a big model finds it over `TEST_BUDGET`, requeues it, and the big box picks it up. On
+a one-big-box rig the big box ends up doing ~everything and the edges contribute a few cheap probes —
 exactly right. On a balanced fleet the work spreads and runs in parallel.
 
 ## 5. The claim policy (capability-aware)
@@ -162,9 +162,9 @@ for every model, and the cap is a final, user-facing-only filter.
 
 ### Distribution's payoff is parallelism, not "best model faster" — the placement matrix [built]
 
-The host almost always wins user-facing (best model, fastest). An edge earns its keep a *different*
+The big box almost always wins user-facing (best model, fastest). An edge earns its keep a *different*
 way: by running **background cognition concurrently** — council, sentinel, the nightly backlog — so
-the host stays free for the user. For that work latency barely matters (idle/capacity-bound), so the
+the big box stays free for the user. For that work latency barely matters (idle/capacity-bound), so the
 bar for an edge is **"can it run a qualified-enough model and return before the next idle tick,"** not
 "is it fast." A runner-up like gemma4:e4b returning in 4s on the macbook is useless for chat but a
 perfect **background worker**.
@@ -172,13 +172,13 @@ perfect **background worker**.
 So the finals produce a **placement matrix**, not a single champion:
 
 - **The column we were missing:** the scheduler tests each model's capability *once* (on whatever node
-  ran it — usually the host). The finals must then probe each qualified model's speed on the **other
+  ran it — usually the big box). The finals must then probe each qualified model's speed on the **other
   nodes it's installed on**, so we know *where each model can actually run*.
-- **User-facing roles** → best model on its fastest viable node (cap applies). Usually the host.
+- **User-facing roles** → best model on its fastest viable node (cap applies). Usually the big box.
 - **Idle/background roles** → **offload to an edge** when a capable-enough model runs there within a
-  *generous* background tolerance — freeing the host. The edges become the background-cognition fleet
+  *generous* background tolerance — freeing the big box. The edges become the background-cognition fleet
   (the council/sentinel/nightly work runs *off* the interactive box, in parallel).
-- **Provisioning gap, surfaced loudly:** if a capable runner-up is installed **only on the host**,
+- **Provisioning gap, surfaced loudly:** if a capable runner-up is installed **only on the big box**,
   the finals say so — *"qualified, but on no edge; pull it to an edge to use it as a background
   worker."* This is the bridge to auto-distributing models across the LAN fleet (the discover →
   qualify → distribute vision): qualification reveals *which* runner-ups are worth pushing to edges.
@@ -262,7 +262,7 @@ the live board fills in as nodes finish — and the per-model elapsed timer alre
    direct provider (no pool thrash).
 2. **The scheduler** (§4) wrapping the quality rounds — worker-per-node, claim/probe/test/requeue,
    termination. Tests: termination on a mock multi-node fleet; a too-slow node requeues to a fast
-   one; capability never scored from a timed-out attempt; one-big-box converges on the host.
+   one; capability never scored from a timed-out attempt; one big box converges on itself.
 3. **Finals speed round** (§7) — fill the per-node matrix (skipping recorded pairings), apply the cap,
    place roles.
 4. **Refinements** — per-node concurrency, capacity learning, re-qualify deltas.

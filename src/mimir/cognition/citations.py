@@ -56,7 +56,7 @@ def _looks_like_citation(bracket: str, title_norm: str) -> bool:
 
 def _matches_known(title_norm: str, known: list[tuple[str, set[str]]]) -> bool:
     """Does this citation title name a source the system holds? Substring either way, or ≥2 shared
-    meaningful words (so 'Example Co OHS Manual' still matches its file)."""
+    meaningful words (so 'Example OHS Manual Nov 2024' still matches its file)."""
     if not title_norm:
         return True  # nothing to check — don't accuse
     tt = _tokens(title_norm)

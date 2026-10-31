@@ -97,8 +97,13 @@ keyword/always-selected for the turn, so a tool-free deployment pays nothing.
 *Every* action funnels through one executor; safety lives there, so it can't be bypassed:
 - **Capability allow-list + arg-schema validation** — an unknown tool or a malformed call is refused,
   logged, never run.
-- **Confirmation gate for `state_changing` tools** — read-only tools (a clock, a lookup) run free;
-  an actuator can require an explicit approve step before it fires.
+- **Confirmation gate for `state_changing` tools [proposed]** — read-only tools (a clock, a lookup)
+  run free; an actuator could require an explicit approve step before it fires. Not built; today
+  the trust gate below is the only gate.
+- **A handler's refusal is `blocked`, not `ok`.** A handler that declines (it returns a string
+  beginning `refused:`) is reported with status `blocked`, so a post-turn worker never counts a
+  refusal as a kept promise. The built-in notebook and milestone tools refuse mutations from a peer
+  AI this way.
 - **Trust-gated actuation — the differentiator.** Mimir already classifies every speaker
   (`speaker_kind`, evidence tiers, `peer_agents`). A **peer AI or a non-primary/low-tier speaker is
   structurally barred from `state_changing` tools** — the same policy that stops a peer laundering a
@@ -231,9 +236,12 @@ optional, never a core dependency.)
   selection) + the guarded dispatcher (schema-validate, **trust-gating**, handler-error-as-string) +
   `actions` in `TurnResult`/`/api/turn` + a single-round invocation in `turn()` generalizing the
   `<FETCH>` mechanism. **[built]** The Notebook and Temporal Registry are two real connectors built on
-  it. Still proposed: multi-round ReAct (call-dedup, outcome logging), a confirmation gate for
-  state-changing tools, and tool-calling in the *streaming* turn (today's single-round loop is on the
-  non-streaming `turn()` path, so `/api/turn/stream` doesn't return `actions` yet).
+  it. Tool-calling on the *streaming* turn **[built 2026-10-31]**: `turn_stream` offers the same
+  tools, holds back the marker, runs the round and streams the final answer; `actions` ride on the
+  stream's `done.introspect`. The `actions_followup` burst task surfaces any refused or crashed call
+  on the next turn. Every tool is registered in the capability ledger (`Mimir.capability_report()`)
+  and touched when it runs. Still proposed: multi-round ReAct (call-dedup, outcome logging) and a
+  confirmation gate for state-changing tools.
 - **Phase 3 — packaging + API.** Config module-paths, `POST /api/event`, `GET /api/tools`, `actions`
   + `context` on `/api/turn`. **[proposed]**
 - **Phase 4 — ecosystem.** The MCP adapter + manifest/subprocess connectors. **[proposed]**

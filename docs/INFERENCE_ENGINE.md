@@ -291,8 +291,8 @@ This is the load-bearing rule for the distributed scheduler:
 - **Latency is per-(MODEL, NODE)**: recorded so we don't re-probe a pairing, and used **only for
   routing/placement** (does *this* box meet the user's `max_latency_s`?), never to gate capability.
 - **The objective is distributed compute, not "use every box."** On one-big-box-plus-weak-edges
-  hardware it is *correct* for everything to run on the host — shipping a 4B to a Pi at 5s when the
-  host does two 26Bs in that time is a loss. An edge earns a role only by having the capability
+  hardware it is *correct* for everything to run on the big box — shipping a 4B to a Pi at 5s when the
+  big box does two 26Bs in that time is a loss. An edge earns a role only by having the capability
   **and** meeting latency. The scheduler therefore: distributes to test fast, probes a node cheaply,
   and if it's too slow to bother → marks that (model, node) and **requeues the model to another
   node** (capability lands on the fastest node that can run it); per-node speed is recorded for
@@ -303,11 +303,11 @@ Extensions this engine adds:
 
 - **Recommended-first ordering [proposed].** Qualify trusted models before unknowns so the system is
   usable immediately and the trusted ones are available as judges.
-- **Known-as-judges → multi-family vote [partial].** Coherence is judged by a panel; today it is
-  guarded by a single canary pair **[built]**. The engine strengthens this: prefer *trusted* judges
-  (from the registry), and weight by **family diversity** — a true cross-family vote is more robust
-  than a single canary, but its confidence **scales with diversity** and must be reported honestly
-  (§10.6), not presented as rigorous on a single-family fleet.
+- **Known-as-judges → multi-family vote [proposed].** The coherence dimension and its canary pair
+  were removed (its column stays, NULL; see `BENCHMARK_SCHEDULER.md`): verifiable dimensions run at
+  temperature 0 instead. A judged dimension, if it returns, should prefer *trusted* judges (from the
+  registry) and weight by **family diversity**, with confidence reported as scaling with that
+  diversity (§10.6), never presented as rigorous on a single-family fleet.
 - **Sampling + confidence [proposed].** Concrete rule (no heavy stats): run *N* samples per
   dimension, keep the mean and a simple confidence bound. If the whole interval is above the floor →
   **pass**; entirely below → **fail**; if it straddles the floor → **needs_more_data** (run more
@@ -417,8 +417,9 @@ Engine additions:
 - **Local-first preference [partial].** When a LAN pool is enabled, a qualified *local* model is
   preferred for latency/privacy; remote nodes serve burst/overflow/edge. (Discovery defaults
   local-only **[built]**; explicit local-vs-remote preference within an enabled pool is **[proposed]**.)
-- **Speed-aware live selection [proposed].** Among equally-qualified options, pick by live
-  speed + least-loaded per call (the Phase-2 dynamic routing), not just a static per-role pick.
+- **Speed-aware live selection [built].** Among equally-qualified options the pool routes each call
+  by expected wait (measured latency × current load), refreshed by the idle latency prober (which
+  stays quiet while the operator is in conversation), not by a static per-role pick.
 - **Loud degradation [proposed].** If no qualified model is available for an identity role (all
   disabled/offline), the engine **refuses to silently run an unqualified model** and surfaces it
   structurally: the API returns a clear error (e.g. HTTP 503 with a structured body naming the role

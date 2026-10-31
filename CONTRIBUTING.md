@@ -21,6 +21,12 @@ bypass them.
 
 ## Fail loud, self-check, stay observable (DESIGN §10)
 
+Two rules added from the parent system's incident record (2026-10-31): **every store boundary that
+persists model output checks it first** (`cognition/generation.py`: an empty or placeholder
+generation is never stored, folded on or filed as an argument), and **every capability registers in
+the ledger** (`cognition/ledger.py`: a new tool, burst task, sleep phase or loop is registered at
+boot and touched when it runs, so it can be found when it stops).
+
 The disease this project guards against is *silence*. So:
 
 - **No bare `except`** in core without a re-raise or an explicit, logged downgrade. A swallowed

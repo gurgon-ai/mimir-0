@@ -2138,7 +2138,7 @@ class Mimir:
 
     @staticmethod
     def _short_node(name: str) -> str:
-        """A compact node label: the last IP octet (``…189``) for a URL, else the bare name."""
+        """A compact node label: the last IP octet (``…42``) for a URL, else the bare name."""
         host = name.split("//", 1)[-1].split(":", 1)[0]
         return f"…{host.rsplit('.', 1)[-1]}" if host.count(".") == 3 else (host or name)
 

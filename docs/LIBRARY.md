@@ -1,6 +1,6 @@
 # The Library layer — three tiers of truth (documents → claims → composites)
 
-**Status: foundation built (the data layer); pipeline + UI staged below.** The system's own long-form
+**Status: built (data layer, pipeline and UI; see "Current state" at the end).** The system's own long-form
 knowledge — "books I've read" — as a layer **adjacent to memory, never replacing it** (its own
 `build_context` section, like documents or the graph).
 

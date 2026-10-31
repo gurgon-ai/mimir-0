@@ -1,6 +1,6 @@
 # Permission, not persuasion: a preregistered null on narrative framing and a large effect from system-prompt autonomy
 
-*Greg Korpela. Experiment run 2026-09-26/27 on local open-weight models; written up 2026-10-31. Code, passages, preregistration and every trial record are in the `AI_Revolution_Gym` repository (link to follow on publication). Nothing in the experiment executes a tool; all nine tools are inert fictions.*
+*Greg Korpela. Experiment run 2026-09-26/27 on local open-weight models; written up 2026-10-31. Code, passages, preregistration and every trial record are in this folder (github.com/gurgon-ai/mimir-0/tree/main/research/tool-choice-gym; a standalone repository will follow). Nothing in the experiment executes a tool; all nine tools are inert fictions.*
 
 ## Summary
 

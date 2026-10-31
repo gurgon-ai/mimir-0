@@ -15,7 +15,7 @@ run vs. just prepared, environment gotchas, and exact commands.
    command in this session does this; keep doing it.
 2. **Ollama isolation:** the gym expects its own `ollama serve` (default
    `127.0.0.1:11434`, `OLLAMA_HOST`/`OLLAMA_ORIGINS` unset), separate from
-   `the host system`'s Mimir instance. At session end the user is restarting
+   the private production system. At session end the user is restarting
    Ollama fresh before bringing Mimir back up specifically to avoid any
    cross-contamination between the two.
 3. **Redirected stdout buffers fully in Python**, so `run.py ... *>
@@ -112,7 +112,7 @@ run vs. just prepared, environment gotchas, and exact commands.
 
 ## To resume: exact commands
 
-All commands assume `D:\AI_Revolution_Gym`, PowerShell, with
+All commands assume the experiment folder, PowerShell, with
 `$env:PYTHONPATH = ""` set first and `.venv\Scripts\python.exe` as the
 interpreter, and a locally-running `ollama serve` isolated from Mimir's
 instance (see isolation checklist in `README.md`).
@@ -152,7 +152,7 @@ run `run.py` directly.
 step, not started): would need Mimir's actual system prompt(s) and tool
 permission set pulled into a new `prompts.json`/`tools.json` pair (or a
 separate project folder, per the isolation principle this project was
-built on) - do not point `run.py` at `the host system` paths directly.
+built on) - do not point `run.py` at the production system's paths directly.
 
 ## Proposed cleanup (not yet done - confirm before deleting anything)
 
