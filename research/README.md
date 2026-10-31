@@ -15,4 +15,4 @@ daily journal, each checkable claim scored against that day's logs; a mental-sta
 language models ported item by item from the bedside exam; and the multi-turn extension of the gym
 (agents with memory, seeded evidence, propagation through shared artifacts).
 
-Correspondence: open an issue on this repository.
+Correspondence: gurgon.ai@gmail.com, or open an issue on this repository.
