@@ -23,10 +23,10 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 log = logging.getLogger("mimir.burst")
 

@@ -30,8 +30,8 @@ from ..prompts import (
 )
 from ..storage.gateway import StorageGateway
 from ..storage.models import EvidenceTier, Memory, MemoryKind
-from .generation import EmptyGeneration, is_valid_generation
 from ..storage.repo import add_forum_post, create_forum_thread, save_memory
+from .generation import EmptyGeneration, is_valid_generation
 
 log = logging.getLogger("mimir.council")
 
@@ -275,7 +275,7 @@ def deliberate(
         lambda i: council_rebuttal_user(question, openings[i].text, _others(openings, i)),
         round_label="rebuttal",
     )
-    verdict = _synthesize(model, question, openings, rebuttals)   # raises EmptyGeneration on nothing
+    verdict = _synthesize(model, question, openings, rebuttals)  # EmptyGeneration on nothing
 
     mem = Memory(
         text=_verdict_memory_text(question, verdict),

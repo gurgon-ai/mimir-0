@@ -15,10 +15,10 @@ import logging
 
 from ..model.gateway import ModelGateway
 from ..prompts import SENTINEL_SYSTEM
-from .generation import require_generation
 from ..storage.gateway import StorageGateway
 from ..storage.models import EvidenceTier, Memory, MemoryKind
 from ..storage.repo import save_memory
+from .generation import require_generation
 
 log = logging.getLogger("mimir.sentinel")
 

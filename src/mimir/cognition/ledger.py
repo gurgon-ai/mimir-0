@@ -4,7 +4,8 @@ Silent feature death was the dominant bug class in the production system this co
 tool refused by a gate for months behind an intercept that caught most requests; a watcher that
 trusted an HTTP probe instead of its process handle; a post-turn task that skipped itself. Nothing
 anywhere was different for any of it, because nothing recorded that a capability had stopped
-firing. A system that cannot feel a part of itself stop cannot fix it, report it, or route around it.
+firing. A system that cannot feel a part of itself stop cannot fix it, report it, or route
+around it.
 
 This is the sense. Every capability the brain exposes — tools, burst tasks, sleep phases, the idle
 loops — is *registered* here at boot and *touched* whenever it runs. The ledger persists in the kv
@@ -16,6 +17,7 @@ the system-health prompt section and the nightly digest; the operator sees them 
 Touching is cheap (a dict write and one small kv write) and never raises — a ledger fault must not
 break the capability it was recording (DESIGN §10).
 """
+
 from __future__ import annotations
 
 import json
@@ -31,8 +33,8 @@ from ..storage.repo import kv_get, kv_set
 log = logging.getLogger("mimir.ledger")
 
 KV_KEY = "capability_ledger"
-DEFAULT_GRACE_S = 7 * 86400          # a registered capability may be quiet this long after first seen
-DEFAULT_STALE_AFTER_S = 14 * 86400   # a capability that HAS fired is stale after this much silence
+DEFAULT_GRACE_S = 7 * 86400  # a registered capability may be quiet this long after first seen
+DEFAULT_STALE_AFTER_S = 14 * 86400  # a capability that HAS fired is stale after this much silence
 
 
 @dataclass(slots=True)
@@ -51,8 +53,12 @@ class Entry:
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "kind": self.kind, "name": self.name, "registered_at": self.registered_at,
-            "last_fired": self.last_fired, "last_ok": self.last_ok, "count": self.count,
+            "kind": self.kind,
+            "name": self.name,
+            "registered_at": self.registered_at,
+            "last_fired": self.last_fired,
+            "last_ok": self.last_ok,
+            "count": self.count,
             "failures": self.failures,
         }
 
@@ -61,13 +67,18 @@ class Entry:
 class Finding:
     kind: str
     name: str
-    status: str          # "never" | "stale" | "failing"
+    status: str  # "never" | "stale" | "failing"
     detail: str
     age_s: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
-        return {"kind": self.kind, "name": self.name, "status": self.status,
-                "detail": self.detail, "age_s": self.age_s}
+        return {
+            "kind": self.kind,
+            "name": self.name,
+            "status": self.status,
+            "detail": self.detail,
+            "age_s": self.age_s,
+        }
 
 
 @dataclass
@@ -90,10 +101,13 @@ class CapabilityLedger:
             data = json.loads(raw)
             for key, d in (data or {}).items():
                 self._entries[key] = Entry(
-                    kind=str(d.get("kind", "")), name=str(d.get("name", "")),
+                    kind=str(d.get("kind", "")),
+                    name=str(d.get("name", "")),
                     registered_at=float(d.get("registered_at") or 0.0),
-                    last_fired=d.get("last_fired"), last_ok=d.get("last_ok"),
-                    count=int(d.get("count") or 0), failures=int(d.get("failures") or 0),
+                    last_fired=d.get("last_fired"),
+                    last_ok=d.get("last_ok"),
+                    count=int(d.get("count") or 0),
+                    failures=int(d.get("failures") or 0),
                 )
         except Exception as exc:  # a corrupt ledger must not take the brain down; start fresh
             log.warning("ledger: could not load (%s); starting empty", exc)
@@ -140,7 +154,10 @@ class CapabilityLedger:
             return sorted(self._entries.values(), key=lambda e: (e.kind, e.name))
 
     def review(
-        self, *, grace_s: float = DEFAULT_GRACE_S, stale_after_s: float = DEFAULT_STALE_AFTER_S,
+        self,
+        *,
+        grace_s: float = DEFAULT_GRACE_S,
+        stale_after_s: float = DEFAULT_STALE_AFTER_S,
         now: float | None = None,
     ) -> list[Finding]:
         """What has gone quiet. ``never``: registered longer than ``grace_s`` ago and never fired.
@@ -152,17 +169,34 @@ class CapabilityLedger:
             if e.last_fired is None:
                 age = t - e.registered_at
                 if age >= grace_s:
-                    out.append(Finding(e.kind, e.name, "never",
-                                       f"registered {age / 86400:.0f} d ago, never fired", age))
+                    out.append(
+                        Finding(
+                            e.kind,
+                            e.name,
+                            "never",
+                            f"registered {age / 86400:.0f} d ago, never fired",
+                            age,
+                        )
+                    )
                 continue
             silent = t - e.last_fired
             if silent >= stale_after_s:
-                out.append(Finding(e.kind, e.name, "stale",
-                                   f"last fired {silent / 86400:.0f} d ago", silent))
-            elif e.failures >= 3 and (e.last_ok is None or e.last_ok < e.last_fired) \
-                    and e.count >= 3 and e.failures >= e.count:
-                out.append(Finding(e.kind, e.name, "failing",
-                                   f"{e.failures} run(s), none succeeded", silent))
+                out.append(
+                    Finding(
+                        e.kind, e.name, "stale", f"last fired {silent / 86400:.0f} d ago", silent
+                    )
+                )
+            elif (
+                e.failures >= 3
+                and (e.last_ok is None or e.last_ok < e.last_fired)
+                and e.count >= 3
+                and e.failures >= e.count
+            ):
+                out.append(
+                    Finding(
+                        e.kind, e.name, "failing", f"{e.failures} run(s), none succeeded", silent
+                    )
+                )
         return out
 
     def render(self, findings: list[Finding]) -> str:

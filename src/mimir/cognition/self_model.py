@@ -20,10 +20,10 @@ from dataclasses import dataclass, field
 
 from ..model.gateway import ModelGateway
 from ..prompts import SELF_MODEL_SYSTEM
-from .generation import require_generation
 from ..storage.gateway import StorageGateway
 from ..storage.models import EvidenceTier, Memory, MemoryKind, is_system_generated
 from ..storage.repo import count_memories, list_memories, recent_by_kind, save_memory
+from .generation import require_generation
 from .identity import current_anchors, render_anchors
 
 log = logging.getLogger("mimir.self_model")

@@ -79,7 +79,10 @@ from .cognition.inner_life import (
     pick_stimulus,
     should_think,
 )
+from .cognition.ledger import CapabilityLedger
 from .cognition.library import compose_page, extract_claims, render_claims, retrieve_claims
+from .cognition.names import Roster
+from .cognition.names import snap as snap_names
 from .cognition.narratives import render_recent_history, run_narrative_cycle
 from .cognition.notebook import make_index_source, make_notebook_tool
 from .cognition.onboarding import (
@@ -99,11 +102,7 @@ from .cognition.self_model import synthesize_self_model
 from .cognition.sentinel import run_sentinel
 from .cognition.sleep import SleepReport, consolidate
 from .cognition.sleep_cycle import CycleReport, in_window, run_cycle
-from .cognition.ledger import CapabilityLedger
-from .cognition.names import Roster
-from .cognition.names import snap as snap_names
 from .cognition.sleep_cycle import Phase as SleepPhase
-from .storage.models import is_system_generated
 from .cognition.temporal import (
     answer_time_query,
     gap_insight,
@@ -164,6 +163,7 @@ from .storage.models import (
     Memory,
     MemoryKind,
     Procedure,
+    is_system_generated,
 )
 from .storage.repo import (
     add_forum_post,
@@ -2920,7 +2920,9 @@ class Mimir:
             "chat", [{"role": "system", "content": system}, *history,
                      {"role": "user", "content": text}])
 
-        markers = ([("<FETCH", "fetch")] if do_fetch else []) + ([("<TOOL", "tool")] if tools else [])
+        markers = [("<FETCH", "fetch")] if do_fetch else []
+        if tools:
+            markers.append(("<TOOL", "tool"))
         first_raw: list[str] = []
         hit: str | None = None
         if markers:
@@ -2958,12 +2960,14 @@ class Mimir:
                 for c in actions:
                     self._ledger.touch("tool", c.tool, ok=(c.status == "ok"))
                 results = "\n".join(f"[{c.tool} → {c.status}] {c.result}" for c in actions)
-                log.info("tools: streamed round ran %s", ", ".join(f"{c.tool}:{c.status}" for c in actions))
+                log.info("tools: streamed round ran %s",
+                         ", ".join(f"{c.tool}:{c.status}" for c in actions))
                 gen = self._model.chat_stream(
                     "chat", [{"role": "system", "content": system}, *history,
                              {"role": "user", "content": text},
                              {"role": "assistant", "content": full},
-                             {"role": "user", "content": f"Tool results:\n{results}\n\nNow give your answer."}])
+                             {"role": "user",
+                              "content": f"Tool results:\n{results}\n\nNow give your answer."}])
             else:  # looked like a marker, parsed as nothing: show what the model said
                 for delta in [full]:
                     clean = stripper.feed(delta)

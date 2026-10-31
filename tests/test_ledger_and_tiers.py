@@ -2,11 +2,10 @@
 path, the unkept-action follow-up, the chat window, keep_alive, system-generated provenance kept
 out of knowledge, and names snapped at the door.
 """
+
 from __future__ import annotations
 
 import time
-
-import pytest
 
 from mimir.brain import Mimir
 from mimir.cognition.burst import BurstResult, BurstWorker, ResponseContext
@@ -17,8 +16,8 @@ from mimir.config import Config
 from mimir.storage.models import EvidenceTier, Memory, MemoryKind, is_system_generated
 from mimir.storage.repo import save_memory
 
-
 # -- ledger -------------------------------------------------------------------------------
+
 
 def test_ledger_registers_touches_reviews_and_persists(brain: Mimir) -> None:
     t = [1_000_000.0]
@@ -26,11 +25,11 @@ def test_ledger_registers_touches_reviews_and_persists(brain: Mimir) -> None:
     led.register("tool", "draw")
     led.register("tool", "notebook")
     led.touch("tool", "notebook", ok=True)
-    assert led.review() == []                                   # inside the grace period: quiet
+    assert led.review() == []  # inside the grace period: quiet
     t[0] += 8 * 86400
     found = {(f.kind, f.name, f.status) for f in led.review()}
-    assert ("tool", "draw", "never") in found                   # registered, never fired
-    assert ("tool", "notebook", "stale") not in found           # 8 d silent is under the 14 d bar
+    assert ("tool", "draw", "never") in found  # registered, never fired
+    assert ("tool", "notebook", "stale") not in found  # 8 d silent is under the 14 d bar
     t[0] += 8 * 86400
     found = {(f.kind, f.name, f.status) for f in led.review()}
     assert ("tool", "notebook", "stale") in found
@@ -59,7 +58,8 @@ def test_burst_on_ran_reports_failures(monkeypatch) -> None:
 
     def boom() -> BurstResult:
         raise RuntimeError("x")
-    w.register("good", lambda ctx: (lambda: BurstResult()), base_priority=1.0)
+
+    w.register("good", lambda ctx: lambda: BurstResult(), base_priority=1.0)
     w.register("bad", lambda ctx: boom, base_priority=2.0)
     w.signal(ResponseContext(user_text="a", reply="b"))
     w.drain_once()
@@ -69,32 +69,45 @@ def test_burst_on_ran_reports_failures(monkeypatch) -> None:
 
 # -- tier three: an unkept action is surfaced, a kept one is not ------------------------------
 
+
 def test_a_failed_tool_call_is_put_in_front_of_the_next_turn(brain: Mimir) -> None:
     failed = ToolCall(tool="notebook", args={})
     failed.status, failed.result = "error", "tool 'notebook' failed: disk"
     ok = ToolCall(tool="record_milestone", args={})
     ok.status, ok.result = "ok", "recorded"
-    task = brain._actions_followup_task(ResponseContext(user_text="x", reply="y", actions=[failed, ok]))
+    task = brain._actions_followup_task(
+        ResponseContext(user_text="x", reply="y", actions=[failed, ok])
+    )
     assert task is not None
     out = task()
-    assert "did not run" in out.surface and "notebook" in out.surface and "record_milestone" not in out.surface
-    assert brain._actions_followup_task(ResponseContext(user_text="x", reply="y", actions=[ok])) is None
+    assert (
+        "did not run" in out.surface
+        and "notebook" in out.surface
+        and "record_milestone" not in out.surface
+    )
+    assert (
+        brain._actions_followup_task(ResponseContext(user_text="x", reply="y", actions=[ok]))
+        is None
+    )
 
 
 # -- streaming path runs a tool round --------------------------------------------------------
 
+
 def test_tools_run_on_the_streaming_path(brain: Mimir, monkeypatch) -> None:
     from mimir.cognition import notebook as nb
+
     calls: list[list] = []
 
     def fake_stream(role: str, messages: list, **k: object):
         calls.append(messages)
         has_results = any("Tool results:" in str(m.get("content")) for m in messages)
         if not has_results:
-            yield '<TOOL name="notebook" args={"op": "write", "title": "ideas", "body": "stream idea"}>'
+            yield ('<TOOL name="notebook" '
+                   'args={"op": "write", "title": "ideas", "body": "stream idea"}>')
             return
-        for tok in ("Noted", " in", " the", " notebook."):
-            yield tok
+        yield from ("Noted", " in", " the", " notebook.")
+
     monkeypatch.setattr(brain._model, "chat_stream", fake_stream)
     gen = brain.turn_stream("jot this in my notebook: stream idea", user="alex")
     tokens: list[str] = []
@@ -103,14 +116,15 @@ def test_tools_run_on_the_streaming_path(brain: Mimir, monkeypatch) -> None:
             tokens.append(next(gen))
     except StopIteration as stop:
         intro = stop.value
-    assert "".join(tokens) == "Noted in the notebook."           # the marker was never streamed
-    assert nb.read(brain._storage, "ideas") == "stream idea"       # the tool actually ran
+    assert "".join(tokens) == "Noted in the notebook."  # the marker was never streamed
+    assert nb.read(brain._storage, "ideas") == "stream idea"  # the tool actually ran
     assert intro["actions"][0]["tool"] == "notebook" and intro["actions"][0]["status"] == "ok"
     assert len(calls) == 2
     assert brain._ledger.snapshot()["tool:notebook"]["count"] >= 1
 
 
 # -- chat window ---------------------------------------------------------------------------
+
 
 def test_in_conversation_covers_the_window_after_a_turn(brain: Mimir) -> None:
     brain._turn_active = False
@@ -127,14 +141,17 @@ def test_in_conversation_covers_the_window_after_a_turn(brain: Mimir) -> None:
 
 # -- keep_alive is a top-level field -----------------------------------------------------------
 
+
 def test_keep_alive_goes_top_level_not_into_options(monkeypatch) -> None:
     from mimir.model.providers.ollama import OllamaProvider
+
     prov = OllamaProvider("http://x")
     seen: list[dict] = []
 
     def fake_post(path, payload, timeout=None):
         seen.append(payload)
         return {"message": {"content": "hi there"}, "done_reason": "stop"}
+
     monkeypatch.setattr(prov, "_post", fake_post)
     prov.chat("m", [{"role": "user", "content": "q"}], {"keep_alive": -1, "num_ctx": 8192})
     assert seen[0]["keep_alive"] == -1 and "keep_alive" not in seen[0]["options"]
@@ -145,17 +162,28 @@ def test_keep_alive_goes_top_level_not_into_options(monkeypatch) -> None:
 
 # -- the system's own notes are not knowledge -------------------------------------------------
 
+
 def test_system_generated_provenance_is_kept_out_of_facts_and_self_model(brain: Mimir) -> None:
     assert is_system_generated("inner life") and is_system_generated("inner council")
     assert not is_system_generated("stated by alex") and not is_system_generated("conversation")
     from mimir.cognition.narratives import _gather_daily_material
     from mimir.cognition.self_model import build_brief, gather_signals
+
     now = time.time()
     for prov in ("stated by alex", "inner life"):
-        save_memory(brain._storage, Memory(text=f"A memory with provenance {prov} and some length.",
-                                           kind=MemoryKind.MEMORY, evidence_tier=EvidenceTier.INFERRED,
-                                           confidence=0.5, salience=1.0, embedding=None,
-                                           provenance=prov, user=None))
+        save_memory(
+            brain._storage,
+            Memory(
+                text=f"A memory with provenance {prov} and some length.",
+                kind=MemoryKind.MEMORY,
+                evidence_tier=EvidenceTier.INFERRED,
+                confidence=0.5,
+                salience=1.0,
+                embedding=None,
+                provenance=prov,
+                user=None,
+            ),
+        )
     material, _ = _gather_daily_material(brain._storage, now - 60)
     assert "stated by alex" in material and "provenance inner life" not in material
     sig = gather_signals(brain._storage)
@@ -163,6 +191,7 @@ def test_system_generated_provenance_is_kept_out_of_facts_and_self_model(brain: 
 
 
 # -- names at the door -------------------------------------------------------------------------
+
 
 def test_phonetic_keys_and_the_two_snap_tiers() -> None:
     assert phonetic_key("Katelyn") == phonetic_key("Caitlin") == phonetic_key("Kaitlyn")
@@ -172,15 +201,18 @@ def test_phonetic_keys_and_the_two_snap_tiers() -> None:
     r.add("Cole", ["Kohl"])
     r.add_from_text("Sam, and the horses Pepper and Rex")
     assert "pepper" in r.names and "sam" in r.names
-    assert snap("katelyn seems insistent. Draw Kohl and KATELYN together", r)[0] == \
-        "Caitlin seems insistent. Draw Cole and CAITLIN together"
-    assert snap("Draw Katelin by the gate please", r)[1] == [("Katelin", "Caitlin")]   # phonetic tier
-    assert snap("Code is what we write. The code compiles.", r)[1] == []         # sentence start
+    assert (
+        snap("katelyn seems insistent. Draw Kohl and KATELYN together", r)[0]
+        == "Caitlin seems insistent. Draw Cole and CAITLIN together"
+    )
+    assert snap("Draw Katelin by the gate please", r)[1] == [("Katelin", "Caitlin")]  # phonetic tier
+    assert snap("Code is what we write. The code compiles.", r)[1] == []  # sentence start
     assert snap("", r)[1] == []
 
 
-def test_names_are_snapped_at_the_turn_from_config(db_path: str, mock_config: Config,
-                                                   monkeypatch) -> None:
+def test_names_are_snapped_at_the_turn_from_config(
+    db_path: str, mock_config: Config, monkeypatch
+) -> None:
     mock_config.known_names = ["Caitlin"]
     mock_config.name_variants = {"Caitlin": ["Katelyn"]}
     m = Mimir(mock_config)
@@ -190,6 +222,7 @@ def test_names_are_snapped_at_the_turn_from_config(db_path: str, mock_config: Co
         def fake_chat(role: str, messages: list, **k: object) -> str:
             seen.append(messages[-1]["content"])
             return "Noted."
+
         monkeypatch.setattr(m._model, "chat", fake_chat)
         m.turn("Katelyn is asleep on the couch", user="g")
         assert any("Caitlin is asleep" in s for s in seen) and not any("Katelyn" in s for s in seen)

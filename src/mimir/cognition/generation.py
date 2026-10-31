@@ -10,14 +10,22 @@ the exchanges it had "summarised". The check lives here, once, and the writers c
 mean. It catches the empty string, whitespace, the council's own ``[unavailable: …]`` placeholder,
 and the handful of error-shaped prefixes a provider or dispatcher can hand back as text.
 """
+
 from __future__ import annotations
 
 MIN_CHARS = 8
 
 # Text that is a report of failure, not content. Lower-cased prefix match after stripping.
 _PLACEHOLDER_PREFIXES = (
-    "[unavailable", "[error", "[failed", "[model unavailable", "[no response",
-    "error:", "provider error", "<error", "unavailable:",
+    "[unavailable",
+    "[error",
+    "[failed",
+    "[model unavailable",
+    "[no response",
+    "error:",
+    "provider error",
+    "<error",
+    "unavailable:",
 )
 
 
