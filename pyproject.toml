@@ -51,6 +51,9 @@ addopts = "-q"
 line-length = 100
 src = ["src", "tests"]
 target-version = "py311"
+# research/ holds experiment scripts frozen as run (the gym's harness and analysis). They are
+# research artifacts, not the framework; reformatting them would alter what the write-ups cite.
+extend-exclude = ["research"]
 
 [tool.ruff.lint]
 # E722 = bare except. We ban it explicitly: DESIGN §10 — no silent swallow.
