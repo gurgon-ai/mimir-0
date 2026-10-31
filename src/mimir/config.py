@@ -123,6 +123,12 @@ class Config:
     # declare. A caller may also self-declare per-turn via the API's ``speaker_kind="ai_peer"``;
     # this list is the operator-side enforcement so a known peer can't avoid it. Empty = none.
     peer_agents: list[str] = field(default_factory=list)
+    # The household's known names (people, pets, places) beyond the operator and anchors, and the
+    # mis-hearings/misspellings the operator has confirmed for them. A name heard wrong splits one
+    # individual into two in every store; names are snapped at the door (cognition/names.py).
+    known_names: list[str] = field(default_factory=list)
+    name_variants: dict[str, list[str]] = field(default_factory=dict)
+    snap_names: bool = True
     # Foundational identity anchors (name/operator/location/purpose), set declaratively here
     # for non-interactive deployments. Re-established (upserted) at boot. The interview sets
     # the same anchors interactively. See cognition/identity.py.
@@ -163,6 +169,10 @@ class Config:
     # stores the thought as a low-confidence, decaying memory that "earns its way" back via ordinary
     # recall. OFF by default — it spends idle compute — and routed OFF the chat model so it never
     # slows a turn; the operator opts in and tunes the cadence from the UI. Cadence floors at 30s.
+    # How long after the last turn the system still counts as "in conversation": the idle latency
+    # prober, the sleep scheduler and the deep-idle loop stay out of the way for this long, so a
+    # person who pauses to think does not come back to a cold model or a busy card.
+    chat_window_s: float = 300.0
     inner_life_enabled: bool = False
     inner_life_cadence_s: float = 300.0        # at most one thought this often (default ~5 min)
     inner_life_idle_floor_s: float = 30.0      # stay quiet at least this long after a turn
@@ -392,6 +402,11 @@ def load_config(path: str | Path) -> Config:
         ),
         trusted_users=_as_str_list(identity_raw.get("trusted_users", [])),
         peer_agents=_as_str_list(identity_raw.get("peer_agents", [])),
+        known_names=_as_str_list(identity_raw.get("known_names", [])),
+        name_variants={
+            str(k): _as_str_list(v) for k, v in (identity_raw.get("name_variants") or {}).items()
+        },
+        snap_names=bool(identity_raw.get("snap_names", True)),
         identity_anchors={
             k: str(identity_raw[k]) for k in anchor_keys if k in identity_raw
         },
@@ -420,6 +435,7 @@ def load_config(path: str | Path) -> Config:
         inner_life_enabled=bool(raw.get("inner_life", {}).get("enabled", False)),
         inner_life_cadence_s=float(raw.get("inner_life", {}).get("cadence_s", 300.0)),
         inner_life_idle_floor_s=float(raw.get("inner_life", {}).get("idle_floor_s", 30.0)),
+        chat_window_s=float(raw.get("cognition", {}).get("chat_window_s", 300.0)),
         inner_life_check_interval_s=float(
             raw.get("inner_life", {}).get("check_interval_s", 20.0)
         ),

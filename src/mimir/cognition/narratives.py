@@ -31,7 +31,7 @@ from ..prompts import (
     NARRATIVE_WEEKLY_SYSTEM,
 )
 from ..storage.gateway import StorageGateway
-from ..storage.models import MemoryKind
+from ..storage.models import MemoryKind, is_system_generated
 from ..storage.repo import (
     get_narrative,
     list_memories,
@@ -74,7 +74,7 @@ def _gather_daily_material(storage: StorageGateway, cutoff_ts: float) -> tuple[s
         parts.append("Running summary and recent exchanges:\n" + wm)
     facts = [
         m for m in list_memories(storage, kind=MemoryKind.MEMORY)
-        if m.created_at and m.created_at >= cutoff_ts
+        if m.created_at and m.created_at >= cutoff_ts and not is_system_generated(m.provenance)
     ]
     if facts:
         lines = "\n".join(f"- {' '.join(m.text.split())}" for m in facts[:_FACTS_LIMIT])

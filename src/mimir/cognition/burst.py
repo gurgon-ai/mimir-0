@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from typing import Any
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -43,6 +44,7 @@ class ResponseContext:
     reply: str
     user: str | None = None
     turn_index: int = 0
+    actions: list[Any] | None = None   # the turn's tool calls (ToolCall), for the follow-up task
 
 
 @dataclass(slots=True)
@@ -83,9 +85,11 @@ class BurstWorker:
     def __init__(
         self, *, autonomous_slots: int = 5, is_busy: Callable[[], bool] | None = None,
         clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep,
+        on_ran: Callable[[str, bool], None] | None = None,
     ) -> None:
         self._slots = max(1, autonomous_slots)
         self._is_busy = is_busy or (lambda: False)
+        self._on_ran = on_ran   # (task name, succeeded) — the capability ledger listens here
         self._clock = clock
         self._sleep = sleep
         self._lock = threading.Lock()
@@ -218,8 +222,10 @@ class BurstWorker:
             result = task.fn() or BurstResult()
         except Exception as exc:  # one task's failure never aborts the window (§10)
             log.warning("burst: task %r failed: %s", task.name, exc)
+            self._notify(task.name, False)
             return None
         ran.append(task.name)
+        self._notify(task.name, True)
         with self._lock:
             self._last_ran[task.name] = self._clock()
             if result.surface:
@@ -228,6 +234,18 @@ class BurstWorker:
         return result
 
     # -- surfaces (drained into the next prompt) --------------------------------------
+
+    def _notify(self, name: str, ok: bool) -> None:
+        if self._on_ran is None:
+            return
+        try:
+            self._on_ran(name, ok)
+        except Exception as exc:  # the listener must never break the worker
+            log.warning("burst: on_ran listener failed: %s", exc)
+
+    def task_names(self) -> list[str]:
+        with self._lock:
+            return list(self._recurrings)
 
     def drain_surfaces(self) -> list[str]:
         """Pop and return the surfaces produced by completed tasks (for the next turn's prompt)."""

@@ -227,7 +227,7 @@ def make_notebook_tool(
                 related = "\n".join(f"- {m.text}" for m in mems[:4])
                 return passage + (f"\n\n(related from memory:\n{related})" if related else "")
             return read(storage, title, args.get("section")) or f"(no notebook {title!r})"
-        if op in ("write", "append", "edit", "rename", "delete") and ctx.speaker_kind != "human":
+        if op in ("write", "append", "edit", "rename", "delete") and getattr(ctx, "speaker_kind", "human") != "human":
             # The notebook is the brain's own working memory and any human in the room may use it;
             # a peer AI may read it but must not rewrite or wipe it (the same policy that keeps a
             # peer's claims out of trusted memory keeps it off the brain's notes).

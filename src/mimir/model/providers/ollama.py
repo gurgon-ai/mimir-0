@@ -56,6 +56,7 @@ class OllamaProvider:
         wall-clock estimate."""
         timeout, params = _split_timeout(params)
         think, opts = _split_think(params)
+        keep_alive, opts = _split_keep_alive(opts)
         payload = {
             "model": model,
             "messages": messages,
@@ -63,6 +64,8 @@ class OllamaProvider:
             "think": think,
             "options": _to_options(opts),
         }
+        if keep_alive is not None:
+            payload["keep_alive"] = keep_alive
         data = self._post("/api/chat", payload, timeout=timeout)
         content = _content_of(data)
         # With thinking on, the reasoning trace and the answer share num_predict. A model that
@@ -134,6 +137,7 @@ class OllamaProvider:
         """Stream a chat completion: Ollama's ``stream=true`` newline-delimited JSON deltas."""
         _timeout, params = _split_timeout(params)   # streaming uses the provider timeout; strip it
         think, opts = _split_think(params)
+        keep_alive, opts = _split_keep_alive(opts)
         payload = {
             "model": model,
             "messages": messages,
@@ -141,6 +145,8 @@ class OllamaProvider:
             "think": think,
             "options": _to_options(opts),
         }
+        if keep_alive is not None:
+            payload["keep_alive"] = keep_alive
         body = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             f"{self._host}/api/chat",
@@ -271,6 +277,14 @@ def _split_think(params: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
     opts = dict(params)
     think = opts.pop("think", False)
     return think, opts
+
+
+def _split_keep_alive(params: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+    """``keep_alive`` is a TOP-LEVEL Ollama field (how long the model stays loaded after the call;
+    ``-1`` = forever, ``0`` = unload now). A role that is meant to be the always-warm daily driver
+    sets ``keep_alive = -1`` in its params; left in ``options`` it would be silently ignored."""
+    opts = dict(params)
+    return opts.pop("keep_alive", None), opts
 
 
 def _to_options(params: dict[str, Any]) -> dict[str, Any]:

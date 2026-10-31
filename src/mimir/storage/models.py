@@ -59,6 +59,21 @@ class EvidenceTier(Enum):
         )
 
 
+# Provenance prefixes of memories the SYSTEM wrote about its own thinking (a musing, a council verdict,
+# a reflection). They are recallable on purpose, but they are not facts anyone stated: a daily
+# narrative's "facts learned", the self-model's "memories I hold" and the output-RAG grounding pass
+# must not count them as knowledge, or the system ends up citing itself to itself.
+SYSTEM_PROVENANCE_PREFIXES = (
+    "inner life", "deep idle", "inner council", "sleep deliberation", "sentinel reflection",
+    "self-model synthesis", "working-memory synthesis",
+)
+
+
+def is_system_generated(provenance: str | None) -> bool:
+    p = (provenance or "").strip().lower()
+    return any(p.startswith(x) for x in SYSTEM_PROVENANCE_PREFIXES)
+
+
 class MemoryKind(Enum):
     """What *role* a stored row plays in assembly.
 

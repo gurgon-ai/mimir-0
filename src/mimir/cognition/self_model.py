@@ -22,7 +22,7 @@ from ..model.gateway import ModelGateway
 from ..prompts import SELF_MODEL_SYSTEM
 from .generation import require_generation
 from ..storage.gateway import StorageGateway
-from ..storage.models import EvidenceTier, Memory, MemoryKind
+from ..storage.models import EvidenceTier, Memory, MemoryKind, is_system_generated
 from ..storage.repo import count_memories, list_memories, recent_by_kind, save_memory
 from .identity import current_anchors, render_anchors
 
@@ -41,11 +41,13 @@ class SelfSignals:
     distinct_users: int = 0
     reflections: int = 0
     recent_reflections: list[str] = field(default_factory=list)
-
+    own_notes: int = 0   # the system's own musings/verdicts, kept apart from knowledge
 
 def gather_signals(storage: StorageGateway) -> SelfSignals:
     """Read universal stats about the knowledge store — nothing domain-specific."""
-    memories = list_memories(storage, kind=MemoryKind.MEMORY)
+    all_rows = list_memories(storage, kind=MemoryKind.MEMORY)
+    own = [m for m in all_rows if is_system_generated(m.provenance)]
+    memories = [m for m in all_rows if not is_system_generated(m.provenance)]
     tier_counts = Counter(m.evidence_tier.key for m in memories)
     users = {m.user for m in memories if m.user}
     recent = recent_by_kind(storage, MemoryKind.SENTINEL_NOTE, limit=_RECENT_REFLECTIONS)
@@ -56,6 +58,7 @@ def gather_signals(storage: StorageGateway) -> SelfSignals:
         distinct_users=len(users),
         reflections=count_memories(storage, kind=MemoryKind.SENTINEL_NOTE),
         recent_reflections=[m.text for m in recent],
+        own_notes=len(own),
     )
 
 
@@ -69,6 +72,10 @@ def build_brief(signals: SelfSignals) -> str:
         f"{signals.distinct_users} user{'' if signals.distinct_users == 1 else 's'}."
     )
     lines = [summary]
+    if signals.own_notes:
+        lines.append(f"I also hold {signals.own_notes} note{'' if signals.own_notes == 1 else 's'} "
+                     "of my own thinking (musings, verdicts); those are mine, not knowledge anyone "
+                     "gave me, and I do not count them above.")
     if signals.tier_counts:
         breakdown = ", ".join(f"{k}: {v}" for k, v in sorted(signals.tier_counts.items()))
         lines.append(f"Evidence tiers held: {breakdown}.")

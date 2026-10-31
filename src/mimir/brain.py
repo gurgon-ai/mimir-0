@@ -99,7 +99,11 @@ from .cognition.self_model import synthesize_self_model
 from .cognition.sentinel import run_sentinel
 from .cognition.sleep import SleepReport, consolidate
 from .cognition.sleep_cycle import CycleReport, in_window, run_cycle
+from .cognition.ledger import CapabilityLedger
+from .cognition.names import Roster
+from .cognition.names import snap as snap_names
 from .cognition.sleep_cycle import Phase as SleepPhase
+from .storage.models import is_system_generated
 from .cognition.temporal import (
     answer_time_query,
     gap_insight,
@@ -385,8 +389,22 @@ class Mimir:
         # The burst worker: all post-response cognition (sentinel, self-model, working memory,
         # sleep) is scheduled through it — priority-ordered, slot-capped, interruptible — instead of
         # N raw threads (DESIGN §5a). Runs in the idle window after a reply; the next turn settles.
-        self._burst = BurstWorker(is_busy=lambda: self._turn_active)
+        # The capability ledger: every tool, burst task, sleep phase and idle loop is registered
+        # here and touched when it runs, so a part that stops firing shows up as a finding instead
+        # of as silence (cognition/ledger.py).
+        self._ledger = CapabilityLedger(self._storage)
+        self._burst = BurstWorker(
+            is_busy=lambda: self._turn_active,
+            on_ran=lambda name, ok: self._ledger.touch("burst", name, ok=ok),
+        )
         self._register_burst_tasks()
+        for _t in self._tools.all():
+            self._ledger.register("tool", _t.name)
+        for _n in self._burst.task_names():
+            self._ledger.register("burst", _n)
+        for _loop in ("inner_life", "deep_idle", "deliberation"):
+            self._ledger.register("loop", _loop)
+        self._roster_cache: tuple[float, Roster] | None = None
         self._burst.start()
         self._stop_idle = threading.Event()  # signals the idle latency heartbeat to stop
         self._idle_prober: threading.Thread | None = None
@@ -554,6 +572,8 @@ class Mimir:
         Bounded to one probe per idle node per cycle (the model with the oldest/absent sample, so
         coverage rotates), at the operational ``num_ctx`` so it doesn't trigger a KV-cache reload.
         """
+        if self.in_conversation():
+            return  # a probe loads a model on a node the person may be about to use
         nodes = set(self._model.idle_nodes())
         if not nodes:
             return
@@ -762,6 +782,10 @@ class Mimir:
         self._burst.register(name, factory, **kwargs)
 
     def register_tool(self, tool: Tool) -> None:
+        self._ledger.register("tool", tool.name) if hasattr(self, "_ledger") else None
+        return self._register_tool_impl(tool)
+
+    def _register_tool_impl(self, tool: Tool) -> None:
         """② Motor port: attach a tool the model can invoke (replaces a same-named tool). Calls run
         through the guarded dispatcher — state-changing tools are gated to trusted speakers."""
         self._tools.register(tool)
@@ -788,6 +812,8 @@ class Mimir:
             return reply, []
         ctx = self._action_context(user, speaker_kind)
         done = [dispatch(self._tools, call, ctx) for call in calls]
+        for c in done:
+            self._ledger.touch("tool", c.tool, ok=(c.status == "ok"))
         results = "\n".join(f"[{c.tool} → {c.status}] {c.result}" for c in done)
         final = strip_epistemic_tags(self._model.chat("chat", [
             {"role": "system", "content": sys_content},
@@ -835,6 +861,7 @@ class Mimir:
         # ``speaker_kind`` ("human"/"ai_peer") is the caller's declaration of what kind of speaker
         # this is; validate it up front so a bad value fails the turn cleanly (DESIGN §3b).
         normalize_speaker_kind(speaker_kind)
+        text = self._snap_names(text)
         # The foreground declares itself BEFORE waiting on the burst, so autonomous work that has
         # not started yet yields instead of being started under a waiting user; then settle the
         # previous turn's burst (sentinel note, self-model) so the prompt reflects it (DESIGN §5a).
@@ -978,7 +1005,7 @@ class Mimir:
         # 5. Fire the burst window: sentinel + any due self-model/working-memory/sleep, scheduled
         #    and run off the hot path (DESIGN §5a). The next turn settles it.
         self._burst.signal(ResponseContext(
-            user_text=text, reply=reply, user=user, turn_index=self._turn_count
+            user_text=text, reply=reply, user=user, turn_index=self._turn_count, actions=actions,
         ))
         return TurnResult(reply=reply, context=bundle, baked=baked, library_sources=lib_refs,
                           actions=actions)
@@ -997,6 +1024,7 @@ class Mimir:
         generator's *return value* (via ``StopIteration.value``) is ``context.introspect()``.
         """
         normalize_speaker_kind(speaker_kind)  # validate up front (DESIGN §3b), mirroring `turn`
+        text = self._snap_names(text)
         self._turn_active = True  # declared before the wait, as in `turn`
         self._burst.wait_idle()
         self._turn_count += 1
@@ -1078,7 +1106,9 @@ class Mimir:
                 bundle = assemble(retrieved)
             # Stream the reply (honoring an opt-in model fetch of a full library page); internal
             # epistemic tags are stripped as we go (a tag may straddle deltas) inside the helper.
-            reply = yield from self._stream_chat_with_fetch(bundle, lib_refs, user, sid, text)
+            stream_tools = self._tools.select(text) if self._tools.all() else []
+            reply, actions = yield from self._stream_chat_with_fetch(
+                bundle, lib_refs, user, sid, text, tools=stream_tools, speaker_kind=speaker_kind)
             # Citation guard: append a fail-loud note (and stream it) if a cited source is unknown.
             cite_note = self._citation_note(reply)
             if cite_note:
@@ -1105,10 +1135,13 @@ class Mimir:
             self._last_turn_at = time.time()  # start the inner-life idle floor (DESIGN §5a)
 
         self._burst.signal(ResponseContext(
-            user_text=text, reply=reply, user=user, turn_index=self._turn_count
+            user_text=text, reply=reply, user=user, turn_index=self._turn_count, actions=actions,
         ))
         intro = bundle.introspect()
         intro["library_sources"] = lib_refs
+        intro["actions"] = [
+            {"tool": a.tool, "status": a.status, "result": str(a.result)[:400]} for a in actions
+        ]
         return intro
 
     def _connected_facts(self, query: str, user: str | None) -> list[str]:
@@ -1269,6 +1302,99 @@ class Mimir:
                              trigger=lambda ctx: self.config.output_rag_enabled)
         self._burst.register("sleep", self._sleep_task, base_priority=60.0,
                              trigger=lambda ctx: self._due("sleep"))
+        # The third tier, in its honest form: a tool call that was refused or crashed is a promise
+        # still unkept. Put it in front of the model on the next turn so it is done another way or
+        # said plainly, rather than counted as handled because a call was attempted.
+        self._burst.register("actions_followup", self._actions_followup_task, base_priority=6.0,
+                             user_requested=True)
+
+    def _actions_followup_task(self, ctx: ResponseContext) -> Callable[[], BurstResult] | None:
+        unkept = [a for a in (ctx.actions or []) if getattr(a, "status", "ok") != "ok"]
+        if not unkept:
+            return None
+
+        def run() -> BurstResult:
+            lines = [f"- {a.tool}: {a.status} — {str(a.result)[:160]}" for a in unkept]
+            return BurstResult(surface=(
+                "Last turn you called a tool and it did not run:\n" + "\n".join(lines) +
+                "\nYou still owe the user that outcome: do it another way, or say plainly that you "
+                "could not. Do not describe it as done."))
+        return run
+
+    def capability_report(self) -> dict[str, Any]:
+        """Every registered capability with when it last fired, plus the findings (never fired
+        after the grace period, stale, failing). The operator's view of silent feature death."""
+        findings = self._ledger.review()
+        return {"entries": self._ledger.snapshot(), "findings": [f.as_dict() for f in findings]}
+
+    def in_conversation(self, now: float | None = None) -> bool:
+        """True while a turn is in flight or within ``chat_window_s`` of the last one. Background
+        work that would cost the person latency (a model probe, the sleep cycle) checks this, not
+        just the in-flight flag: someone who pauses to think is still in the conversation."""
+        t = time.time() if now is None else now
+        if self._turn_active:
+            return True
+        return bool(self._last_turn_at) and (t - self._last_turn_at) < self.config.chat_window_s
+
+    # -- names at the door (cognition/names.py) ------------------------------------------
+
+    def _roster(self) -> Roster:
+        """The household's known names: config, identity anchors, and the capitalised words of the
+        onboarding household/pets answers. Rebuilt at most once a minute."""
+        now = time.time()
+        if self._roster_cache and now - self._roster_cache[0] < 60.0:
+            return self._roster_cache[1]
+        r = Roster()
+        for n in self.config.known_names:
+            r.add(n)
+        for canon, vs in self.config.name_variants.items():
+            r.add(canon, vs)
+        if self.config.primary_user:
+            r.add(self.config.primary_user)
+        for u in self.config.trusted_users:
+            r.add(u)
+        try:
+            for key, value in (self.config.identity_anchors or {}).items():
+                if key in ("name", "operator"):
+                    r.add(str(value))
+            profile = self.onboarding_profile()
+            for row in profile if isinstance(profile, list) else []:
+                if isinstance(row, dict) and row.get("key") in ("household", "pets", "name",
+                                                                  "operator"):
+                    r.add_from_text(str(row.get("answer") or ""))
+        except Exception as exc:  # the roster is a convenience; never block a turn on it
+            log.debug("names: roster sources unavailable: %s", exc)
+        self._roster_cache = (now, r)
+        return r
+
+    def _snap_names(self, text: str) -> str:
+        if not self.config.snap_names or not text:
+            return text
+        try:
+            snapped, subs = snap_names(text, self._roster())
+        except Exception as exc:
+            log.warning("names: snap failed: %s", exc)
+            return text
+        if subs:
+            log.info("names: snapped %s", ", ".join(f"{a}->{b}" for a, b in subs[:6]))
+        return snapped
+
+    def _ledgered_phases(self, phases: list[SleepPhase]) -> list[SleepPhase]:
+        """Wrap each sleep phase so the ledger sees it run (or fail)."""
+        out: list[SleepPhase] = []
+        for ph in phases:
+            self._ledger.register("sleep_phase", ph.name)
+
+            def _run(_ph: SleepPhase = ph) -> object:
+                try:
+                    result = _ph.run()
+                except Exception:
+                    self._ledger.touch("sleep_phase", _ph.name, ok=False)
+                    raise
+                self._ledger.touch("sleep_phase", _ph.name, ok=True)
+                return result
+            out.append(SleepPhase(ph.name, ph.min_minutes, _run))
+        return out
 
     def _due(self, which: str) -> bool:
         """Whether a cadence task is due this turn (preserving the prior per-task schedules)."""
@@ -1338,6 +1464,7 @@ class Mimir:
         candidates = [
             m for m in list_memories(self._storage, user=user, kind=MemoryKind.MEMORY)
             if now - m.created_at > 10  # skip what was just baked from this turn (an echo)
+            and not is_system_generated(m.provenance)  # its own musings are not grounding
         ]
         scored = retrieve(text, query_vec, candidates, top_k=max(1, self.config.output_rag_top_k))
         if not scored:
@@ -1585,7 +1712,7 @@ class Mimir:
         the manual "run sleep" path. Otherwise honours the effective window and phase budgets."""
         _enabled, start, end = self._effective_window()
         return run_cycle(
-            self._sleep_phases(),
+            self._ledgered_phases(self._sleep_phases()),
             clock=lambda: local_now(self._tz()),
             window_start=start,
             window_end=end,
@@ -1635,7 +1762,7 @@ class Mimir:
                     state = self._load_sleep_state()
                     done_today = (state.get("date") == now.strftime("%Y-%m-%d")
                                   and state.get("completed"))
-                    if done_today or self._turn_active:
+                    if done_today or self.in_conversation():
                         continue
                     catch_up = (not in_window(now, start, end)) and now.hour < 12
                     if in_window(now, start, end) or catch_up:
@@ -1761,6 +1888,7 @@ class Mimir:
         self._last_thought_at = now
         self._last_thought_kind = stim.kind
         log.info("inner life: mused on %s (mem %s)", stim.kind, mem.id)
+        self._ledger.touch("loop", "inner_life")
         return {"ran": True, "kind": stim.kind, "thought": thought, "memory_id": mem.id}
 
     _COUNCIL_ESCALATION_COOLDOWN_S = 3600.0  # at most ~one inner-life-driven council per hour
@@ -1797,6 +1925,7 @@ class Mimir:
         self._last_thought_at = now
         self._last_thought_kind = "conflict"
         log.info("inner life: escalated a conflict to the council (thread %s)", result.thread_id)
+        self._ledger.touch("loop", "inner_life")
         return {"ran": True, "kind": "conflict", "escalated": True,
                 "thread_id": result.thread_id, "verdict": result.verdict}
 
@@ -1863,6 +1992,7 @@ class Mimir:
         outcome = self._converge_or_store_insight(insight, vec)
         log.info("deep idle: dialogue on %s → %s (mem %s)", stim.kind,
                  "converged" if outcome["converged"] else "stored", outcome["memory_id"])
+        self._ledger.touch("loop", "deep_idle")
         return {"ran": True, "deep": True, "kind": stim.kind, "insight": insight.text,
                 "type": insight.kind, "converged": outcome["converged"],
                 "memory_id": outcome["memory_id"], "transcript": [t.as_dict() for t in turns]}
@@ -2062,6 +2192,12 @@ class Mimir:
         # not on every healthy turn, to keep the prompt quiet when all is well.
         if backend and (backend[1] or recent):
             blocks.append(backend[0])
+        try:
+            quiet = self._ledger.render(self._ledger.review())
+            if quiet:
+                blocks.append(quiet)
+        except Exception as exc:  # the ledger is observability; it never breaks the turn
+            log.debug("ledger: review skipped: %s", exc)
         return "\n".join(blocks) if blocks else None
 
     def digest_errors(self) -> dict[str, Any]:
@@ -2075,6 +2211,7 @@ class Mimir:
             "counts": counts,
             "total": sum(counts.values()),
             "samples": samples,
+            "capabilities": [f.as_dict() for f in self._ledger.review()],
             "generated_at": time.time(),
         }
         kv_set(self._storage, self._HEALTH_DIGEST_KEY, json.dumps(digest))
@@ -2759,38 +2896,50 @@ class Mimir:
 
     def _stream_chat_with_fetch(
         self, bundle: ContextBundle, refs: list[dict[str, Any]],
-        user: str | None, sid: str | None, text: str,
-    ) -> Generator[str, None, str]:
-        """Stream the chat reply, honoring an opt-in model fetch of a full library page (Phase 2,
-        streaming). If model-fetch is on and the model opens with ``<FETCH id=N>``, that marker is
-        intercepted (never shown to the user), the page is loaded, and the FINAL answer is streamed
-        with the page in context. Returns the full (tag-stripped) reply for storage/bake."""
+        user: str | None, sid: str | None, text: str, *,
+        tools: list[Tool] | None = None, speaker_kind: str = "human",
+    ) -> Generator[str, None, tuple[str, list[ToolCall]]]:
+        """Stream the chat reply, honouring an opt-in model fetch of a full library page and the
+        motor port's tool round (both streaming). A fetch reply or a tool call is *exactly* a
+        marker line, so the opening few characters say whether to intercept: the marker is never
+        streamed to the user; the page is loaded or the tools are run; the FINAL answer is streamed
+        with the results in context. Returns ``(full tag-stripped reply, tool calls)``.
+
+        Until 2026-10-31 the streaming path offered no tools at all, and the bundled UI only
+        streams — so the notebook and milestone tools never fired from the UI. A capability that
+        exists on one path and not on the one people use is a capability nobody has."""
         history = self._history_messages(user, sid)
         do_fetch = self.config.library_model_fetch and bool(refs)
-        system = f"{bundle.prompt}\n\n{self._fetch_hint_text(refs)}" if do_fetch else bundle.prompt
+        tools = tools or []
+        system = bundle.prompt
+        if do_fetch:
+            system = f"{system}\n\n{self._fetch_hint_text(refs)}"
+        if tools:
+            system = f"{system}\n\n{tools_hint(tools)}"
         gen = self._model.chat_stream(
             "chat", [{"role": "system", "content": system}, *history,
                      {"role": "user", "content": text}])
 
-        # Peek the opening: a fetch reply is *exactly* the marker, so a few non-whitespace chars
-        # tell us whether to intercept it — we never stream the marker to the user.
+        markers = ([("<FETCH", "fetch")] if do_fetch else []) + ([("<TOOL", "tool")] if tools else [])
         first_raw: list[str] = []
-        is_fetch = False
-        if do_fetch:
+        hit: str | None = None
+        if markers:
             for delta in gen:
                 first_raw.append(delta)
-                head = "".join(first_raw).lstrip()
+                head = "".join(first_raw).lstrip().upper()
                 if len(head) >= 6:
-                    is_fetch = head[:6].upper() == "<FETCH"
+                    hit = next((kind for mk, kind in markers if head.startswith(mk)), None)
                     break
-                if head and not "<FETCH".startswith(head.upper()):
-                    break  # diverged from the marker prefix — it's a normal answer
+                if head and not any(mk.startswith(head) for mk, _ in markers):
+                    break  # diverged from every marker prefix — it's a normal answer
             else:
-                is_fetch = "".join(first_raw).lstrip()[:6].upper() == "<FETCH"
+                head = "".join(first_raw).lstrip().upper()
+                hit = next((kind for mk, kind in markers if head.startswith(mk)), None)
 
         stripper = StreamTagStripper()
         chunks: list[str] = []
-        if is_fetch:
+        actions: list[ToolCall] = []
+        if hit == "fetch":
             full = "".join(first_raw) + "".join(gen)  # drain the (short) marker reply
             cap = max(1, self.config.library_max_fetches)
             ids = [int(m) for m in self._FETCH_RE.findall(full)][:cap]
@@ -2800,6 +2949,28 @@ class Mimir:
             gen = self._model.chat_stream(
                 "chat", [{"role": "system", "content": system2}, *history,
                          {"role": "user", "content": text}])
+        elif hit == "tool":
+            full = "".join(first_raw) + "".join(gen)
+            calls = parse_tool_calls(full)
+            if calls:
+                ctx = self._action_context(user, speaker_kind)
+                actions = [dispatch(self._tools, call, ctx) for call in calls]
+                for c in actions:
+                    self._ledger.touch("tool", c.tool, ok=(c.status == "ok"))
+                results = "\n".join(f"[{c.tool} → {c.status}] {c.result}" for c in actions)
+                log.info("tools: streamed round ran %s", ", ".join(f"{c.tool}:{c.status}" for c in actions))
+                gen = self._model.chat_stream(
+                    "chat", [{"role": "system", "content": system}, *history,
+                             {"role": "user", "content": text},
+                             {"role": "assistant", "content": full},
+                             {"role": "user", "content": f"Tool results:\n{results}\n\nNow give your answer."}])
+            else:  # looked like a marker, parsed as nothing: show what the model said
+                for delta in [full]:
+                    clean = stripper.feed(delta)
+                    if clean:
+                        chunks.append(clean)
+                        yield clean
+                gen = iter(())
         else:
             for delta in first_raw:  # replay what we buffered while peeking, then continue
                 clean = stripper.feed(delta)
@@ -2815,7 +2986,7 @@ class Mimir:
         if tail:
             chunks.append(tail)
             yield tail
-        return "".join(chunks)
+        return "".join(chunks), actions
 
     def _maybe_model_fetch(
         self, reply: str, bundle: ContextBundle, user: str | None, sid: str | None, text: str
@@ -3387,8 +3558,14 @@ class Mimir:
         Personas spread across whatever models are installed; the verdict is stored as recallable
         understanding (DESIGN §0.4, §4, §5).
         """
-        return deliberate(self._model, self._storage, self._embedder, question=question, user=user,
-                          personas=self._council_personas)
+        try:
+            result = deliberate(self._model, self._storage, self._embedder, question=question,
+                                user=user, personas=self._council_personas)
+        except Exception:
+            self._ledger.touch("loop", "deliberation", ok=False)
+            raise
+        self._ledger.touch("loop", "deliberation")
+        return result
 
     # -- the council forum (browsable deliberations + housekeeping; DESIGN §5a) --------
 
