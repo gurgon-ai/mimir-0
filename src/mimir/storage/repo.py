@@ -689,24 +689,28 @@ def recent_by_kind(
     *,
     user: str | None = None,
     limit: int = 5,
+    include_archived: bool = False,
 ) -> list[Memory]:
     """The most recent rows of a kind, newest first. Used for notes and the self-model.
 
     With ``user`` set, includes user-agnostic rows (``user IS NULL``) too, so shared content
-    surfaces alongside a specific user's.
+    surfaces alongside a specific user's. Archived rows (excluded from recall, kept in store) are
+    left out unless ``include_archived`` — working memory reads them as the *sources* it rebuilds
+    its summary from.
     """
 
     def _read(conn: sqlite3.Connection) -> list[Memory]:
+        arch = "" if include_archived else " AND archived = 0"
         if user is None:
             rows = conn.execute(
-                f"SELECT {_COLUMNS} FROM memories WHERE kind = ? "
+                f"SELECT {_COLUMNS} FROM memories WHERE kind = ?{arch} "
                 f"ORDER BY created_at DESC, id DESC LIMIT ?",
                 (kind.value, limit),
             ).fetchall()
         else:
             rows = conn.execute(
-                f"SELECT {_COLUMNS} FROM memories WHERE kind = ? AND (user = ? OR user IS NULL) "
-                f"ORDER BY created_at DESC, id DESC LIMIT ?",
+                f"SELECT {_COLUMNS} FROM memories WHERE kind = ? AND (user = ? OR user IS NULL)"
+                f"{arch} ORDER BY created_at DESC, id DESC LIMIT ?",
                 (kind.value, user, limit),
             ).fetchall()
         return [_row_to_memory(r) for r in rows]
@@ -826,15 +830,33 @@ def get_identity_anchors(gateway: StorageGateway) -> dict[str, str]:
 
 
 def prune_kind(gateway: StorageGateway, kind: MemoryKind, keep: int) -> int:
-    """Keep only the most recent ``keep`` rows of a kind; delete the rest. Returns rows removed.
+    """Keep only the most recent ``keep`` *live* (unarchived) rows of a kind; delete the rest of the
+    live rows. Archived rows are untouched (see :func:`prune_archived`). Returns rows removed.
 
     Bounds the recency logs (e.g. EXCHANGE) so they never grow without limit.
     """
 
     def _write(conn: sqlite3.Connection) -> int:
         cur = conn.execute(
-            "DELETE FROM memories WHERE kind = ? AND id NOT IN "
-            "(SELECT id FROM memories WHERE kind = ? ORDER BY created_at DESC, id DESC LIMIT ?)",
+            "DELETE FROM memories WHERE kind = ? AND archived = 0 AND id NOT IN "
+            "(SELECT id FROM memories WHERE kind = ? AND archived = 0 "
+            "ORDER BY created_at DESC, id DESC LIMIT ?)",
+            (kind.value, kind.value, keep),
+        )
+        return cur.rowcount
+
+    return gateway.submit(_write)
+
+
+def prune_archived(gateway: StorageGateway, kind: MemoryKind, keep: int) -> int:
+    """Keep only the most recent ``keep`` *archived* rows of a kind; delete older archived rows.
+    Bounds the source window working memory rebuilds from. Returns rows removed."""
+
+    def _write(conn: sqlite3.Connection) -> int:
+        cur = conn.execute(
+            "DELETE FROM memories WHERE kind = ? AND archived = 1 AND id NOT IN "
+            "(SELECT id FROM memories WHERE kind = ? AND archived = 1 "
+            "ORDER BY created_at DESC, id DESC LIMIT ?)",
             (kind.value, kind.value, keep),
         )
         return cur.rowcount
@@ -852,13 +874,21 @@ def delete_kind(gateway: StorageGateway, kind: MemoryKind) -> int:
     return gateway.submit(_write)
 
 
-def count_memories(gateway: StorageGateway, *, kind: MemoryKind | None = None) -> int:
+def count_memories(
+    gateway: StorageGateway, *, kind: MemoryKind | None = None, include_archived: bool = False,
+) -> int:
+    """Rows of a kind (or all kinds). Archived rows are excluded unless ``include_archived``: they
+    are out of recall, and the counts that drive behaviour (the fold trigger, the self-model's
+    stats) must see what the system can actually reach."""
     def _read(conn: sqlite3.Connection) -> int:
+        arch = "" if include_archived else " AND archived = 0"
         if kind is None:
-            row = conn.execute("SELECT COUNT(*) FROM memories").fetchone()
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM memories WHERE 1=1{arch}"
+            ).fetchone()
         else:
             row = conn.execute(
-                "SELECT COUNT(*) FROM memories WHERE kind = ?", (kind.value,)
+                f"SELECT COUNT(*) FROM memories WHERE kind = ?{arch}", (kind.value,)
             ).fetchone()
         return int(row[0])
 

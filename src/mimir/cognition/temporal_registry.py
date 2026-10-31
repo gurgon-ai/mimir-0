@@ -223,8 +223,11 @@ def make_milestone_tool(storage: StorageGateway) -> Tool:
             return "error: 'title' and 'statement' are required"
         if status not in STATUSES:
             return f"error: status must be one of {STATUSES}"
+        if getattr(ctx, "speaker_kind", "human") != "human":
+            return "refused: a milestone is a human's statement of state; a peer AI may not record one"
+        current = args.get("is_current_config", args.get("current_config", False))  # both spellings
         mid = record_milestone(storage, title, statement, status,
-                               is_current_config=bool(args.get("is_current_config", False)),
+                               is_current_config=bool(current),
                                provenance="stated")
         return f"recorded milestone {title!r} as {status} (id {mid})"
 

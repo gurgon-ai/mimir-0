@@ -30,6 +30,7 @@ from ..prompts import (
 )
 from ..storage.gateway import StorageGateway
 from ..storage.models import EvidenceTier, Memory, MemoryKind
+from .generation import EmptyGeneration, is_valid_generation
 from ..storage.repo import add_forum_post, create_forum_thread, save_memory
 
 log = logging.getLogger("mimir.council")
@@ -149,9 +150,16 @@ def _gather(
     return positions
 
 
+def _available(p: Position) -> bool:
+    """A voice that failed carries its failure as text; it is not an argument and must not be
+    answered, synthesised or filed as one."""
+    return is_valid_generation(p.text)
+
+
 def _others(positions: list[Position], idx: int) -> list[tuple[str, str]]:
-    """The floor a persona must answer in round two: every voice's opening but its own."""
-    return [(p.persona, p.text) for j, p in enumerate(positions) if j != idx]
+    """The floor a persona must answer in round two: every voice's opening but its own, and only
+    the voices that actually spoke."""
+    return [(p.persona, p.text) for j, p in enumerate(positions) if j != idx and _available(p)]
 
 
 def _clamp01(value: float) -> float:
@@ -203,8 +211,11 @@ def _parse_verdict(raw: str) -> Verdict:
 def _synthesize(
     model: ModelGateway, question: str, openings: list[Position], rebuttals: list[Position]
 ) -> Verdict:
-    opening_block = "\n".join(f"[{p.persona}] {p.text}" for p in openings)
-    rebuttal_block = "\n".join(f"[{p.persona}] {p.text}" for p in rebuttals)
+    spoke = [p for p in openings if _available(p)]
+    if not spoke:
+        raise EmptyGeneration("council: no persona produced a position; nothing to synthesise")
+    opening_block = "\n".join(f"[{p.persona}] {p.text}" for p in spoke)
+    rebuttal_block = "\n".join(f"[{p.persona}] {p.text}" for p in rebuttals if _available(p))
     brief = (
         f"Question: {question}\n\nOpening positions:\n{opening_block}\n\n"
         f"Rebuttals:\n{rebuttal_block}"
@@ -216,7 +227,10 @@ def _synthesize(
             {"role": "user", "content": brief},
         ],
     )
-    return _parse_verdict(raw)
+    verdict = _parse_verdict(raw)
+    if not is_valid_generation(verdict.summary):
+        raise EmptyGeneration("council: synthesis returned no verdict; nothing stored")
+    return verdict
 
 
 def _verdict_memory_text(question: str, verdict: Verdict) -> str:
@@ -261,7 +275,7 @@ def deliberate(
         lambda i: council_rebuttal_user(question, openings[i].text, _others(openings, i)),
         round_label="rebuttal",
     )
-    verdict = _synthesize(model, question, openings, rebuttals)
+    verdict = _synthesize(model, question, openings, rebuttals)   # raises EmptyGeneration on nothing
 
     mem = Memory(
         text=_verdict_memory_text(question, verdict),
@@ -294,11 +308,15 @@ def _persist_thread(
             storage, question=question, source=source, verdict=verdict.summary
         )
         for pos in openings:
+            if not _available(pos):
+                continue  # a failed voice is logged, not filed as a position
             add_forum_post(
                 storage, thread_id=thread_id, author=pos.persona, kind="position",
                 content=pos.text, model=pos.model, node=pos.node,
             )
         for reb in rebuttals:
+            if not _available(reb):
+                continue
             add_forum_post(
                 storage, thread_id=thread_id, author=reb.persona, kind="rebuttal",
                 content=reb.text, model=reb.model, node=reb.node,

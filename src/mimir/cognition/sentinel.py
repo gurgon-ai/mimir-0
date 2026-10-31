@@ -15,6 +15,7 @@ import logging
 
 from ..model.gateway import ModelGateway
 from ..prompts import SENTINEL_SYSTEM
+from .generation import require_generation
 from ..storage.gateway import StorageGateway
 from ..storage.models import EvidenceTier, Memory, MemoryKind
 from ..storage.repo import save_memory
@@ -36,13 +37,13 @@ def run_sentinel(
     background runner) is responsible for logging that loudly and keeping it off the hot path.
     """
     review = f"User said: {turn_text}\nYou replied: {reply}"
-    note_text = model.chat(
+    note_text = require_generation(model.chat(
         "reasoning",
         [
             {"role": "system", "content": SENTINEL_SYSTEM},
             {"role": "user", "content": review},
         ],
-    ).strip()
+    ), what="sentinel note")
 
     note = Memory(
         text=note_text,

@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 
 from ..model.gateway import ModelGateway
 from ..prompts import SELF_MODEL_SYSTEM
+from .generation import require_generation
 from ..storage.gateway import StorageGateway
 from ..storage.models import EvidenceTier, Memory, MemoryKind
 from ..storage.repo import count_memories, list_memories, recent_by_kind, save_memory
@@ -89,13 +90,13 @@ def synthesize_self_model(
     anchors = render_anchors(current_anchors(storage))
     if anchors:
         brief = f"Foundational identity (operator-established): {anchors}\n{brief}"
-    text = model.chat(
+    text = require_generation(model.chat(
         "reasoning",
         [
             {"role": "system", "content": SELF_MODEL_SYSTEM},
             {"role": "user", "content": brief},
         ],
-    ).strip()
+    ), what="self-model synthesis")
 
     mem = Memory(
         text=text,

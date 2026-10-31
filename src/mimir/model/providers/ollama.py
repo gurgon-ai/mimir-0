@@ -24,6 +24,16 @@ log = logging.getLogger("mimir.model.ollama")
 
 _DEFAULT_HOST = "http://localhost:11434"
 _TIMEOUT_S = 120
+EMBED_BATCH = 128   # /api/embed silently returns nothing useful past ~256 inputs; stay well under
+
+
+def _content_of(data: Any) -> str:
+    try:
+        return str(data["message"]["content"])
+    except (KeyError, TypeError) as exc:
+        raise ProviderError(
+            f"unexpected /api/chat response shape from Ollama: {data!r}"
+        ) from exc
 
 
 class OllamaProvider:
@@ -54,12 +64,17 @@ class OllamaProvider:
             "options": _to_options(opts),
         }
         data = self._post("/api/chat", payload, timeout=timeout)
-        try:
-            content = str(data["message"]["content"])
-        except (KeyError, TypeError) as exc:
-            raise ProviderError(
-                f"unexpected /api/chat response shape from Ollama: {data!r}"
-            ) from exc
+        content = _content_of(data)
+        # With thinking on, the reasoning trace and the answer share num_predict. A model that
+        # spends the whole budget thinking returns an EMPTY body with done_reason == "length" —
+        # Ollama's own field says so, and it is the one to read before guessing. That is not "no
+        # answer wanted": retry once with thinking off, which costs no model reload.
+        if think and not content.strip() and str(data.get("done_reason", "")) == "length":
+            log.warning("ollama: %s spent its whole budget thinking (empty body, done_reason="
+                        "length); retrying once with think=false", model)
+            payload["think"] = False
+            data = self._post("/api/chat", payload, timeout=timeout)
+            content = _content_of(data)
         return content, int(data.get("eval_count") or 0), int(data.get("eval_duration") or 0)
 
     def _tags(self) -> list[dict[str, Any]]:
@@ -161,15 +176,27 @@ class OllamaProvider:
                     break
 
     def embed(self, model: str, texts: list[str]) -> list[list[float]]:
-        payload = {"model": model, "input": texts}
-        data = self._post("/api/embed", payload)
-        try:
-            vectors = data["embeddings"]
-        except (KeyError, TypeError) as exc:
-            raise ProviderError(
-                f"unexpected /api/embed response shape from Ollama: {data!r}"
-            ) from exc
-        return [[float(x) for x in vec] for vec in vectors]
+        """Embed in chunks of ``EMBED_BATCH`` and check the reply shape. Ollama's ``/api/embed``
+        returns all-None vectors past roughly 256 inputs with no error; a batch that comes back the
+        wrong length or with a missing vector is a provider failure, never a silent blank."""
+        out: list[list[float]] = []
+        for start in range(0, len(texts), EMBED_BATCH):
+            chunk = texts[start:start + EMBED_BATCH]
+            payload = {"model": model, "input": chunk}
+            data = self._post("/api/embed", payload)
+            try:
+                vectors = data["embeddings"]
+            except (KeyError, TypeError) as exc:
+                raise ProviderError(
+                    f"unexpected /api/embed response shape from Ollama: {data!r}"
+                ) from exc
+            if len(vectors) != len(chunk) or any(v is None or len(v) == 0 for v in vectors):
+                raise ProviderError(
+                    f"/api/embed returned {len(vectors)} vector(s) for {len(chunk)} input(s) "
+                    f"(or an empty vector); batch of {len(chunk)} at offset {start}"
+                )
+            out.extend([float(x) for x in vec] for vec in vectors)
+        return out
 
     # -- transport --------------------------------------------------------------------
 

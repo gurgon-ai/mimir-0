@@ -22,11 +22,20 @@ from ..model.gateway import ModelGateway
 from ..prompts import WORKING_MEMORY_SYSTEM
 from ..storage.gateway import StorageGateway
 from ..storage.models import EvidenceTier, Memory, MemoryKind
-from ..storage.repo import count_memories, delete_memories, prune_kind, recent_by_kind, save_memory
+from ..storage.repo import (
+    archive_memories,
+    count_memories,
+    prune_archived,
+    prune_kind,
+    recent_by_kind,
+    save_memory,
+)
+from .generation import is_valid_generation, rejection_reason
 
 log = logging.getLogger("mimir.working_memory")
 
 MAX_EXCHANGES = 20    # hard cap on the recency log (safety net if compression is disabled/lagging)
+SOURCE_WINDOW = 30    # folded (archived) exchanges kept as the SOURCES the summary is rebuilt from
 DISPLAY_RECENT = 6    # how many raw exchanges to show in the prompt
 FOLD_THRESHOLD = 10   # fold once this many raw exchanges have accumulated
 KEEP_RECENT = 4       # raw exchanges kept verbatim after a fold (the rest become summary)
@@ -54,9 +63,12 @@ def record_exchange(
     prune_kind(storage, MemoryKind.EXCHANGE, MAX_EXCHANGES)
 
 
-def recent_exchanges(storage: StorageGateway, limit: int) -> list[Memory]:
+def recent_exchanges(
+    storage: StorageGateway, limit: int, *, include_archived: bool = False,
+) -> list[Memory]:
     """The most recent exchanges in chronological order (oldest → newest)."""
-    rows = recent_by_kind(storage, MemoryKind.EXCHANGE, limit=limit)  # newest first
+    rows = recent_by_kind(storage, MemoryKind.EXCHANGE, limit=limit,
+                          include_archived=include_archived)  # newest first
     return list(reversed(rows))
 
 
@@ -69,13 +81,20 @@ def synthesize_working_memory(
     model: ModelGateway, storage: StorageGateway, *,
     fold_threshold: int = FOLD_THRESHOLD, keep_recent: int = KEEP_RECENT,
 ) -> Memory | None:
-    """Fold the OLDEST accumulated exchanges (and the prior summary) into a fresh rolling summary,
-    keeping the most recent ``keep_recent`` raw. A no-op until ``fold_threshold`` have accumulated.
+    """Fold the OLDEST accumulated exchanges into a fresh summary, keeping the most recent
+    ``keep_recent`` raw. A no-op until ``fold_threshold`` have accumulated.
 
-    This is the rolling-compression scheme: recent turns stay verbatim, older ones become a short
-    couple-paragraph summary that itself folds into the next one — older material compressed harder
-    each pass. Returns the new summary, or ``None`` if there wasn't enough to fold. Off-hot-path; a
-    failure here must never break the turn.
+    The summary is REBUILT FROM SOURCES every time: the folded exchanges are archived (kept in
+    store, out of recall) rather than deleted, and the new summary is written from the last
+    ``SOURCE_WINDOW`` of them plus the ones being folded now. The previous summary is never fed
+    back in. A rolling summary that reads its own last version cannot forget: the private system
+    this came from restated a corrected claim for eight hours because the correction reached the
+    exchanges and the summary kept quoting itself. Older material falls off the window instead;
+    the daily narrative is the lossy long-term record.
+
+    An empty or placeholder generation is rejected before anything is saved or archived. Returns the
+    new summary, or ``None`` if there wasn't enough to fold or nothing usable came back.
+    Off-hot-path; a failure here must never break the turn.
     """
     if fold_threshold <= 0:
         return None  # compression disabled — recency-only working memory
@@ -87,20 +106,25 @@ def synthesize_working_memory(
     if not to_fold:
         return None
 
-    prior = latest_working_memory(storage)
-    brief_parts: list[str] = []
-    if prior:
-        brief_parts.append(f"Previous working memory:\n{prior.text}")
-    brief_parts.append("Older exchanges to fold in:\n" + "\n\n".join(e.text for e in to_fold))
-    brief = "\n\n".join(brief_parts)
+    # Sources: previously folded exchanges (archived, oldest → newest, bounded) then the ones
+    # folding now. No prior summary.
+    archived = [e for e in recent_exchanges(storage, SOURCE_WINDOW + MAX_EXCHANGES,
+                                            include_archived=True) if e.archived]
+    sources = archived[-SOURCE_WINDOW:] + to_fold
+    brief = "Exchanges to summarise (oldest first):\n" + "\n\n".join(e.text for e in sources)
 
-    summary = model.chat(
+    raw = model.chat(
         "reasoning",
         [
             {"role": "system", "content": WORKING_MEMORY_SYSTEM},
             {"role": "user", "content": brief},
         ],
-    ).strip()
+    )
+    if not is_valid_generation(raw):
+        log.warning("working-memory: fold rejected (%s); nothing saved, nothing archived",
+                    rejection_reason(raw))
+        return None
+    summary = str(raw).strip()
 
     mem = Memory(
         text=summary,
@@ -113,10 +137,12 @@ def synthesize_working_memory(
         user=None,
     )
     save_memory(storage, mem)
-    # Drop only the folded (oldest) exchanges — the most recent `keep_recent` stay raw.
-    delete_memories(storage, [e.id for e in to_fold if e.id is not None])
-    log.info("working-memory: folded %d oldest exchange(s), kept %d raw",
-             len(to_fold), len(exchanges) - len(to_fold))
+    # Archive the folded (oldest) exchanges — out of recall, kept as sources for the next fold;
+    # the most recent `keep_recent` stay raw. The source window is bounded.
+    archive_memories(storage, [e.id for e in to_fold if e.id is not None])
+    prune_archived(storage, MemoryKind.EXCHANGE, SOURCE_WINDOW)
+    log.info("working-memory: folded %d oldest exchange(s) from %d source(s), kept %d raw",
+             len(to_fold), len(sources), len(exchanges) - len(to_fold))
     return mem
 
 

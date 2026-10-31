@@ -122,7 +122,9 @@ def dispatch(registry: ToolRegistry, call: ToolCall, ctx: ActionContext) -> Tool
         return call
     try:
         call.result = tool.handler(call.args, ctx) or ""
-        call.status = "ok"
+        # A handler that declines (it returns "refused: …") did not act; report that honestly so a
+        # post-turn worker never counts a refusal as a kept promise.
+        call.status = "blocked" if call.result.lower().startswith("refused:") else "ok"
     except Exception as exc:  # a tool fault is data for the model, not a crash (§10)
         call.status, call.result = "error", f"tool {tool.name!r} failed: {exc}"
         log.error("tools: handler %r raised: %s", tool.name, exc, exc_info=True)

@@ -121,6 +121,9 @@ _TIME_TRIGGERS = (
     "when is spring", "when is summer", "when is fall", "when is autumn", "when is winter",
 )
 _SEASON_COUNTDOWN_WORDS = ("until", "till", "to", "when", "long", "days", "start", "begin")
+_LEAD_IN_RE = re.compile(
+    r"^(?:(?:hey|hi|so|ok|okay|um|uh|please|quick question|mimir|\w+ mimir)[ ,]+)+"
+)
 _SEASONS = ("spring", "summer", "fall", "autumn", "winter")
 
 
@@ -136,7 +139,14 @@ def answer_time_query(
     if not text:
         return None
     norm = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", text.lower())).strip()
-    if not any(t in norm for t in _TIME_TRIGGERS) or len(norm.split()) > 8:
+    if len(norm.split()) > 8:
+        return None
+    # Position, not content: the question must OPEN the turn (after a short lead-in such as
+    # "hey", "so", "ok", a name). "how many days to finish the report" contains "days to" and is
+    # not a time question; "what day is it" is. A substring match anywhere was the bug class that
+    # hijacked spoken turns in the system this came from.
+    body = _LEAD_IN_RE.sub("", norm, count=1)
+    if not any(body.startswith(t) for t in _TIME_TRIGGERS):
         return None
 
     starts = {name: (m, d) for m, d, name in _season_starts(hemisphere)}

@@ -294,7 +294,10 @@ class ModelGateway:
         prompts aren't truncated and a slow model fails fast. ``max_retries`` overrides the pool
         default — the benchmark passes 0 so one slow call isn't retried into a multi-minute stall.
         """
-        merged = {**self._council_params(), **(params or {})}
+        # The operational num_ctx applies here too: a council or background call with a different
+        # window than the chat path forces a full reload of a warm model. Explicit per-call params
+        # (the benchmark pins its own) still win.
+        merged = self._with_op_ctx(self._council_params(), params)
         return self._pool.chat(model, messages, merged, priority=priority, max_retries=max_retries)
 
     def council_placements(self) -> list[tuple[str, str]]:
@@ -308,7 +311,7 @@ class ModelGateway:
     ) -> str:
         """Run a council persona on a specific node (DESIGN §5). Params come from council/reasoning
         config; falls back to routing if that node is unavailable, so no persona is lost."""
-        merged = {**self._council_params(), **(params or {})}
+        merged = self._with_op_ctx(self._council_params(), params)
         return self._pool.chat_on(
             node, model, messages, merged, priority=priority, max_retries=max_retries,
         )

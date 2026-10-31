@@ -835,8 +835,10 @@ class Mimir:
         # ``speaker_kind`` ("human"/"ai_peer") is the caller's declaration of what kind of speaker
         # this is; validate it up front so a bad value fails the turn cleanly (DESIGN §3b).
         normalize_speaker_kind(speaker_kind)
-        # Settle the previous turn's burst (sentinel note, self-model) before we assemble — so the
-        # prompt reflects the latest reflection and identity (DESIGN §5a).
+        # The foreground declares itself BEFORE waiting on the burst, so autonomous work that has
+        # not started yet yields instead of being started under a waiting user; then settle the
+        # previous turn's burst (sentinel note, self-model) so the prompt reflects it (DESIGN §5a).
+        self._turn_active = True
         self._burst.wait_idle()
         self._turn_count += 1
 
@@ -859,9 +861,9 @@ class Mimir:
             record_exchange(self._storage, user=user, user_text=text, reply=intercept)
             record_conversation_turn(self._storage, user=user, user_text=text, reply=intercept,
                                      session_id=sid)
+            self._turn_active = False
             return TurnResult(reply=intercept, context=bundle, baked=[])
 
-        self._turn_active = True  # foreground in progress — the burst yields to it (§5a)
         try:
             # Optional context-source layers (self-model, working memory, graph, procedures,
             # library, wiki, inner-life surfacing) are *enrichment* — a fault in one degrades that
@@ -995,6 +997,7 @@ class Mimir:
         generator's *return value* (via ``StopIteration.value``) is ``context.introspect()``.
         """
         normalize_speaker_kind(speaker_kind)  # validate up front (DESIGN §3b), mirroring `turn`
+        self._turn_active = True  # declared before the wait, as in `turn`
         self._burst.wait_idle()
         self._turn_count += 1
 
@@ -1014,10 +1017,10 @@ class Mimir:
             record_exchange(self._storage, user=user, user_text=text, reply=intercept)
             record_conversation_turn(self._storage, user=user, user_text=text, reply=intercept,
                                      session_id=sid)
+            self._turn_active = False
             yield intercept
             return bundle.introspect()
 
-        self._turn_active = True  # foreground in progress — the burst yields to it (§5a)
         try:
             # Enrichment layers degrade on fault; the reply never breaks for one (§10). Like turn().
             def _enrich(label: str, fn: Callable[[], Any], default: Any) -> Any:
