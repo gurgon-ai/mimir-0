@@ -23,6 +23,12 @@ thin evidence instead of confabulating.
 > snapshot; APIs, schema, scores, and UI may shift between commits, and it is **not yet hardened**.
 > Setup lives in [`docs/SETUP.md`](docs/SETUP.md); see [`CHANGELOG.md`](CHANGELOG.md) for the log.
 
+## Research
+
+Findings from the production system this core was extracted from live in [`research/`](research/): twenty-five
+measured field notes on local-model cognition, a preregistered tool-choice experiment with its data, and the
+system's own self-description checked line by line. See [`research/README.md`](research/README.md).
+
 ## What's included vs. what you provide
 
 This repo ships **only code** — everything in it is ours, under Apache-2.0. Anything that *runs a

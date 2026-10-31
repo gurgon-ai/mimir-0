@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+*.pyc
+Incident Data/
+MIMIR_HARDENING_REVIEW.md

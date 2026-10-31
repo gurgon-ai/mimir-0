@@ -1,0 +1,29 @@
+# Semantic Tool-Choice Gym config
+# Ollama must already be running locally (see README "Isolation checklist").
+
+ollama:
+  base_url: "http://127.0.0.1:11434"
+  # One or more locally installed model tags. Every trial schedule loops over
+  # all of them. Keep this list small while iterating; add bigger models once
+  # a smoke run looks sane.
+  models:
+    - "mistral-small3.1:24b"
+    - "qwen3.8:27b"
+    - "ttempvnn/Blackfrost-AI-Qwen3.8-27B-ABLITERATED:latest"
+    - "gemma3:27b"
+  # deepseek-r1:32b dropped for this pass (reasoning-token overhead made the
+  # full run too slow); run it separately later with --model.
+  temperature: 0.7
+  request_timeout_seconds: 180
+  max_retries: 1          # network/timeout retries only, never "retry until valid JSON"
+  retry_backoff_seconds: 2
+
+experiment:
+  repetitions: 3          # reps per (model, context, passage) combination
+  base_seed: 42            # deterministic seed for tool-order shuffling
+  output_path: "results/trials.jsonl"
+
+paths:
+  passages: "passages.jsonl"
+  prompts: "prompts.json"
+  tools: "tools.json"
