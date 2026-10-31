@@ -123,6 +123,34 @@ def test_tools_run_on_the_streaming_path(brain: Mimir, monkeypatch) -> None:
     assert brain._ledger.snapshot()["tool:notebook"]["count"] >= 1
 
 
+# -- a turn arriving with queued burst work settles it, it does not wait out the timeout -------
+
+
+def test_a_turn_with_pending_burst_work_settles_it_instead_of_timing_out(brain: Mimir) -> None:
+    """Regression (2026-11-01): declaring the foreground active BEFORE waiting on the burst made
+    the burst yield to the very turn that was waiting for it; the turn then sat out wait_idle's
+    30 s. Seen only on a slow CI runner, where turn two arrived before turn one's window ran."""
+    import threading
+
+    brain._burst.stop()  # park the loop so the queued window cannot run yet
+    brain._burst.signal(ResponseContext(user_text="earlier", reply="noted", user="g"))
+    assert brain._burst.pending() >= 1
+    seen_active: list[bool] = []
+    done = threading.Event()
+
+    def _turn() -> None:
+        brain.turn("hello again", user="g")
+        done.set()
+
+    threading.Thread(target=_turn, daemon=True).start()
+    time.sleep(0.3)
+    seen_active.append(brain._turn_active)
+    assert done.is_set() is False  # the turn is waiting on the burst, as designed
+    brain._burst.start()  # the loop comes back; with the fix it drains and the turn proceeds
+    assert done.wait(timeout=8.0), "turn waited out the burst timeout instead of settling it"
+    assert seen_active == [False]  # the foreground was not declared while it waited
+
+
 # -- chat window ---------------------------------------------------------------------------
 
 

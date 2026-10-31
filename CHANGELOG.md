@@ -5,7 +5,17 @@ Pre-1.0: the API and schema may change between releases.
 
 ## [Unreleased]
 
-Nothing yet. The itemised history of every change in 0.2.0 (about 1,160 lines, kept for anyone who needs
+### Fixed
+- A turn that arrived while the previous turn's burst window was still queued waited out the burst's
+  full 30 s timeout: 0.2.0 declared the foreground active *before* waiting for the burst to settle, and
+  the burst yields while the foreground is active. Order restored (settle, then declare). Found by CI
+  on the Linux 3.13 runner, where the second HTTP turn of a test arrived before the first window ran.
+- The fleet-init thread could reach `_start_idle_prober` before `__init__` had created the prober
+  handle; the idle latency prober then silently never started. Both attributes now exist before the
+  thread does.
+- `ruff check .` covers the whole tree; `research/` (experiment scripts frozen as run) is excluded.
+
+Nothing else yet. The itemised history of every change in 0.2.0 (about 1,160 lines, kept for anyone who needs
 the exact sequence) is in git: `git show v0.1.0..v0.2.0 -- CHANGELOG.md`, or the file as it stood at
 commit fc519fe.
 

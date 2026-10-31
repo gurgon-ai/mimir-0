@@ -339,6 +339,11 @@ class Mimir:
         # the fleet once inventory is available, and re-resolved on rescan (DESIGN §4).
         self._auto_roles = {r for r, s in config.roles.items() if s.model == AUTO_MODEL}
         self._storage = StorageGateway(config.storage_path)
+        # Declared before the fleet-init thread exists: that thread ends in _start_idle_prober(),
+        # which reads both, and a fast inventory reached it before __init__ had set them
+        # (AttributeError in the thread; the prober silently never started — 2026-11-01).
+        self._stop_idle = threading.Event()  # signals the idle latency heartbeat to stop
+        self._idle_prober: threading.Thread | None = None
         if config.backend is not None and provider is None:
             # A discovered/declared Ollama fleet: build a model-aware pool, then inventory it and
             # start the active-health prober IN THE BACKGROUND — so a slow node can't block boot
@@ -406,8 +411,6 @@ class Mimir:
             self._ledger.register("loop", _loop)
         self._roster_cache: tuple[float, Roster] | None = None
         self._burst.start()
-        self._stop_idle = threading.Event()  # signals the idle latency heartbeat to stop
-        self._idle_prober: threading.Thread | None = None
         # The wall-clock sleep cycle: heavy maintenance in its own quiet window, since streaming +
         # slow machines starve the post-turn burst of real idle time (DESIGN §5a).
         self._stop_sleep = threading.Event()
@@ -862,11 +865,14 @@ class Mimir:
         # this is; validate it up front so a bad value fails the turn cleanly (DESIGN §3b).
         normalize_speaker_kind(speaker_kind)
         text = self._snap_names(text)
-        # The foreground declares itself BEFORE waiting on the burst, so autonomous work that has
-        # not started yet yields instead of being started under a waiting user; then settle the
-        # previous turn's burst (sentinel note, self-model) so the prompt reflects it (DESIGN §5a).
-        self._turn_active = True
+        # Settle the previous turn's burst (sentinel note, self-model) so the prompt reflects it,
+        # and only THEN declare the foreground active (DESIGN §5a). The order matters: the burst
+        # yields while ``_turn_active`` is set, so declaring first and waiting second is a deadlock
+        # that only the 30 s timeout breaks — seen as a 30 s second turn on a slow runner whenever
+        # the previous turn's window had not started yet (2026-11-01). Anything the burst starts in
+        # the gap yields at its next ``is_busy`` check, which is the behaviour wanted.
         self._burst.wait_idle()
+        self._turn_active = True
         self._turn_count += 1
 
         # Temporal awareness: read the gap from PRIOR interactions, then log this turn (DESIGN §3e).
@@ -1025,8 +1031,8 @@ class Mimir:
         """
         normalize_speaker_kind(speaker_kind)  # validate up front (DESIGN §3b), mirroring `turn`
         text = self._snap_names(text)
-        self._turn_active = True  # declared before the wait, as in `turn`
-        self._burst.wait_idle()
+        self._burst.wait_idle()  # settle first, declare second — the burst yields to `_turn_active`
+        self._turn_active = True
         self._turn_count += 1
 
         # Temporal awareness + the deterministic time intercept (DESIGN §3e), mirroring `turn`.
