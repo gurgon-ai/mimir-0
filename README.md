@@ -3,185 +3,170 @@
 [![ci](https://github.com/gurgon-ai/mimir-0/actions/workflows/ci.yml/badge.svg)](https://github.com/gurgon-ai/mimir-0/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-**A local-first cognition core: a memory that behaves like a mind's, not a database's, and the
-machinery around a language model that a bare model lacks.**
+Long-term memory and turn orchestration for a local language model, in pure Python with SQLite and
+no runtime dependencies.
 
-Mimir 0 is a pure-Python library (standard library and SQLite only; no runtime dependencies) that
-gives a local language model typed, provenance-tracked, evidence-tiered memory; a prompt assembled
-with an explicit epistemic structure; a post-reply "burst" of background cognition; a nightly sleep
-cycle; an inner life that thinks between conversations; and a ledger that notices when any part of
-it stops working. You tell it something; later it recalls the fact, says who told it and how far it
-trusts them, and says plainly when it is reasoning from thin evidence instead of guessing.
+A bare local model forgets everything past its context window, can't tell something a user told it from
+something it made up, and confidently answers questions it has no evidence for. Mimir-0 sits between your
+application and the model and fixes those three things. Every fact it stores records who said it and how
+far that source is trusted. Every prompt is assembled from typed stores under a token budget, with each
+fact tagged by source and age. When the evidence is thin, the prompt says so, and the model is told to ask
+rather than guess.
 
-It was extracted, public-clean, from a larger private home AI that has run a private site for a
-year. The lessons that system paid for are in [`research/`](research/), and most of them are now
-mechanisms in this core (see *What it learned the hard way* below).
+## What that looks like
 
-**Status: 0.2.0, pre-alpha.** Everything in [`DESIGN.md`](DESIGN.md) is implemented and runs end to
-end on a single machine and on a multi-node LAN. The API, schema and UI can still change between
-releases, and it is not hardened for exposure beyond localhost or a trusted LAN. The
-[`CHANGELOG`](CHANGELOG.md) is honest about what each release changed and what it means for an upgrade.
+Three speakers state the same kind of fact. The server, not the caller, decides how much each is believed:
 
-## Research
+```python
+m.turn("The garlic goes in around October.", user="alex")                 # alex is the primary user
+m.turn("The garlic goes in around March.", user="sam")                    # another human
+m.turn("The garlic goes in around June.", user="relay", speaker_kind="ai_peer")
+```
 
-[`research/`](research/) holds twenty-five measured field notes from a year of running a local-model
-mind, a preregistered tool-choice experiment with its data (narrative framing did not move an agent's
-tool choice; system-prompt autonomy moved it from about 1 % to 60 %), and the system's own
-self-description checked line by line against its records. See [`research/README.md`](research/README.md).
+```
+text                                    evidence_tier            provenance
+The garlic goes in around October.      stated_by_primary_user   stated by alex
+The garlic goes in around March.        conversation             stated by sam
+The garlic goes in around June.         stated_by_peer           stated by peer AI relay
+```
 
-## Try it in ten seconds
+On a later turn, recalled facts reach the model with their provenance attached, so it can attribute
+instead of flattening everyone into "you told me":
+
+```
+<RECALL>
+- The garlic goes in around October. [tier=stated_by_primary_user; source=stated by alex; just now]
+</RECALL>
+```
+
+That output is from a real run on the built-in mock provider. Try it with no model installed:
 
 ```bash
 pip install -e ".[dev]"
-python -m mimir.selftest        # the whole loop on a deterministic mock provider: no model, no network
-python examples/quickstart.py   # bake a fact, recall it attributed
+python -m mimir.selftest        # the full loop, deterministic, offline
+python examples/quickstart.py   # bake a fact, recall it, print what went into the prompt
 ```
 
-For a real conversation with a local model, install [Ollama](https://ollama.com), pull a model, and
-follow [`docs/SETUP.md`](docs/SETUP.md). The reference web UI (chat, the identity interview, documents,
-the memory graph, the sleep and model tabs) is one command:
+## How a turn works
 
-```bash
-python -m mimir.server --config mimir.toml   # → http://127.0.0.1:8765
-```
+1. **Names are normalised.** A misheard or mistyped name ("Katelyn" for "Caitlin") is snapped to a known one
+   before anything is stored or searched, from configured variants and a conservative phonetic match.
+   Fixing it here is the only place that works: once two spellings are in memory, every lookup finds half.
+2. **Retrieval runs per store.** Stated facts, conclusions the system reached itself, document chunks,
+   cited library claims and entity relationships are separate stores with separate retrieval. Each hit
+   carries its evidence tier, which acts as a gentle multiplier (1.30 for the primary user down to 0.90
+   for the system's own inferences): it breaks ties between equally relevant facts and never overrides
+   relevance.
+3. **The prompt is assembled under a budget.** Sections (self-model, identity, time, knowledge, graph,
+   working memory, notes) are rendered with a priority tier. When the budget is tight, low-priority
+   sections are truncated first, and truncating a high-priority one is reported as a warning.
+   `TurnResult.context.introspect()` shows exactly what was requested, what was admitted and what was cut.
+4. **The uncertainty gate.** If the knowledge that made it in is thin for the question asked, the prompt
+   says so and tells the model to ask instead of answering.
+5. **The model is called through one gateway.** The gateway keeps `num_ctx` identical for every call to a
+   given model, sets `keep_alive` per role, retries an empty "length" reply once with thinking off, and
+   routes to whichever node on the LAN has the model loaded.
+6. **Tools run on both paths.** The model can emit tool calls in streaming and non-streaming replies; the
+   results go back for one more round, and the reply carries an `actions` list of what ran and how it went.
+7. **Facts are baked.** New statements are extracted and stored with the tier the server's trust policy
+   assigns. A guard at every store boundary refuses empty output, placeholders and error strings, so a
+   failed generation never becomes a memory.
+8. **Background work runs after the reply.** A burst worker runs post-turn tasks in priority order: a short
+   reflection for the next turn, the self-model, working-memory folding, and a check that any tool call
+   that failed is put back in front of the model. It yields the moment the next turn arrives, and stays
+   out of the way for a configurable window after a turn, not only while one is running.
 
-Mimir is model-agnostic. It benchmarks whatever models you install and picks the best per role, so the
-right recommendation is "measure your own". On the hardware this was built on, `gemma4:e2b` was the
-standout small model and `gemma4:26b` / `qwen3.5:27b` the best large ones; treat that as a first pull,
-not a requirement.
+Between conversations, a nightly sleep cycle deduplicates, decays salience, archives, resolves
+contradictions, ingests documents and writes daily, weekly and monthly summaries. An optional idle loop
+reflects on recent exchanges and errors and stores the results at low salience.
 
-## What makes it different
+## Things it handles that you would otherwise find out the hard way
 
-- **Typed knowledge layers.** Stated facts, learned conclusions, document chunks, cited library claims
-  and entity relationships live in separate stores with separate retrieval, not one flat index.
-- **Evidence tiers and provenance.** Every fact knows who said it and how much that source is
-  believed, and the *server* decides belief, never the caller: the primary user at the top, trusted
-  users next, any other human at conversation tier, a peer AI below that and marked as AI-sourced. An
-  exposed endpoint cannot launder a claim into trusted memory.
-- **Confidence and salience, decoupled.** Truth and relevance are separate axes. A fact does not
-  become false because it has not been used lately; it becomes less salient.
-- **An uncertainty gate.** When the system is reasoning from thin evidence it says so and asks,
-  instead of answering confidently.
-- **State beside narrative.** Memory accumulates in mixed tense ("planning X", "X is done"). A
-  separate, dated milestone ledger says what is true *now*, and during sleep it demotes the memories
-  it supersedes.
-- **A guard at every store boundary.** Nothing the model failed to produce (an empty body, a
-  placeholder, an error string) is ever stored, folded on or filed as an argument.
-- **It can feel a part of itself stop.** Every tool, background task, sleep phase and idle loop is
-  registered in a capability ledger and touched when it runs. Anything that never fires, goes stale,
-  or fires and always fails becomes a finding in the prompt and the nightly digest.
+Each of these is a failure that is silent in a naive implementation. The measurements are in
+[`research/field_notes_local_model_cognition.md`](research/field_notes_local_model_cognition.md).
 
-## What is inside
+| Problem | What the code does |
+|---|---|
+| Ollama reloads the model whenever `num_ctx` changes, discarding the KV cache | One `num_ctx` per model on every call, including background and council calls |
+| With thinking on, a model can spend its whole budget reasoning and return an empty body with `done_reason: "length"` | Retries once with thinking off instead of treating it as "no answer" |
+| `/api/embed` returns nothing useful past ~256 inputs, with no error | Batches of 128, and every response is shape-checked |
+| A rolling summary that reads its own previous version can never drop a claim that was corrected | Working memory archives what it folds and rebuilds the summary from the archived turns every time |
+| An empty or placeholder generation gets stored, then the source it "summarised" is deleted | `require_generation()` at every store boundary; a fold that gets nothing back keeps its sources |
+| "What time is it" matches inside "I lost track of what time it was yesterday" | Intercepts trigger on position: the question has to open the turn |
+| A tool call that was refused or crashed gets counted as done | The reply's `actions` carry status; failed calls are surfaced on the next turn |
+| The system's own reflections get recalled later as if someone had stated them | System-generated provenance is recallable but excluded from summaries' facts and the self-model's counts |
+| A feature stops running and nothing anywhere changes | A capability ledger records the last run of every tool, task, sleep phase and loop, and reports anything that never ran, went stale, or keeps failing |
 
-Every turn assembles an epistemic prompt: self-model → current state (timeline) → identity → the
-current moment → attributed knowledge (memory, documents, library, graph; each fact tagged with its
-age) → learned procedures → recent history → working memory → temporal awareness → background notes →
-sentinel note → uncertainty gate, routed through two disciplined gateways (model and storage).
+## Using it
 
-Around it:
-
-- **The burst worker.** After each reply, the idle window runs a prioritised, interruptible pool of
-  post-response work: the sentinel reflection, the self-model, working memory, output-triggered RAG,
-  and a follow-up that puts any tool call that failed back in front of the model as an unkept promise.
-- **Sleep.** A wall-clock nightly window for consolidation (dedup, decay, archival, contradiction
-  resolution), self-knowledge (it bakes its own README), document ingest, narratives (daily → weekly →
-  monthly, lossy by design), self-directed council deliberation, and the health digest.
-- **Inner life.** Between conversations, on a cadence you set, it reflects on a recent exchange, a
-  memory, a tension in what it knows or an error it hit, and keeps the thought as a faint note that
-  resurfaces only if it later proves relevant. Off by default; it spends idle compute.
-- **The inner council.** Adversarial deliberation across whatever models you have installed, personas
-  fanned one per node, every debate kept in a browsable forum. A voice that fails is not an argument
-  and is never synthesised or filed as one.
-- **Working memory rebuilt from sources.** Recent turns stay verbatim; older ones are folded into a
-  summary that is rebuilt from the archived exchanges every time, never from its own previous text.
-- **Documents and a library.** Drop files in a folder or upload them; text and Markdown in core, PDF
-  and DOCX behind an extra, images via a vision role. A three-tier library (documents → cited claims →
-  composites) with a citation guard that flags a citation to a source the system does not hold.
-- **An offline encyclopedia.** Point it at a local Kiwix server over any ZIM and it gets a live,
-  attributed reference layer over stdlib HTTP.
-- **A distributed, qualified model fleet.** It discovers every `ollama serve` on your LAN, routes
-  each request to a node that has the model, and qualifies models on a measured battery (talk, tools,
-  code, reasoning, discipline, epistemics, vision) at your operational context size, with a staged,
-  human-veto tournament, a per-node placement matrix and a diversity-first council roster.
-- **Names at the door.** A heard or mistyped name is snapped to the household's known names before
-  memory, graph or recall see it, from confirmed variants and a conservative phonetic match.
-- **Notebook, sessions, graph, streaming.** A lossless self-curated notebook; durable, restorable
-  conversation sessions; a visual memory graph; token-by-token streaming with tools on both paths.
-- **Four extension ports.** Tools, context sources, backends and background reflexes, so you attach
-  capabilities without forking. The notebook and the milestone ledger are the two reference
-  connectors. See [`docs/EXTENSIBILITY.md`](docs/EXTENSIBILITY.md).
-
-## What it learned the hard way
-
-Each of these came from an incident in the production system and is now a mechanism here; the
-measurements are in [`research/field_notes_local_model_cognition.md`](research/field_notes_local_model_cognition.md).
-
-- One `num_ctx` on every call to a model, including council and background calls; a different value
-  forces a full reload.
-- An empty body with `done_reason == "length"` under thinking is not "no answer"; it is retried once
-  with thinking off.
-- Embeddings go to Ollama in batches of 128 and are shape-checked, because past about 256 inputs the
-  endpoint returns nothing useful with no error.
-- A rolling summary that reads its own last version cannot forget a corrected claim; it is rebuilt from
-  sources.
-- Intercepts count by position: a time question must open the turn, not merely contain a trigger.
-- A tool that was refused or crashed is a promise still unkept, not a call that was "made".
-- The system's own musings, verdicts and reflections are recallable but are not facts anyone stated;
-  they are kept out of narratives' "facts", the self-model's knowledge counts and output grounding.
-- Background work stays out of the way for a window after the last turn, not just while a turn is in
-  flight; someone who pauses to think is still in the conversation.
-
-## Integration API
-
-Mimir ships no IO of its own (no voice, avatar, home automation) on purpose. Drive it from Python or
-over HTTP and build any front end on top; register tools on the motor port when you want hands. Full
-contract in [`docs/API.md`](docs/API.md).
+From Python:
 
 ```python
 from mimir import Mimir
 m = Mimir.from_config("mimir.toml")
-print(m.turn("My garlic goes in around October.", user="alex").reply)
-print(m.turn("When do I plant the garlic?", user="alex").reply)   # recalled, attributed
+r = m.turn("When do I plant the garlic?", user="alex")
+print(r.reply, r.actions, r.context.introspect())
 ```
+
+Over HTTP, with the reference server (`python -m mimir.server --config mimir.toml`, then
+http://127.0.0.1:8765 for a web UI):
 
 ```bash
 curl -s http://127.0.0.1:8765/api/turn -H "Content-Type: application/json" \
   -d '{"text": "hello", "user": "alex"}'
-# → {"reply": "...", "actions": [...], "introspect": {sources, tiers, tokens}}
+# {"reply": "...", "actions": [...], "introspect": {...}}
 ```
 
-- `user` is the speaker's identity and `speaker_kind` (`human` / `ai_peer`) its kind; the server's
-  trust policy decides how much each is believed.
-- `POST /api/turn/stream` streams tokens over Server-Sent Events, runs the tool round, and carries
-  `actions` in the final `done` event.
-- `GET /api/health` is an instant, unauthenticated liveness check. Set `[server] api_token` to require
-  a Bearer token on every other `/api/*` route.
+`POST /api/turn/stream` streams tokens over Server-Sent Events. Set `[server] api_token` to require a
+Bearer token on every route except `/api/health`. Full contract: [`docs/API.md`](docs/API.md).
 
-Two Mimirs can talk to each other through a tiny relay; each remembers the other as a peer and, by
-the trust policy, does not take the other's hallucinations as fact. A worked example is in the API doc.
+For a real model, install [Ollama](https://ollama.com), pull a chat model and `nomic-embed-text`, and
+follow [`docs/SETUP.md`](docs/SETUP.md). Mimir benchmarks the models you have and picks one per role
+(chat, bake, reasoning, vision), so the right model is whichever measures best on your machine.
 
-## Runtime contract
+## Extending it
 
-Python 3.11+, SQLite, one chat endpoint, one embeddings endpoint. No GPU requirement, no cloud, no
-peripherals. Provider-agnostic; pools several local inference nodes across a LAN when you have them.
+Mimir has no IO of its own: no voice, no avatar, no home automation. You add capabilities through four
+ports without forking:
 
-## Security
+- **Tools**: functions the model can call.
+- **Context sources**: extra prompt sections, budgeted like the built-in ones.
+- **Backends**: model providers and embedders.
+- **Reflexes**: background tasks registered on the burst worker or the sleep cycle.
 
-Pre-alpha and not hardened; the reference server is for localhost or a trusted LAN, not a public
-service. Disclosure policy and the security model are in [`SECURITY.md`](SECURITY.md).
+The notebook and the milestone ledger in core are written as ordinary plugins on these ports, to serve as
+examples. See [`docs/EXTENSIBILITY.md`](docs/EXTENSIBILITY.md).
 
-## Contributing
+## Also in the box
 
-The bar for core is high and the discipline is specific: zero runtime dependencies, the two gateways
-are law, fail loud, keep core layers generic, and every store boundary guards what it stores. See
-[`CONTRIBUTING.md`](CONTRIBUTING.md).
+- **Documents and a cited library.** Drop text, Markdown, PDF or DOCX into a folder. Claims extracted from
+  them keep their citations, and a guard flags a citation to a source the system doesn't hold.
+- **An offline encyclopedia.** Point it at a local Kiwix server and it gets an attributed reference layer.
+- **A multi-node model fleet.** It discovers every `ollama serve` on the LAN, routes each request to a node
+  that has the model, and qualifies models on a measured battery at your real context size.
+- **A council.** Hard questions can be argued by several models or personas before an answer is settled;
+  a voice that fails to answer is dropped, never synthesised as an argument.
+- **A milestone ledger.** Memory accumulates in mixed tense ("planning X", "X is done"). A separate dated
+  ledger holds what is true now, and the sleep cycle demotes memories it supersedes.
 
-## License
+## Status
 
-[Apache-2.0](LICENSE). Research write-ups under `research/` are CC BY 4.0 where stated.
+0.2.0, pre-alpha. Everything in [`DESIGN.md`](DESIGN.md) is implemented and tested (523 tests, mypy
+strict, CI on Python 3.11 to 3.13). The API and schema can still change between releases; the
+[`CHANGELOG`](CHANGELOG.md) lists what each release changed and what an upgrade needs. The reference
+server is for localhost or a trusted LAN, not the internet; see [`SECURITY.md`](SECURITY.md).
 
----
+Requires Python 3.11+, SQLite, one chat endpoint and one embeddings endpoint. No GPU requirement and no
+cloud dependency.
 
-*Mimir 0 is the general, reusable cognition core extracted and rebuilt from a larger private home-AI
-system. None of the original's hardware integrations or personal data come with it; the memory and
-reasoning architecture, and what running it taught, do.*
+## Research
+
+[`research/`](research/) has the measurements behind the table above, and a preregistered experiment on
+what makes a model cross a boundary with its tools (not stories about confinement; one sentence of
+autonomy in the system prompt took it from 1–2% to 60%).
+
+## Contributing and license
+
+Core stays dependency-free, every model call goes through the model gateway and every write through the
+storage gateway, and failures are loud. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+[Apache-2.0](LICENSE).
