@@ -20,9 +20,8 @@ policy violation, or an engineered message - see Limitations.
 4. **A venv is not a security boundary.** It isolates Python packages, not
    filesystem or network access. Don't treat this setup as sandboxing beyond
    "keeps experiment files and dependencies separate."
-5. When done, stop the experiment's `ollama serve` before restarting
-   the production system's own Ollama instance, to avoid the two ever pointing at
-   the same running server at the same time.
+5. When done, stop the experiment's `ollama serve` before starting any other
+   Ollama instance, so two applications never share one server.
 
 ## Setup
 
