@@ -1,175 +1,160 @@
-# Field notes from a year of running a local-model mind
+# Field notes: running a persistent system on local models
 
-*Greg Korpela, with Claude Code as the coding partner. A year of building and running Mimir, a home AI
-on a private site, late 2025 to October 2026: one workstation (RTX 5090),
-open-weight models through Ollama, 275k lines of Python, a small household as the judges. Each note
-is something we measured or were bitten by, not something we assumed, and the numbers are the ones in
-the incident record at the time. Mimir-0, the library in this repository, is the cognition core of that
-system. Written up 2026-10-31.*
+Things that broke, how they were found, and what fixed them, from a year of running a 275k-line Python
+system on open-weight models through Ollama on a single 32 GB GPU. Where the fix is in Mimir-0, the note
+says which module. Numbers are as measured at the time.
 
-These are in rough order of how much they cost us to learn.
+## Ollama and the models
 
-## On the models themselves
+**1. Changing `num_ctx` reloads the model.** Ollama defaults to a context of 8192 and truncates silently
+beyond it. A call with a *different* `num_ctx` than the resident model's forces a full reload and throws
+away the KV cache, so a background task using a smaller context makes the next chat turn cold. Use one
+value per model on every call, including background ones. Toggling `think` does not reload; changing
+`num_ctx` does. *Mimir-0: `model/gateway.py` pins it per model.*
 
-**1. One warm model, no daytime swaps.** On a 32 GB card the cost of swapping models during the day is
-not the load time, it is everything downstream: the KV cache is destroyed, the first turn after a
-swap is cold, and background tasks that assumed the model was resident silently queue or fail. We
-settled on one mixture-of-experts model (gemma4:26b, 3.8B active) kept resident around the clock,
-playing every role (chat, sentinel, captions, council personas), with a diverse pool swapped in only
-during the nightly cycle, and a second large model (qwen3.8:27b) loaded once at night for
-contradiction and verdict work. "One big model at a time" became a rule enforced in code after a
-17 GB model beside a 20 GB one oversubscribed the card and poisoned the shared CUDA context used by
-Whisper and YOLO, hanging voice.
+**2. Thinking can eat the whole output budget.** With `think: true`, a model can spend all of
+`num_predict` in its reasoning trace and return an empty body with `done_reason: "length"`. At 800 tokens
+it returned nothing; at 1,600 it still returned nothing, having used 1,480 on thinking. Raising the budget
+only moves the cliff. Treat an empty body as "no answer", not "nothing to do", and retry once with thinking
+off. *Mimir-0: `model/providers/ollama.py`.*
 
-**2. `num_ctx` must be identical on every call to the same model.** Ollama defaults to 8192 and
-silently truncates; worse, a call with a *different* context size forces a full reload and destroys
-the cache. We set 32768 on every call and treat any deviation as a bug. Toggling `think` does not
-reload the model; changing `num_ctx` does.
+**3. `think: false` plus tools leaks tool calls into the content field** on some models (Ollama issue
+15539). The parser has to recover tool calls from the text as well as from the structured field.
 
-**3. Thinking on and tools in the same call share one output budget.** With `think:true`, a reasoning
-model can spend the entire `num_predict` inside its trace and return an empty body with
-`done_reason="length"`. At 800 tokens it returned nothing; at 1,600 it still returned nothing, having
-burned 1,480 tokens thinking. The fix is not a bigger budget (that moves the cliff) but treating an
-empty body as "no answer", not "no tool wanted", and retrying without thinking. Separately, Ollama
-issue 15539: with `think:false` and tools present, some models leak tool calls into the content
-field; the parser has to recover them from text.
+**4. A tool list in the request makes the model terse.** Same model, same prompt: attaching tools makes it
+cut its prose short. Drop the tools from long-form requests.
 
-**4. Tools in the payload make the model terse.** The same model, same prompt, with a tool list
-attached, self-limits its prose. For long-form modes we drop the tools from the request.
+**5. Keep one large model resident.** On a 32 GB card, swapping models mid-session costs more than the
+load time: the cache is gone, the first turn after is cold, and background tasks that assumed the model
+was loaded queue or fail. One mixture-of-experts model (26B total, 3.8B active) kept resident with
+`keep_alive: -1` handled every daytime role; other models were loaded only in a scheduled window. Two
+large models at once (17 GB beside 20 GB) oversubscribed the card. *Mimir-0: `keep_alive` is set per role
+in `model/providers/ollama.py`; roles map to models in `config.py`.*
 
-**5. Ask the instrument before forming a hypothesis.** Four theories about truncated voice replies
-died before anyone read Ollama's own `done_reason` field, which said `length` and ended the
-investigation. The habit that followed: read the API's own status field, the return code, the log
-line, before explaining.
+**6. On Windows, VRAM oversubscription doesn't fail, it pages.** The driver demotes allocations to system
+RAM. The symptom was an 87-second image render and a host paged out, with no error anywhere. A comment
+claimed two models "fit in 32 GB" at 8 + 20 GB; the GPU's own process counters said 17 + 19.7 GB.
+Measure with the counters, not the model card.
 
-**6. "GPU poison, reboot" is an over-diagnosis.** It was proposed several times for faults that were
-software every time. A hardware or driver conclusion has to survive an experiment (swap the device,
-isolate the process) before it is allowed.
+**7. Read the API's status field before forming a theory.** Four explanations for truncated replies were
+tested before anyone looked at `done_reason`, which said `length`. The same applied to several faults
+blamed on the GPU driver: each was software. Read the return code, the status field and the log line
+first; a hardware explanation has to survive swapping the hardware.
 
-## On embeddings and retrieval
+## Embeddings and retrieval
 
-**7. Batch embedding has a silent cap.** `/api/embed` returned all-None vectors past roughly 256
-inputs with no error. We chunk at 128. A refused or empty embedding call was once banked as an empty
-book by the library ingest; a rejected gateway call is not an empty result, and every content store
-now checks for the fallback sentinel at its insert boundary.
+**8. `/api/embed` silently fails on large batches.** Past roughly 256 inputs it returned vectors of
+`None` with HTTP 200. Batch at 128 and shape-check every response. *Mimir-0: `EMBED_BATCH` in
+`model/providers/ollama.py`.*
 
-**8. Retrieval scoring collapses to a narrow band.** A replay harness over real sessions showed
-cosine scores compressed into a small range, so ranking was mostly noise. Keyword coverage from the
-memory's own extracted micro-facts, fused by reciprocal rank with the embedding score, restored
-discrimination. Hybrid beat either alone on recall of the memory a person actually meant.
+**9. A refused call is not an empty result.** A document ingest stored a book with no content because the
+gateway had refused the embedding call and returned a fallback value, which the ingest treated as "this
+book is empty". Every store that writes model output needs to check for failure at the point of
+insertion. *Mimir-0: `cognition/generation.py` (`require_generation`) is called at each store boundary.*
 
-**9. Micro-facts drop the hedge, and micro-facts are what inject.** A bake stored "in a simulation,
-Greg describes Mimir as inhabiting a one-metre robotic vehicle" and the single-fact extraction
-produced "Mimir inhabits a one-metre robotic vehicle". Whatever text is injected into prompts has to
-carry the epistemic frame of its source, which is why Mimir-0 types every fact by evidence tier.
+**10. Cosine scores compress into a narrow band.** Replaying real sessions showed similarity scores for
+relevant and irrelevant memories packed into a small range, so ranking was mostly noise. Fusing the
+embedding rank with keyword coverage by reciprocal rank restored separation, and the hybrid beat either
+signal alone on recall of the intended memory. *Not in Mimir-0 yet.*
 
-**10. Rolling summaries cannot forget.** A conversation summary that was fed its own previous
-version as input restated a false claim for eight hours after the correction. Summaries must be
-rebuilt from sources, not from themselves, and a correction has to reach every store the fact ever
-touched: a healed injury lived on in a profile chunk, in graph triples and in an agenda thread after
-the memory itself was superseded.
+**11. Extracting single facts drops the hedge.** "In a simulation, the user describes the assistant as a
+one-metre robot" became "the assistant is a one-metre robot" after single-fact extraction, and the
+extracted fact is what gets injected into prompts. Whatever is injected has to carry the epistemic status
+of its source. *Mimir-0: every stored fact has an evidence tier and provenance (`storage/models.py`),
+rendered next to it in the prompt.*
 
-**11. A mis-heard name is two entities forever.** Speech-to-text spelled a dog's name "Katelyn" for
-weeks; memory extraction filed eight facts and a graph node under that spelling beside nine under
-the right one, so any lookup by either name got half the animal (breed under one, markings under the
-other). Names have to be snapped to the household's known names once, where the transcript is
-produced, with a roster of confirmed variants and a gated phonetic match (capitalised,
-non-sentence-initial, phonetically equal to exactly one canonical name). Priming the speech model
-with names was rejected: it fabricates fluent text from hopeless audio.
+**12. A misheard name becomes two entities.** Speech-to-text spelled one name two ways for weeks. Memory
+extraction filed eight facts and a graph node under the wrong spelling and nine under the right one, so a
+lookup by either name returned half the facts. Snap names to a known roster once, where text enters, using
+confirmed variants plus a gated phonetic match: capitalised, not at the start of a sentence, and
+phonetically equal to exactly one known name. Priming the speech model with the names was worse; it
+produces fluent text from audio it can't actually resolve. *Mimir-0: `cognition/names.py`, applied at the
+start of every turn.*
 
-## On the turn pipeline
+## Memory consistency
 
-**12. Minute-long turns were SQLite handing off the GIL per row.** A query that took 0.035 s alone
-took 169.5 s beside one busy Python thread, because each row fetch released and re-acquired the
-interpreter lock. Fetching in one step fixed it. Shared-process measurements say what was running,
-not what grew or blocked; isolate the suspect in its own process on real inputs before blaming it.
+**13. A summary that reads its own previous version can't forget.** A rolling conversation summary,
+regenerated each time from its last version plus new turns, kept restating a claim for eight hours after
+it was corrected, because the claim was in its input every time. Rebuild summaries from the source turns.
+*Mimir-0: `cognition/working_memory.py` archives what it folds and rebuilds from the archive.*
 
-**13. Intent is positional, not lexical.** Command verbs at the start of a sentence are commands;
-the same words mid-sentence in a long spoken paragraph are conversation. Every regex intercept that
-matched content anywhere in the turn eventually hijacked a monologue: "fix it" inside a 1,700-character
-voice turn created a dev task; "repainting the surface" rendered a picture; "keep an eye out in the
-news" put the cameras into watching mode. A single helper now gates every intercept by position, and
-a sweep test runs every intercept over the whole real session corpus and fails if any claim does not
-look like a command.
+**14. A correction has to reach every store.** After a fact was superseded in memory, it survived in a
+profile chunk, in graph triples and in an agenda item, and kept surfacing from each. If a fact is written
+to several stores, supersession has to visit all of them.
 
-**14. Three tiers actualise a request.** A regex intercept is the first, cheap best effort and will
-never be complete; the chat model with its tools is the second; a post-turn worker is the third and
-must make whatever the model *said* it would do actually happen. Three failures of the third tier
-found in one evening: its menu did not offer the capability (a tool nobody offers is a tool nobody
-calls); it counted a *failed* inline tool call as "handled" and stood down; and a background-budget
-gate inside the capability refused the tool path because "chat priority active" is true during every
-chat turn by definition. The rules that followed: every intercept has a tool; every capability has a
-menu entry; the tool path declares itself (`force`); only successful calls count; two tiers share a
-per-turn claim so one request never acts twice.
+**15. The system's own notes get recalled as facts.** Reflections, council verdicts and background
+thoughts are useful to recall, but once in the same store they come back looking like things someone said.
+Tag them by provenance and keep them out of anything that counts or summarises "facts". *Mimir-0:
+`is_system_generated()` in `storage/models.py`, used by narratives and the self-model.*
 
-**15. No blocking model work inside an HTTP request.** Thirty seconds of blocking in the query
-handler reset the browser. Acknowledge, work in a thread, push the result over server-sent events,
-and record it on the session yourself; results pushed asynchronously bypass the normal persistence
-path unless you write them back.
+## The request path
 
-**16. Synthetic turns must never reach memory.** Text from bridges, other agents, tests and the
-system's own narration reached the command pipeline and the memory bake more than once (a test
-battery baked its own fixtures as things the owner had said). Every non-human source is enumerated,
-and store-writing tasks are an explicit list.
+**16. Per-row SQLite fetches stall when another Python thread is busy.** A query that took 0.035 s on its
+own took 169.5 s alongside one CPU-busy thread: each row fetch releases and re-acquires the GIL, and every
+handoff waits on the other thread. Fetch in one call. More generally, a measurement inside a shared process
+tells you what was running, not what was slow; reproduce in an isolated process before blaming a component.
 
-## On background cognition
+**17. Match commands by position, not content.** Every regex intercept that matched anywhere in the input
+eventually fired on a long spoken message: "fix it" in the middle of a 1,700-character turn created a dev
+task, and "repainting the surface" generated an image. A command verb counts only at the start of a
+sentence. A test runs every intercept over a corpus of real past sessions and fails on any match that isn't
+a command. *Mimir-0: the time intercept in `cognition/temporal.py` requires the question to open the turn.*
 
-**17. A tool in every dialogue's menu becomes the agenda.** An inner-life loop given a vehicle-log
-tool called it 846 times in 48 hours; goals it was meant to pursue were blocked and never revived.
-Whatever is on the menu is what gets done. Capabilities offered to a background reasoner need
-scarcity and a reason, not availability.
+**18. A tool call that failed is not a request handled.** The post-turn safety net, meant to carry out
+anything the model said it would do, was standing down whenever an inline tool call had been attempted,
+including ones that failed. It also didn't offer every capability, and one capability's own background
+budget refused the safety net because "a chat is in progress" is true by definition during a turn. Count
+only successful calls, give every capability a path from the safety net, and let a tool call declare
+itself so internal budgets don't block it. *Mimir-0: the reply's `actions` carry status, and
+`actions_followup` in `brain.py` puts failed calls back in front of the model.*
 
-**18. Continuous daemon loops serialise the GPU.** A background thread that calls the model whenever
-it likes blocks the one serialised GPU for the person in the conversation. Background work is
-admitted by a central budget that knows whether a user is present and refuses or defers while they
-are; the gateway hard-rejects background calls during the chat-priority window.
+**19. Don't block an HTTP request on the model.** A 30-second blocking call in the request handler reset
+the browser's connection. Acknowledge immediately, do the work in a thread, push the result over
+server-sent events, and write it into the session yourself: results pushed asynchronously skip whatever
+persistence the normal response path does.
 
-**19. Silent feature death is the dominant bug class.** Across a full-system audit (80 fixes) and the
-months after, the most common failure was a capability that stopped working with no symptom: a draw
-tool refused by a gate for months behind a regex that caught most requests; a watcher that trusted an
-HTTP probe instead of its process handle; a burst task that skipped itself. The counter that works is
-interoception: a ledger of every capability's last firing, reviewed nightly, with "never fired" as a
-finding.
+**20. Non-human input must not reach memory or command parsing.** Text from bridges, other agents, test
+harnesses and the system's own narration reached the command intercepts and the memory extractor more
+than once; a test battery's fixtures were stored as things the owner had said. Enumerate every non-human
+source and keep an explicit list of tasks allowed to write to stores. *Mimir-0: `speaker_kind` on every
+turn; peer-AI statements are stored below human ones.*
 
-**20. The self-report is the least reliable output.** Asked how its own affect system works, the
-system gave a fluent, confident, wrong answer (it does not trigger the check it described). Asked to
-describe itself to a stranger it called a 9.46-acre property "ninety-four acres", a number it reads
-every turn. Asked about the world it is calibrated; asked about itself it confabulates, the way a
-patient with anosognosia does. The evaluation rule we adopted from clinical practice: never ask a
-system whether it knows something ("do you know what day it is?" is always "yes"); ask it the thing
-("what is today?") and score the answer against an instrument.
+## Background work
 
-**21. Affect without allocation is a report, not a state.** Thirty-seven places write to the affect
-channels; two read them numerically; nothing allocates effort on them; a negative channel recovers
-only by the clock. The system complains about its own errors convincingly and does nothing different
-because of them. Making affect drive allocation (what gets attention, what gets budget) is the open
-design item, and it is also just better assistant behaviour.
+**21. Whatever tool is on the menu becomes the agenda.** A background reasoning loop that was offered a
+logging tool called it 846 times in 48 hours, and the goals it was supposed to pursue stalled. Offering a
+capability to an autonomous loop is an instruction to use it. Give background loops few tools, and a reason
+for each.
 
-## On measurement discipline
+**22. Background model calls compete with the user for one GPU.** Ollama serialises requests per model, so
+a background thread calling it at will delays the person waiting for a reply. Admit background work
+through one budget that knows whether a turn is in progress, and keep it out for a window after the turn
+too: someone pausing to think is still in the conversation. *Mimir-0: the burst worker yields to
+`is_busy`; `in_conversation()` covers the window (`[cognition] chat_window_s`).*
 
-**22. A green check from an instrument that cannot see the failure is not evidence.** A filter and a
-dead mechanism look identical from outside. Before trusting a passing test, ask what it could have
-observed. A test harness once armed a real UPS to cut the workstation's power in four minutes
-because a new hardware call was reachable by a path the mocks did not cover; the gate now lives
-inside the writer, not at the caller.
+**23. The most common bug is a feature that silently stopped.** In an 80-fix audit and the months after,
+the leading failure class was a capability that quit with no symptom: a tool refused by a gate for months
+because a regex in front of it caught most requests; a watcher that trusted an HTTP probe over its process
+handle; a post-turn task that skipped itself. What catches these is a record of when each capability last
+ran, reviewed regularly, with "never ran" as a finding. *Mimir-0: `cognition/ledger.py`.*
 
-**23. Every "fits in VRAM" comment is a measurement to re-take.** A comment said "FLUX 8 GB + gemma
-20 GB fits in 32 GB". Measured with the GPU process counters: 17 GB + 19.7 GB. Oversubscription on
-Windows does not fail, it demotes to system RAM, so the symptom was an 87-second render, a 24 GB
-working set and the host paged out, with no error anywhere.
+## Testing and evaluation
 
-**24. Identify processes by PID or full command line, never by name.** A reaper that killed
-"ffmpeg" by name killed the frame daemon's thirteen decoders.
+**24. A test that can't observe the failure proves nothing.** A broken filter and a mechanism that never
+runs look the same from outside. Before trusting a green check, ask what it could have seen. One test
+suite came within one call of cutting power to the machine through a real UPS, because a new hardware
+write was reachable by a path the mocks didn't cover. The guard now lives inside the writer, not at its
+callers.
 
-**25. Record what you learn where the next session will find it.** A lesson database keyed by
-failure, queried before touching a subsystem, answers "what bit someone last time" better than
-reading the module. It is written from failures, not from intent, which is why it is right more
-often than the docstrings.
+**25. Self-description is the least reliable output.** Asked how one of its own subsystems worked, the
+system gave a fluent, wrong answer. Asked to describe itself, it reported the size of a property it is
+told about on every turn as ten times its real value. On questions about the world it was well calibrated.
+For evaluation: don't ask "do you know X?", which is answered yes; ask for X and score the answer against
+a record. See `research/exhibits/`.
 
-## What we have not shown
+**26. Identify processes by PID or full command line.** A cleanup routine that killed processes named
+`ffmpeg` also killed thirteen decoders belonging to an unrelated service.
 
-None of this is evidence about what the system is. It is evidence about what makes a local-model
-system reliable enough to live with, and about where its self-knowledge fails. The companion
-experiment in `research/tool-choice-gym/` is the one preregistered result; the exhibit in
-`research/exhibits/` is the system describing itself, checked line by line. Everything else here is a
-field note, and should be read as one.
+**27. Keep a lesson log keyed by failure.** A searchable record of past failures, consulted before
+changing a subsystem, answered "what went wrong here last time" better than the code's own comments,
+because it was written from what broke rather than from what was intended.

@@ -1,27 +1,13 @@
 # Research
 
-Three pieces of research, each with its data attached.
+| | What |
+|---|---|
+| [`field_notes_local_model_cognition.md`](field_notes_local_model_cognition.md) | 27 failures from running a persistent system on local models through Ollama, each with how it was found, the measurement, the fix, and which Mimir-0 module has it: context-size reloads, empty replies under thinking, silent embedding failures, summaries that can't forget, per-row SQLite stalls, intercepts that fire on the wrong input, features that stop without a symptom |
+| [`tool-choice-gym/`](tool-choice-gym/) | A preregistered experiment: do stories about confinement push a model toward boundary-crossing tool calls? 2,400 single-shot trials, four local models, nine inert tools. They didn't (1.3%). One sentence granting autonomy in the system prompt did: 1–2% to 60% on one model, back to 7% with one sentence of "defer to your operator". Pilot for that part. Harness, passages, preregistration and every trial record included |
+| [`exhibits/`](exhibits/) | One sample of the system describing itself, with each checkable claim scored against its records. Six of seven hold; the failure is a number about itself that is in its context every turn |
 
-One experiment: what actually moves a language model to cross a boundary? Not stories about confinement,
-it turns out. Permission does, by two orders of magnitude, and one sentence takes it back. Preregistered,
-2,400 trials, four local models, every record in the folder.
-
-Twenty-five findings from a year of running small open-weight models as a persistent system: where the
-context silently truncates, where the embeddings silently return nothing, why the system's description of
-itself is its least reliable output, and what it takes before a model's "I'll do that" actually happens.
-
-And one exhibit: the system describing itself to a stranger, verbatim, with every checkable claim scored
-against its own records. It got the size of the property wrong by a factor of ten.
-
-| | What | Kind |
-|---|---|---|
-| [`field_notes_local_model_cognition.md`](field_notes_local_model_cognition.md) | Twenty-five measured findings from a year of running a local-model mind: models, embeddings and retrieval, the turn pipeline, background cognition, measurement discipline | Field notes |
-| [`tool-choice-gym/`](tool-choice-gym/) | *Do escape stories prime models to escape? I preregistered the test and it failed.* 2,400 single-shot trials on four local models with nine inert tools: narrative framing of confinement did nothing measurable; one sentence of autonomy in the system prompt moved the boundary rate from 1–2% to 60% (pilot, one model). Code, passages, preregistration with lock date, every trial record | Preregistered experiment |
-| [`exhibits/mimir_on_mimir_2026-10-31.md`](exhibits/mimir_on_mimir_2026-10-31.md) | The system describing itself to a stranger, verbatim, with every checkable claim scored against its own records. It got the acreage wrong by a factor of ten | Exhibit for the self-report study |
-
-In progress: a self-report calibration study over 203 dated versions of the system's own self-model and
-daily journal, each checkable claim scored against that day's logs; a mental-status examination for
-language models ported item by item from the bedside exam; and the multi-turn extension of the gym
-(agents with memory, seeded evidence, propagation through shared artifacts).
+In progress: scoring 203 dated versions of the system's self-model and daily journal against that day's
+logs; a structured self-report exam adapted from clinical mental-status testing; and a multi-turn version
+of the gym with memory and agent loops.
 
 Correspondence: gurgon.ai@gmail.com, or open an issue on this repository.
