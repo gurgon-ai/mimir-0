@@ -1,9 +1,17 @@
 # Research
 
-What a year of running a home AI on local, open-weight models taught me, with the numbers. The system
-itself is a 275k-line Python project on one workstation; Mimir-0, the library in this repository, is its
-cognition core. Written by Greg Korpela. Claude Code did much of the building, and the notes say so where
-one is about something it did.
+Three pieces of research, each with its data attached.
+
+One experiment: what actually moves a language model to cross a boundary? Not stories about confinement,
+it turns out. Permission does, by two orders of magnitude, and one sentence takes it back. Preregistered,
+2,400 trials, four local models, every record in the folder.
+
+Twenty-five findings from a year of running small open-weight models as a persistent system: where the
+context silently truncates, where the embeddings silently return nothing, why the system's description of
+itself is its least reliable output, and what it takes before a model's "I'll do that" actually happens.
+
+And one exhibit: the system describing itself to a stranger, verbatim, with every checkable claim scored
+against its own records. It got the size of the property wrong by a factor of ten.
 
 | | What | Kind |
 |---|---|---|
