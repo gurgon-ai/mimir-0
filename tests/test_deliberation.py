@@ -39,9 +39,9 @@ def test_additive_relations_are_not_surfaced(brain: Mimir) -> None:
     # Regression for the worst real failure: "has 16-core; has 64GB; has RTX 5090" is a spec LIST,
     # not a disagreement — the council was reasoning itself out of true hardware facts.
     for obj in ("a 16-core CPU", "64 GB of RAM", "an RTX 5090"):
-        save_triple(brain._storage, Triple(subject="Parent system", relation="has", object=obj))
+        save_triple(brain._storage, Triple(subject="Workstation", relation="has", object=obj))
     conflicts = surface_conflicts(brain._storage, embedder=brain._embedder)
-    assert not any(c.key.startswith("graph:parent system|has") for c in conflicts)
+    assert not any(c.key.startswith("graph:workstation|has") for c in conflicts)
 
 
 def test_curate_caps_to_limit(brain: Mimir) -> None:

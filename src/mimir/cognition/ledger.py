@@ -1,21 +1,19 @@
 """ledger.py — the capability ledger: when did each part of the system last do anything?
 
-Silent feature death was the dominant bug class in the production system this core came from: a
-tool refused by a gate for months behind an intercept that caught most requests; a watcher that
-trusted an HTTP probe instead of its process handle; a post-turn task that skipped itself. Nothing
-anywhere was different for any of it, because nothing recorded that a capability had stopped
-firing. A system that cannot feel a part of itself stop cannot fix it, report it, or route
-around it.
+In a long-running system the most common failure is a feature that stops with no symptom: a tool
+refused by a gate while a regex in front of it handles most requests, a watcher that trusts an HTTP
+probe instead of its process handle, a post-turn task that quietly skips itself. Nothing errors, so
+nothing is noticed, because nothing records that the capability stopped running.
 
-This is the sense. Every capability the brain exposes — tools, burst tasks, sleep phases, the idle
-loops — is *registered* here at boot and *touched* whenever it runs. The ledger persists in the kv
-table (one JSON document, written through the storage gateway's single writer), so it survives a
-restart. :meth:`CapabilityLedger.review` turns it into findings: registered and never fired after a
-grace period, or fired before but not for longer than ``stale_after_s``. The brain puts those into
-the system-health prompt section and the nightly digest; the operator sees them in the UI.
+Every capability the brain exposes (tools, burst tasks, sleep phases, idle loops) is *registered*
+here at boot and *touched* whenever it runs. The ledger is one JSON document in the kv table,
+written through the storage gateway, so it survives restarts. :meth:`CapabilityLedger.review` turns
+it into findings: registered but never run after a grace period, run before but silent for longer
+than ``stale_after_s``, or running but failing every time. The brain puts findings into the system-
+health prompt section and the nightly digest.
 
-Touching is cheap (a dict write and one small kv write) and never raises — a ledger fault must not
-break the capability it was recording (DESIGN §10).
+Touching costs a dict write and one small kv write, and never raises: a ledger fault must not break
+the capability it was recording.
 """
 
 from __future__ import annotations

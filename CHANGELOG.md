@@ -46,7 +46,7 @@ much larger UI). Schema v9 → v24.
   `max_model_size_b` defaults to 30; `DEFAULT_TOP_K` 6 → 10; `[library] claims_top_k` 5 → 8; output-RAG
   and the citation guard are on by default.
 
-### Added (2026-10-31, from the production system's incident record)
+### Added (2026-10-31)
 - `cognition/generation.py`: a guard at every store boundary. Sentinel, self-model and council refuse
   to store an empty or placeholder generation; a council voice that failed is not answered,
   synthesised or filed as a position.
@@ -66,7 +66,7 @@ much larger UI). Schema v9 → v24.
 - `Mimir.in_conversation()` and `[cognition] chat_window_s` (300): the sleep scheduler and the idle
   latency prober stay clear for a window after the last turn, not just during one.
 - `cognition/names.py` and `[identity] known_names` / `name_variants` / `snap_names`: heard or
-  mistyped names snap to the household roster at the turn, before bake, graph or recall.
+  mistyped names snap to a roster of known names at the turn, before bake, graph or recall.
 - Ollama: `keep_alive` is a top-level field a role may set (`-1` = always warm); an empty body with
   `done_reason == "length"` under thinking is retried once with thinking off; embeddings go in
   batches of 128 and are shape-checked (a short or `None` batch raises instead of blanking).
@@ -81,8 +81,6 @@ much larger UI). Schema v9 → v24.
   `is_current_config`.
 - `recent_by_kind` / `count_memories` exclude archived rows unless asked; `prune_kind` prunes only
   live rows; `prune_archived` bounds the archived window.
-- Public-clean pass: employer document names, LAN addresses, a machine nickname and private paths
-  removed from code, tests and docs.
 
 ### Security
 - Integration API auth: `[server] api_token` / `MIMIR_API_TOKEN` (renamable via `api_token_env`) gates
@@ -93,7 +91,7 @@ much larger UI). Schema v9 → v24.
 - Peer-AI source tier: `speaker_kind` on the turn API, `[identity] peer_agents`, a decaying
   `STATED_BY_PEER` tier (0.95); kind overrides identity, so a peer cannot reach a human tier by renaming itself.
 - The tool dispatcher schema-validates and trust-gates state-changing actions; peers and guests cannot actuate.
-- Added `SECURITY.md` (disclosure policy, scope, the not-hardened caveat). `CLAUDE.md` untracked from the public repo.
+- Added `SECURITY.md` (disclosure policy, scope, the not-hardened caveat).
 
 ### Added
 - Extensibility ports (`docs/EXTENSIBILITY.md`, `cognition/tools.py`): sensory `ContextSource`, motor `Tool`

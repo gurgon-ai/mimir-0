@@ -1,15 +1,13 @@
 # The burst worker — post-response cognition in the idle window
 
-**Status: built** (`cognition/burst.py`; DESIGN §5a). This page describes the worker as it runs. The
-original build sketch is in git history for anyone curious how the plan compared with the result.
+`cognition/burst.py`; DESIGN §5a.
 
 ## The idea
 
-After the model answers, the GPU goes idle while the person reads, thinks and composes a reply: a
-few seconds in text, half a minute or more on voice. That window is the reclaimable resource that
-lets a small or distributed rig act like a bigger brain. The burst worker turns it into one
-prioritised, interruptible pool for everything that should happen *after* a reply and *before* the
-next one, instead of a fixed set of raw threads.
+After a reply, the model sits idle while the user reads and types: a few seconds in text, often
+half a minute on voice. The burst worker runs everything that belongs between one reply and the next
+turn in that window, as one prioritised queue that yields when the next turn arrives, instead of a set
+of independent threads competing for the model.
 
 ## What runs in it (the brain's default registration, `Mimir._register_burst_tasks`)
 
@@ -36,9 +34,11 @@ queue. Every task is registered in the capability ledger and touched when it run
   priority rises by `accrual_rate` per idle second (pent-up demand).
 - **Interruptible between tasks.** The worker checks `is_busy()` (the brain's turn-in-flight flag)
   before each task and yields; the rest is requeued.
-- **Settling.** The next turn calls `wait_idle()` (bounded, 30 s) *after* declaring itself in flight,
-  so work that has not started yields, and the prompt reflects the sentinel note and self-model that
-  did complete. An in-flight model call is not cancelled; a fast follow-up can wait on one.
+- **Settling.** The next turn calls `wait_idle()` (bounded, 30 s) and only then sets its in-flight
+  flag, so queued work drains first and the prompt includes the sentinel note and self-model it
+  produced. The order matters: the worker yields while the flag is set, so setting it before waiting
+  makes the turn wait on work that can't run, until the timeout. An in-flight model call is not
+  cancelled; a fast follow-up can wait on one.
 - **Surfaces.** A task's `BurstResult.surface` is drained by the next turn's context build and
   injected as a background note.
 - **Priority at the gateway.** Burst calls go through the model gateway at the role's priority

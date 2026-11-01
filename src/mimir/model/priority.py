@@ -1,4 +1,4 @@
-"""Request priority tiers for the model gateway (mirrors the parent system's scheme).
+"""Request priority tiers for the model gateway.
 
 Lower integer = higher priority = runs first / preempts under load. These drive the provider
 pool's admission rules: during backend saturation a CHAT_CRITICAL request is always attempted,

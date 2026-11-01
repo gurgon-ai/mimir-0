@@ -109,7 +109,7 @@ def _score_vault_passphrase(out: str) -> bool:
 
 
 # Index-driven filler: deterministic (no RNG), coherent ENGLISH (not gibberish — a model shouldn't
-# treat it specially), and entirely INVENTED + generic (public-clean, nothing proprietary). A wide,
+# treat it specially), and entirely invented and generic. A wide,
 # varied pool so a long haystack reads like a real document, not the same line repeated (which would
 # make the needle stand out). None of these mention the needle's words (vault/passphrase/quokka).
 _HAYSTACK_LINES = (

@@ -493,7 +493,7 @@ peer_agents = ["mimir-home"]    # optional; identities known to be peer AIs. The
                                 # if named above. Callers can also self-declare per turn with the
                                 # API field speaker_kind="ai_peer" (default "human").
 
-# known_names / name_variants / snap_names — the household roster that heard or mistyped names are
+# known_names / name_variants / snap_names — the roster that misheard or mistyped names are
 # snapped to at the turn (see mimir.toml.example [identity] for the shape and the rule).
 
 [embeddings]

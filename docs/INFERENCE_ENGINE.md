@@ -4,8 +4,7 @@
 engine that the rest of Mimir bolts onto. It extends `DESIGN.md` §4 (model-agnostic by role) and §5
 (the fleet) into a complete contract: how models are *discovered*, *measured*, *trusted*, *routed*,
 and *kept current* — and how a new user goes from a clone to a running, qualified fleet without
-reading the source. It is explicitly **beyond the scope of the private system Mimir-0 was distilled
-from**, and deliberately so (see Motivation).
+reading the source.
 
 Each subsection marks **[built]**, **[partial]**, or **[proposed]** so the doc stays honest about
 current state.
@@ -61,8 +60,8 @@ $10k AI box), the engine *is* the difference between good and useless cognition.
    role assignment, or a skipped step always wins.
 6. **Fail loud.** No silent fallback to an unqualified model; no silent staleness; misconfiguration
    and degradation are surfaced, not swallowed (`DESIGN.md` §10).
-7. **Zero added dependencies, public-clean.** The wizard is the existing stdlib `http.server` UI;
-   nothing here introduces a runtime dependency or copies private code.
+7. **Zero added dependencies.** The wizard is the existing stdlib `http.server` UI; nothing here
+   introduces a runtime dependency.
 8. **Headless parity.** Every wizard choice has a `mimir.toml` equivalent, so edge/server/CI deploys
    configure identically without a browser.
 
@@ -488,7 +487,7 @@ don't quietly collapse two distinct families into one (which would fake diversit
 
 ## 12. Non-negotiables (must hold for every part)
 
-Zero core runtime dependencies · stdlib-only web wizard · public-clean (no private code) · fail-loud
+Zero core runtime dependencies · stdlib-only web wizard · fail-loud
 · headless parity with the wizard · the core §6 loop still boots with no models installed.
 
 ---

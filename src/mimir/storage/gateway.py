@@ -4,8 +4,7 @@
 writer thread it owns. There is no other path to a write. Reads stay direct (SQLite WAL allows
 many readers alongside the one writer), so reads do not queue behind writes.
 
-Hardened internals (the patterns proven in the parent system's single-writer, reimplemented
-clean):
+Internals:
 
 - **Priority queue** — interactive writes jump ahead of background ones.
 - **Batching** — ops that arrive close together are applied in one transaction, so the write
@@ -46,7 +45,7 @@ WriteFn = Callable[[sqlite3.Connection], Any]
 
 
 class Priority:
-    """Write priority — lower runs first (mirrors the parent system's tiers)."""
+    """Write priority — lower runs first."""
 
     CRITICAL = 0  # interactive writes a user is waiting on
     USER_ADJACENT = 10  # bakes, sentinel notes — post-turn, someone may read them back

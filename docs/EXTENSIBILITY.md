@@ -8,7 +8,7 @@ sensors, or actuators. That doctrine does not change. What this document specifi
 attach: instead of one narrow door (`POST /api/turn`, text→prose), the brain exposes **four typed
 ports**, each a clean Protocol + a registry + a construction-time injection point. A **connector** is
 anything a user writes against a port. The **core ships the ports and the protocols** (and trivial
-reference connectors), and **never a real integration** — so it stays public-clean and
+reference connectors), and **never a real integration** — so it stays generic and
 zero-dependency while making "build your own IO" a small job instead of a fork.
 
 This honors the same law as the rest of the system (`DESIGN.md`): Python + SQLite + one chat + one
@@ -79,8 +79,8 @@ class Tool:
 ```
 Registered **replace-by-name** (hot-safe) via `brain.register_tool(tool)` / `Mimir(config,
 tools=[...])`. A **keyword / always-on selector** caps how many tools reach the model per turn —
-small local models degrade sharply when handed too many (a hard-won lesson from the parent system),
-so this cap is load-bearing, not cosmetic.
+small local models pick tools noticeably worse as the list grows, so this cap is load-bearing, not
+cosmetic.
 
 **Invocation is tool-calling, not prose-scanning** (the chosen model): the model *deliberately*
 invokes a tool by emitting a structured in-band call — `<TOOL name="x" args={…}>` — generalizing the
@@ -190,7 +190,7 @@ It dogfoods three ports plus the sleep cycle:
    gap. **Opt-in and trust-flagged** — importing arbitrary modules is a security decision, off by
    default, surfaced loudly. **[proposed]**
 3. **Manifest / subprocess connectors** (Phase 4) — a language-agnostic, sandboxed, approval-gated
-   "drop a folder in" contract (JSON-in / JSON-out), modeled on the parent system's skills. **[proposed]**
+   "drop a folder in" contract (JSON-in / JSON-out). **[proposed]**
 
 ---
 
@@ -218,7 +218,7 @@ optional, never a core dependency.)
 
 - **Zero core dependencies** — ports + protocols only; a connector's deps are the connector's, never
   the core's. The mock provider + bootstrap embedder still boot the whole loop on Python alone.
-- **Public-clean** — core ships the *slots*, never an integration. Reference connectors are trivial
+- **No integrations in core** — core ships the *slots*, never an integration. Reference connectors are trivial
   (a `now` clock, an echo) and exist to document the contract + drive tests.
 - **Fail loud / never break the turn** — a faulty context source or reflex task degrades (logged);
   a tool handler returns an error *string*, never raises; an unknown/blocked action is refused loudly.

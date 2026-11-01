@@ -1,14 +1,15 @@
 """generation.py — the guard at every store boundary that persists model output.
 
-A rejected, empty or placeholder generation must never be stored as if it were content. The private
-system this core was extracted from learned that three ways: a refused gateway call was banked as an
-empty book; a reflection that spent its whole token budget thinking returned an empty body that was
-saved as the next turn's note; and a working-memory fold saved an empty summary and then deleted
-the exchanges it had "summarised". The check lives here, once, and the writers call it.
+A rejected, empty or placeholder generation must never be stored as if it were content. Each of
+these happens in practice: a gateway refuses a call and hands back a fallback value, which an
+ingest stores as an empty document; a reasoning model spends its whole budget thinking and returns
+an empty body, which is saved as the next turn's note; a working-memory fold gets an empty summary
+back, saves it, and deletes the exchanges it was meant to summarise. The check lives here, once,
+and every writer calls it.
 
-``is_valid_generation`` is deliberately conservative: it rejects nothing a model would plausibly
-mean. It catches the empty string, whitespace, the council's own ``[unavailable: …]`` placeholder,
-and the handful of error-shaped prefixes a provider or dispatcher can hand back as text.
+``is_valid_generation`` is deliberately conservative and rejects nothing a model would plausibly
+mean: the empty string, whitespace, the council's own ``[unavailable: …]`` placeholder, and the
+handful of error-shaped prefixes a provider or dispatcher can return as text.
 """
 
 from __future__ import annotations

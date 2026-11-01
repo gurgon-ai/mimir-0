@@ -87,10 +87,9 @@ def synthesize_working_memory(
     The summary is REBUILT FROM SOURCES every time: the folded exchanges are archived (kept in
     store, out of recall) rather than deleted, and the new summary is written from the last
     ``SOURCE_WINDOW`` of them plus the ones being folded now. The previous summary is never fed
-    back in. A rolling summary that reads its own last version cannot forget: the private system
-    this came from restated a corrected claim for eight hours because the correction reached the
-    exchanges and the summary kept quoting itself. Older material falls off the window instead;
-    the daily narrative is the lossy long-term record.
+    back in. A rolling summary that reads its own last version cannot forget: a corrected claim
+    stays in the summary's input on every refresh, so the summary keeps restating it. Older
+    material falls off the window instead; the daily narrative is the lossy long-term record.
 
     An empty or placeholder generation is rejected before anything is saved or archived. Returns the
     new summary, or ``None`` if there wasn't enough to fold or nothing usable came back.

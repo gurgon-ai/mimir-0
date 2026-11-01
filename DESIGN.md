@@ -287,8 +287,7 @@ stored understanding's confidence is **derived from consensus** (a unanimous ver
 than a 3–2 split; a 50/50 split lands on the old flat default, and it never escapes the modest
 INFERRED band). The objection persists as its own attributed forum post. Parsing is tolerant — a
 model that ignores the format degrades to the whole reply as the conclusion, so a verdict is never
-lost to a formatting slip (§10). _(Ported from the home-AI moderator's rule: the most valuable
-output of an adversarial debate is the strongest objection that survives.)_
+lost to a formatting slip (§10). _(The most valuable output of an adversarial debate is the strongest objection that survives.)_
 
 ### The qualification battery — gate, rank, then watch
 "Could model X do the job as well as Y?" — don't guess; measure deterministically, rank, then watch.
@@ -408,8 +407,7 @@ models are acceptable for a role*; routing decides *which model on which node an
 A finding from months of running this on small, distributed compute (the project's origin): **after
 the model answers, the GPU goes idle while the user reads, thinks, and composes a reply.** In text
 that's a few seconds; **on voice it's 30 seconds or more, routinely**. That window is not dead time
-— it is *the* reclaimable resource that lets a small or distributed rig act like a much bigger brain.
-Reference design (proven in the parent system, to be rebuilt public-clean):
+— it is the main reclaimable compute on a small or distributed setup.
 
 > **Landed (the engine):** `cognition/burst.py` is the generic scheduler — pent-up-demand priority,
 > the two task classes, the slot cap, interruptibility (an injected `is_busy` predicate), and
@@ -528,7 +526,7 @@ graceful degradation on a slow box rather than starting work it can't finish. Ea
 checkpointed per-day in a generic `kv` table, so a same-night restart **resumes** and the cycle
 **never runs twice a day**, with **catch-up before noon** if the window was missed (a powered-off or
 restarted host). It always yields to a live turn, and a manual "run sleep now" forces the full cycle
-any time. This is the pattern lifted (clean) from the private home-AI's nightly cycle.
+any time.
 
 **Self-directed deliberation — the council argues the system's own conflicts. [landed]** A
 `deliberate` phase (after consolidation) turns the inner council from a hand-invoked tool into
@@ -545,8 +543,7 @@ hardware. The **curator is a filter, not just a ranker**: an LLM judges which su
 conflicts (it may answer *none*, and that's honored — no council), degrading to a deterministic weight
 order only on a model error. Each genuine conflict is submitted to the council; the verdict is stored
 as recallable understanding (`provenance="sleep deliberation"`). Conflicts argued recently are skipped
-so it doesn't loop. This is the public-clean analogue of the home-AI's nightly BBS/deliberation forum
-(its 16-persona forum + curator → our council + curator).
+so it doesn't loop.
 
 **The forum — deliberations made legible + governable. [landed]** Council runs (convened, asked, or
 self-initiated in sleep) persist as **threads**: one post per persona (tagged with the node+model that
@@ -641,8 +638,7 @@ needs.
   question living in one place, name/operator/location mirrored into the identity anchors. The
   LLM parse pass (one answer → several typed facts + triples, review-before-commit) is Phase 2)_,
   the qualification battery.
-- **v0.1+ — the extracted thinking layers** (the home AI's highest-leverage cognition, public-clean;
-  see §3e/§5a): ~~temporal grounding~~ _(landed: clock/calendar line + per-fact age + no-LLM time
+- **v0.1+ — the thinking layers** (see §3e/§5a): ~~temporal grounding~~ _(landed: clock/calendar line + per-fact age + no-LLM time
   intercept + interaction-gap awareness baselines)_, ~~temporal narratives~~ _(landed: hierarchical
   daily→weekly→monthly journal, lossy by design, written in the consolidation pass, injected as recent
   history)_, ~~the burst worker~~ _(landed: the idle-window scheduler that runs all post-response
@@ -725,7 +721,7 @@ be the least-fragile, loudest-failing, self-testing part of the system.
 - **The capability ledger (`cognition/ledger.py`) [built]** — every tool, burst task, sleep phase
   and idle loop is registered at boot and touched when it runs; never-fired (after a grace period),
   stale and always-failing capabilities are findings in the system-health section and the nightly
-  digest. Silent feature death was the dominant bug class in the parent system.
+  digest. A capability that stops with no error is the most common failure in a long-running system.
 - **A guard at every store boundary (`cognition/generation.py`) [built]** — an empty or placeholder
   generation is never stored, folded on, or filed as an argument.
 - **Proactivity is an isolated plugin** — idle/proactive behavior runs as a plugin whose failure

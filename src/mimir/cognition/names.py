@@ -1,26 +1,25 @@
-"""names.py — snap heard or mistyped names to the household's known names, once, at the door.
+"""names.py — snap misheard or mistyped names to known ones before anything is stored.
 
-A name the speech recogniser has never seen comes out the way it sounds. In the production system
-this core came from, a dog's name was transcribed "Katelyn" for weeks; memory extraction filed eight
-facts and a graph node under that spelling beside nine under the right one, so every lookup by
-either name got half the animal. The place to fix a heard name is where the text enters, before
-bake, graph and recall ever see it. Priming the speech model with names was rejected: it fabricates
-fluent text from hopeless audio.
+Speech-to-text writes an unfamiliar name the way it sounds, and people mistype names. If both
+spellings reach memory, the facts about one person or animal split across two entities and every
+lookup by either name finds half of them. The fix has to happen where text enters, before bake,
+graph and recall see it; correcting stored facts afterwards means finding every store they reached.
+(Priming the speech model with the names instead makes it produce fluent text from audio it
+couldn't actually resolve.)
 
-Two tiers, both logged:
+Two tiers, both reported back as ``(heard, canonical)`` pairs:
 
-1. **Variants** the operator has confirmed (``[identity] name_variants = { Caitlin = ["Katelyn"] }``)
-   and
-   user aliases snap anywhere, any case.
-2. **Phonetic match**: a capitalised word that is not the first word of its sentence
-   (recognisers and people capitalise proper nouns and sentence starts, nothing else), is not
-   itself a known name, and
-   whose consonant-skeleton key equals exactly one roster name's key with character similarity of at
-   least 0.5. "Code" at a sentence start stays "Code"; "Katelin" after "draw" becomes "Caitlin".
+1. **Confirmed variants** (``[identity] name_variants = { Caitlin = ["Katelyn"] }``) and user
+   aliases are replaced anywhere, in any case.
+2. **Phonetic match**: a capitalised word that isn't the first word of its sentence (recognisers
+   and people capitalise proper nouns and sentence starts, nothing else), isn't itself a known
+   name, and has the same consonant-skeleton key as exactly one known name, with character
+   similarity of at least 0.5. "Coal" at the start of a sentence stays "Coal"; "Katelin"
+   mid-sentence becomes "Caitlin".
 
-The roster is the operator and identity anchors, ``[identity] known_names``, and the capitalised
-words of the onboarding "household" and "pets" answers. Nothing here touches memory; it rewrites the
-turn text and reports what it changed.
+The roster is the operator, the identity anchors, ``[identity] known_names``, and capitalised words
+from the onboarding answers about who else is around. This module never touches memory: it rewrites
+the turn text and returns what it changed.
 """
 
 from __future__ import annotations
@@ -48,7 +47,7 @@ _CAP_WORD_RE = re.compile(r"\b[A-Z][a-z]{2,}\b")
 
 
 def phonetic_key(word: str) -> str:
-    """A small consonant-skeleton key: Katelyn/Caitlin/Kaitlyn → 'mk', Kohl/Cole → 'kd', Jon/John → 'jn'."""
+    """Consonant-skeleton key: Caitlin/Katelyn → 'ktln', Cole/Kohl → 'kl', Jon/John → 'jn'."""
     w = re.sub(r"[^a-z]", "", (word or "").lower())
     if not w:
         return ""
@@ -76,7 +75,7 @@ class Roster:
                 self.variants[v.lower()] = name
 
     def add_from_text(self, text: str) -> int:
-        """Harvest capitalised words from a free-text answer ("Sam, and the horses Pepper and Rex")."""
+        """Harvest capitalised words from free text ("Sam, and the horses Pepper and Rex")."""
         n = 0
         for m in _CAP_WORD_RE.finditer(text or ""):
             if m.group().lower() not in self.names:

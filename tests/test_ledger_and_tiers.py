@@ -222,19 +222,19 @@ def test_system_generated_provenance_is_kept_out_of_facts_and_self_model(brain: 
 
 
 def test_phonetic_keys_and_the_two_snap_tiers() -> None:
-    assert phonetic_key("Katelyn") == phonetic_key("Caitlin") == phonetic_key("Kaitlyn")
-    assert phonetic_key("Kohl") == phonetic_key("Cole")
+    assert phonetic_key("Caitlin") == phonetic_key("Katelyn") == phonetic_key("Kaitlyn")
+    assert phonetic_key("Cole") == phonetic_key("Kohl")
     r = Roster()
     r.add("Caitlin", ["Katelyn", "Kaitlyn"])
     r.add("Cole", ["Kohl"])
-    r.add_from_text("Sam, and the horses Pepper and Rex")
+    r.add_from_text("Sam, and the horses Pepper and Rocket")
     assert "pepper" in r.names and "sam" in r.names
     assert (
         snap("katelyn seems insistent. Draw Kohl and KATELYN together", r)[0]
         == "Caitlin seems insistent. Draw Cole and CAITLIN together"
     )
-    assert snap("Draw Katelin by the gate please", r)[1] == [("Katelin", "Caitlin")]  # phonetic tier
-    assert snap("Code is what we write. The code compiles.", r)[1] == []  # sentence start
+    assert snap("Draw Katelin by the gate", r)[1] == [("Katelin", "Caitlin")]  # phonetic tier
+    assert snap("Coal is cheap. The coal arrived.", r)[1] == []  # sentence start, then lower case
     assert snap("", r)[1] == []
 
 

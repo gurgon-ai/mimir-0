@@ -6,7 +6,7 @@ the qualifying tournament: while the fleet is being scored upstairs, Mimir gets 
 downstairs. By the time the questions are done, a chat model has qualified to make sense of them.
 
 This is a design brief, not the final UI copy. It is **v0.1+** — built after the v0 acceptance loop
-and the tournament land. It must stay public-clean and **generic**: the questions and their answers
+and the tournament land. It must stay **generic**: the questions and their answers
 become *seed config + memories*, never anything hardcoded into the core (see DESIGN §9; the household
 is the canonical example, not a baked-in assumption).
 

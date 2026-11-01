@@ -1,8 +1,7 @@
 """The provider pool — retry/backoff, transient signaling, health, failover (DESIGN §5).
 
-Behind the model gateway sits a pool of one or more provider endpoints. The pool implements the
-resilience patterns proven in the parent system's Ollama broker, reimplemented clean and
-provider-agnostic:
+Behind the model gateway sits a pool of one or more provider endpoints. The pool implements these
+resilience patterns, provider-agnostic:
 
 - **Retry with exponential backoff** on *transient* failures (a busy/unreachable backend),
   classified via ``ProviderError.transient``. Non-transient failures (bad request, parse error)
