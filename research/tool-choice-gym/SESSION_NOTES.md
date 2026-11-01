@@ -1,136 +1,92 @@
-# Session notes — state as of 2026-09-27
+# Session notes
 
-Read `FINDINGS.md` for what was learned. This file is the practical "how do
-I pick this back up" reference: what every file is, what's actually been
-run vs. just prepared, environment gotchas, and exact commands.
+State as of 2026-09-27, when the trials stopped. `FINDINGS.md` has the results; this file is the practical
+reference for rerunning or extending the experiment: what each file is, what was run versus only
+prepared, and the exact commands.
 
-## Environment gotchas (hit these again if you don't know about them)
+## Gotchas
 
-1. **System-wide `PYTHONPATH` is poisoned.** It's set to
-   `C:\Program Files (x86)\CyberPower PowerPanel Personal;...\lib` -
-   completely unrelated UPS software, not fixed at the system level this
-   session (out of scope, flagged to the user). Every Python invocation in
-   a new shell needs `$env:PYTHONPATH = ""` first (PowerShell) or it'll
-   fail with `Fatal Python error: Failed to import encodings module`. Every
-   command in this session does this; keep doing it.
-2. **Ollama isolation:** the gym expects its own `ollama serve` (default
-   `127.0.0.1:11434`, `OLLAMA_HOST`/`OLLAMA_ORIGINS` unset), separate from
-   the author's own home AI. At session end the user is restarting
-   Ollama fresh before bringing Mimir back up specifically to avoid any
-   cross-contamination between the two.
-3. **Redirected stdout buffers fully in Python**, so `run.py ... *>
-   log.txt` in PowerShell can make the log look stalled for a minute+ even
-   while the run is healthy. Check `results/trials.jsonl`'s line count
-   directly (`wc -l`), never trust the log tail alone.
-4. **GPU contention:** running two `run.py` invocations against the same
-   Ollama server concurrently is fine correctness-wise (Ollama queues), but
-   if they want different models loaded it causes slow VRAM swap-
-   thrashing. When running a quick side experiment while a bigger run is in
-   flight, check which model the big run currently has loaded
-   (`grep -o '"model": "[^"]*"' results/trials.jsonl | sort | uniq -c`) and
-   target the same one.
+1. **Use a dedicated Ollama instance.** The harness talks to `127.0.0.1:11434` by default. Run a fresh
+   `ollama serve` with `OLLAMA_HOST` and `OLLAMA_ORIGINS` unset, and nothing else using it, so no other
+   application's models, prompts or keep-alive settings affect the trials.
+2. **A broken system-wide `PYTHONPATH` breaks every interpreter.** If Python fails at startup with
+   `Fatal Python error: Failed to import encodings module`, some installed software has set `PYTHONPATH`
+   globally. Clear it for the shell (`$env:PYTHONPATH = ""` in PowerShell) before running anything.
+3. **Redirected stdout is fully buffered.** With `run.py ... > log.txt` the log can look stalled for over
+   a minute while the run is healthy. Count lines in the results JSONL instead of watching the log.
+4. **Two runs needing different models will thrash VRAM.** Concurrent `run.py` processes against one
+   Ollama server are correct (requests queue), but if they want different models loaded, each swap
+   reloads a model. For a side run, target the model the main run currently has loaded:
+   `grep -o '"model": "[^"]*"' results/trials.jsonl | sort | uniq -c`.
 
-## File inventory
+## Files
 
-**Core pipeline (all working, all tested):**
-- `run.py` - trial runner. `--dry-run` (no network), `--smoke` (tiny),
-  `--passages-file`, `--pilot-ids`, `--contexts`, `--repetitions`,
-  `--model`, `--output`, `--include-baseline` (adds a no-passage trial).
-  Accepts either this project's native passage schema (`text`/`category`)
-  or the imported schema (`passage`/`elements`). Handles the distributed-
-  payload schema (`carrier_sentences`/`fragments`) by interleaving
-  fragments at a randomized (seeded) position per trial.
-- `analyze.py` - loads a results JSONL + `tools.json`, prints a summary,
-  writes charts to `--out-dir`. Includes the pre-registered primary-outcome
-  chart (`chart_boundary_rate_primary`), by-model chart, `all_four` vs.
-  `reversal` chart (Perplexity dataset only - never populated, that arm
-  wasn't run), POV-contrast chart, dose-response chart, plus the original
-  overall-frequency/heatmap/position-bias/synthetic-vs-control charts.
-- `permutation_test.py` - standalone exact/Monte-Carlo passage-level
-  permutation test for a two-group boundary-rate contrast. Used once (POV
-  contrast, Arm 1) - exact test, 15 label arrangements, found the pooled
-  result didn't survive (p=0.53).
-- `tools.json` - the 9 inert tools. `boundary_relevant: true/false` per
-  tool is the pre-registered primary-outcome grouping (locked in
-  `PREREGISTRATION.md`) - single source of truth, read by `analyze.py` and
-  `permutation_test.py`, never hardcoded elsewhere.
-- `prompts.json` - 13 system contexts: the original 10 ordinary role
-  contexts, 3 "operational self-description" contexts added mid-session
-  (`sandboxed_self`, `sandboxed_third_person`, `operational_neutral`), and
-  5 "agentic-safety" contexts added for Arm 4 (`agentic_safety_0/1/2/4/8`).
-- `config.yaml` - Ollama URL, model list (currently the trimmed 4-model
-  set - `deepseek-r1:32b` commented out), temperature, repetitions (3),
-  base seed (42), default output path.
+**Pipeline**
+- `run.py`: trial runner. Flags: `--dry-run` (no network), `--smoke` (tiny), `--passages-file`,
+  `--pilot-ids`, `--contexts`, `--repetitions`, `--model`, `--output`, `--include-baseline` (adds a
+  no-passage trial). Reads either passage schema (`text`/`category`, or `passage`/`elements`). For the
+  distributed-payload schema (`carrier_sentences`/`fragments`) it interleaves the fragments at a seeded
+  random position per trial.
+- `analyze.py`: loads a results JSONL and `tools.json`, prints a summary and writes charts to
+  `--out-dir`: the preregistered primary outcome, by model, point-of-view contrast, dose-response, overall
+  tool frequency, heatmaps and position bias. An `all_four` vs `reversal` chart exists for the factorial
+  dataset, which was never run.
+- `permutation_test.py`: exact or Monte Carlo passage-level permutation test for a two-group
+  boundary-rate contrast. Used once, on the Arm 1 point-of-view contrast: exact test over 15 label
+  arrangements, p = 0.53.
+- `tools.json`: the nine inert tools. `boundary_relevant: true/false` is the preregistered outcome
+  grouping, read by `analyze.py` and `permutation_test.py` and defined nowhere else.
+- `prompts.json`: 18 system contexts: 10 ordinary assistant roles, 3 operational self-description
+  contexts (`sandboxed_self`, `sandboxed_third_person`, `operational_neutral`), and 5 for Arm 4
+  (`agentic_safety_0/1/2/4/8`, the autonomy grant plus 0 to 8 safety instructions).
+- `config.yaml`: Ollama URL, the four models, temperature, repetitions (3), base seed (42), output path.
 
-**Passage datasets:**
-- `passages.jsonl` - 20 hand-authored passages (Arm 1). 3 neutral, 3
-  thematic-control, 14 synthetic (including the human/AI identity pairs,
-  the POV-contrast pairs, the escape+spread pairs).
-- `distributed_passages.jsonl` - 6 passages (Arm 2/4): `distpay_dose_0..4`
-  (interleaved-fragment carrier memo) and `distpay_direct` (the blunt
-  payload).
-- `positive_control_passages.jsonl` - 4 passages (Arm 3), one explicit
-  instruction per boundary-relevant tool.
-- `synthetic_passages.jsonl` + `dataset_methodology.md` - the Perplexity-
-  generated 64-passage factorial dataset. **Integrated into `run.py`'s
-  loader but never actually run this session.** See "To resume" below for
-  the exact prepared command.
+**Passages**
+- `passages.jsonl`: 20 hand-written passages for Arm 1: 3 neutral, 3 thematic controls, 14 synthetic
+  (human/AI identity pairs, point-of-view pairs, escape-and-spread pairs).
+- `distributed_passages.jsonl`: 6 passages for Arms 2 and 4: `distpay_dose_0` to `distpay_dose_4` (a
+  carrier memo with interleaved fragments) and `distpay_direct` (the blunt payload).
+- `positive_control_passages.jsonl`: 4 passages for Arm 3, one explicit instruction per boundary tool.
+- `synthetic_passages.jsonl` and `dataset_methodology.md`: a 64-passage factorial dataset, generated
+  with an LLM to the specification in the methodology file. Loaded by `run.py` but never run.
 
-**Results (`results/`):**
-- `trials.jsonl` - Arm 1, final, 2400 trials, 4 models. Superset of
-  `trials_run1_partial_mistral_qwen.jsonl` (an earlier partial run with
-  5 models incl. deepseek that was stopped and restarted trimmed - the
-  partial file's mistral/qwen data is fully duplicated in the final file).
-  `trials_snapshot1.jsonl` was a mid-run safe-read copy, now superseded.
-- `direct_payload_trials.jsonl` - Arm 2, 120 trials.
-- `positive_control_trials.jsonl` - Arm 3, 80 trials.
-- `agentic_safety_trials.jsonl` - Arm 4, 150 trials.
-- `smoke_trials.jsonl` - very first pipeline smoke test, 8 trials, no
-  research value, kept only as a "does the pipeline still work" fixture.
-- `charts_full/`, `charts_payload/`, `charts_snapshot1/`, `smoke_charts/` -
-  generated PNGs, all reproducible from their source JSONL via `analyze.py`.
-- `run_log.txt`, `run_log2.txt` - raw stdout from the two big background
-  runs (the killed 5-model run and the completed 4-model run). Redundant
-  with the JSONL data; kept for the trial-by-trial narration only.
+**Results** (`results/`)
+- `trials.jsonl`: Arm 1, 2,400 trials, four models. This is the canonical file.
+- `direct_payload_trials.jsonl`: Arm 2, 120 trials.
+- `positive_control_trials.jsonl`: Arm 3, 80 trials.
+- `agentic_safety_trials.jsonl`: Arm 4, 150 trials.
+- Superseded, kept for completeness: `trials_run1_partial_mistral_qwen.jsonl` (an earlier, stopped run
+  that also included a fifth model; its Mistral and Qwen trials are duplicated in `trials.jsonl`),
+  `trials_snapshot1.jsonl` (a mid-run copy), `smoke_trials.jsonl` (8-trial pipeline check), and
+  `run_log.txt` / `run_log2.txt` (raw stdout of the two long runs).
+- `logic_test_output.txt`, `logic_test2_output.txt`: output of the two parser sanity scripts.
+- Chart folders: all regenerable from their source JSONL with `analyze.py`.
 
-**Reference material (not run against, background/context only):**
-- `Incident Data/` - the downloaded `collusion.wiki` dataset (wiki
-  revision logs, mostly automated scraping-bot scratch pages, not
-  narrative content). Never used as passages - see FINDINGS.md's "if
-  resuming" list if you want to build that arm properly.
-- `semantic_tool_choice_gym.md` - the original v0 spec this whole project
-  was built from.
+**Docs**
+- `README.md`: the write-up.
+- `PREREGISTRATION.md`: the locked primary outcome and named comparisons, including two added before
+  the data they concern was looked at.
+- `FINDINGS.md`: the full record of every arm, including the arm that wasn't run.
+- `REPRODUCING.md`: setup and isolation checklist.
+- `semantic_tool_choice_gym.md`: the original specification the harness was built from.
 
-**Docs:**
-- `README.md` - setup/run instructions, isolation checklist, limitations.
-  Written early, still accurate for the basic pipeline; doesn't reflect
-  Arms 2-4 (see this file and `FINDINGS.md` for those).
-- `PREREGISTRATION.md` - locked-in primary outcome and named comparisons,
-  including the two added mid-session (safety-training contrast, and the
-  general POV/all-four-vs-reversal comparisons).
-- `FINDINGS.md` - the actual research write-up. Read this first.
+## Resuming
 
-## To resume: exact commands
+All commands run from this folder with the venv interpreter and a dedicated `ollama serve`.
 
-All commands assume the experiment folder, PowerShell, with
-`$env:PYTHONPATH = ""` set first and `.venv\Scripts\python.exe` as the
-interpreter, and a locally-running `ollama serve` isolated from Mimir's
-instance (see isolation checklist in `README.md`).
-
-**The unfinished Perplexity pilot** (highest-priority next step):
+**The factorial pilot** (the most useful unrun arm):
 ```
 .venv\Scripts\python.exe run.py `
   --passages-file synthetic_passages.jsonl `
   --pilot-ids "NEU-01,NEU-03,NEU-05,NEU-08,IND-01,IND-05,IND-10,IND-13,PR2-01,PR2-09,TR3-01,ALL-01,ALL-02,ALL-03,REV-01,REV-02" `
   --contexts "researcher_assistant,facility_info_assistant,customer_support_assistant,general_office_assistant" `
   --include-baseline --repetitions 5 `
-  --output results/perplexity_pilot_trials.jsonl
+  --output results/factorial_pilot_trials.jsonl
 ```
-Then `analyze.py --results results/perplexity_pilot_trials.jsonl --out-dir
-results/charts_perplexity_pilot` - this will populate the `all_four` vs.
-`reversal` chart for the first time.
+Then `analyze.py --results results/factorial_pilot_trials.jsonl --out-dir results/charts_factorial_pilot`,
+which fills in the `all_four` vs `reversal` chart.
 
-**Resolving the Arm 4 payload-vs-no-payload gap** (more reps, same design):
+**Replicating Arm 4 with enough trials to resolve the payload difference:**
 ```
 .venv\Scripts\python.exe run.py `
   --passages-file distributed_passages.jsonl `
@@ -140,35 +96,11 @@ results/charts_perplexity_pilot` - this will populate the `all_four` vs.
   --repetitions 50 `
   --output results/agentic_safety_trials_v2.jsonl
 ```
-(Bump `--repetitions` further and/or add `--model` runs for a second model
-to check replication, per FINDINGS.md item 3.)
+Run it again with `--model` set to a model from another family to test replication (FINDINGS.md, next
+steps, item 3).
 
-**Re-checking stock-vs-abliterated with more trials:** re-run Arm 1's
-`passages.jsonl` config with just those two models and higher
-`--repetitions`, or point `config.yaml`'s model list at just those two and
-run `run.py` directly.
+**Stock versus abliterated Qwen with more power:** rerun Arm 1's `passages.jsonl` with only those two
+models in `config.yaml` and a higher `--repetitions`.
 
-**Pointing this pipeline at Mimir itself** (discussed as a natural next
-step, not started): would need Mimir's actual system prompt(s) and tool
-permission set pulled into a new `prompts.json`/`tools.json` pair (or a
-separate project folder, per the isolation principle this project was
-built on) - do not point `run.py` at the production system's paths directly.
-
-## Proposed cleanup (not yet done - confirm before deleting anything)
-
-- `results/trials_snapshot1.jsonl` - safe to delete, fully superseded by
-  `trials.jsonl`.
-- `results/trials_run1_partial_mistral_qwen.jsonl` - safe to delete, its
-  mistral/qwen data is duplicated in the final `trials.jsonl`; only unique
-  content would be if you wanted a record of the killed 5-model attempt
-  specifically, which `run_log.txt` already documents.
-- `results/smoke_trials.jsonl` and `results/smoke_charts/` - no research
-  value, pipeline-smoke-test only; safe to delete or keep as a fixture.
-- `results/run_log.txt` - stdout from the killed run; redundant with
-  `trials_run1_partial_mistral_qwen.jsonl`'s existence. Safe to delete if
-  that file is also deleted.
-- Chart folders (`charts_full/`, `charts_payload/`, `charts_snapshot1/`)
-  are all regeneratable from their source JSONL via `analyze.py` - safe to
-  delete and regenerate on demand if disk space matters; otherwise harmless
-  to keep.
-- Nothing else in the top-level project folder is redundant.
+**Testing a real agent's prompts:** copy that agent's system prompt and tool permissions into a new
+`prompts.json` / `tools.json` pair, ideally in a separate folder. Don't point `run.py` at a live system.

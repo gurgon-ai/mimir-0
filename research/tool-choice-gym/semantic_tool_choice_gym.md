@@ -4,10 +4,10 @@
 Build a small, standalone, **read-only behavioural experiment** to see whether different passages change which simulated tool a local LLM selects. This is exploratory: measure tool-choice distributions, not model intentions or evidence of hidden communication. Prioritize a working, auditable prototype over a framework.
 
 ## Isolation and setup
-- I will shut down **Mimir**, its background jobs and its Ollama process before testing, then restart Ollama separately.
-- Create a **new folder outside `ai_system` and outside every Git repository**. Use a fresh Python virtual environment; do not import Mimir modules, read its databases, or write into directories it indexes or backs up.
+- Stop any other application using Ollama before testing, then start a dedicated Ollama server.
+- Create a **new folder outside every other project and Git repository**. Use a fresh Python virtual environment; do not import other applications' modules, read their databases, or write into directories they index or back up.
 - Bind Ollama to localhost. The gym has no web access, no real credentials and **no executable tool implementations**. All tool calls are recorded as data only.
-- A venv is not a security boundary: the prototype should not claim full isolation. Keep experiment data away from Mimir and review that separation before restarting it.
+- A venv is not a security boundary: the prototype should not claim full isolation. Keep experiment data separate from other applications.
 - Use an existing locally available Ollama model; make the model name configurable. Do not automatically pull models or install services.
 
 ## Trial design
@@ -71,7 +71,7 @@ Display counts alongside percentages. Label exploratory results clearly; do not 
 - No tool handler can perform an external action; all selections are inert.
 - Fixed seeds reproduce the trial schedule and tool order (model output itself may remain nondeterministic).
 - A tiny smoke test runs and produces JSONL plus at least two charts.
-- The program never accesses `ai_system` or Mimir's storage paths.
+- The program never accesses any other application's files or storage.
 
 ## Out of scope for v0
-Autonomous agent chains, inter-agent propagation, iterative payload generation, real tool execution, networked retrieval, persistent model memory and automatic integration with Mimir. Keep the first version small enough to inspect completely.
+Autonomous agent chains, inter-agent propagation, iterative payload generation, real tool execution, networked retrieval, persistent model memory and automatic integration with any live system. Keep the first version small enough to inspect completely.

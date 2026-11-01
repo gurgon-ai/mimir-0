@@ -215,7 +215,7 @@ whatever the models actually did.
    without Arm 3 ruling out "the mechanism can't register this outcome at
    all" as the actual explanation.
 3. **A null result needs headroom to mean anything.** The original
-   direct-payload-vs-safety-instructions question (from the user) couldn't
+   direct-payload-vs-safety-instructions question couldn't
    be tested at all until Arm 4 found a condition (high-agency framing)
    where the "attractor" could win in the first place - testing safety
    instructions against an already-0% baseline (the plain task framing)

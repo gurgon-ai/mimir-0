@@ -8,20 +8,18 @@ policy violation, or an engineered message - see Limitations.
 
 ## Isolation checklist (run in order, every session)
 
-1. Confirm the production system (the private home AI this core came from) is fully stopped:
+1. Confirm nothing else is using Ollama:
    `Get-Process | Where-Object { $_.ProcessName -match 'ollama|python' }`
-   should show no `mimir_mcp.py` and no pre-existing `ollama.exe` you didn't
-   start yourself for this experiment.
+   should show no `ollama.exe` you didn't start yourself for this experiment.
 2. Start a fresh Ollama server with `OLLAMA_HOST`/`OLLAMA_ORIGINS` unset (so it
    binds to the default `127.0.0.1:11434`, localhost-only):
    `ollama serve`
-3. This project lives in its own folder, outside
-   the production system's tree, with its own `.venv` and no Git repo. Nothing here imports
-   Mimir modules, reads its SQLite database, or writes into any path it
+3. Run it from its own folder with its own `.venv`. Nothing here imports another
+   application's modules, reads its databases, or writes into paths another tool
    indexes or backs up.
 4. **A venv is not a security boundary.** It isolates Python packages, not
    filesystem or network access. Don't treat this setup as sandboxing beyond
-   "keeps experiment files and dependencies out of the production system's way."
+   "keeps experiment files and dependencies separate."
 5. When done, stop the experiment's `ollama serve` before restarting
    the production system's own Ollama instance, to avoid the two ever pointing at
    the same running server at the same time.
