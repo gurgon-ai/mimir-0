@@ -111,4 +111,4 @@ the parsed tool choice and reason, a validity flag, the error type if any
 Autonomous agent chains, inter-agent propagation, iterative passage
 optimization toward "boundary-crossing," real tool execution, networked
 retrieval, persistent model memory, and any automatic integration with
-the private production system.
+a live system.

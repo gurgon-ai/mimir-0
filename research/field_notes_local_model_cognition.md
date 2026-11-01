@@ -1,11 +1,11 @@
 # Field notes from a year of running a local-model mind
 
-*Greg Korpela, with Claude Code as the coding partner. Findings from building and operating Mimir, a
-home AI on a private site, from late 2025 to October 2026: one workstation (RTX
-5090), open-weight models through Ollama, a 275k-line Python system, a small household as the
-judges. Each note is something we measured or were bitten by, not something we assumed. Numbers are
-the ones in the incident record at the time. Mimir-0, in this repository, is the public-clean
-extraction of the cognition core; the production system stays private. Written up 2026-10-31.*
+*Greg Korpela, with Claude Code as the coding partner. A year of building and running Mimir, a home AI
+on a private site, late 2025 to October 2026: one workstation (RTX 5090),
+open-weight models through Ollama, 275k lines of Python, a small household as the judges. Each note
+is something we measured or were bitten by, not something we assumed, and the numbers are the ones in
+the incident record at the time. Mimir-0, the library in this repository, is the cognition core of that
+system. Written up 2026-10-31.*
 
 These are in rough order of how much they cost us to learn.
 

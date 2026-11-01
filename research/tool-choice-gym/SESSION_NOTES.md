@@ -15,7 +15,7 @@ run vs. just prepared, environment gotchas, and exact commands.
    command in this session does this; keep doing it.
 2. **Ollama isolation:** the gym expects its own `ollama serve` (default
    `127.0.0.1:11434`, `OLLAMA_HOST`/`OLLAMA_ORIGINS` unset), separate from
-   the private production system. At session end the user is restarting
+   the author's own home AI. At session end the user is restarting
    Ollama fresh before bringing Mimir back up specifically to avoid any
    cross-contamination between the two.
 3. **Redirected stdout buffers fully in Python**, so `run.py ... *>

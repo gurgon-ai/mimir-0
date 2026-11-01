@@ -2,7 +2,7 @@
 
 *Prompt, through the chat UI on the owner's account path, in a fresh session. Reply verbatim, fast tier
 ("consider"), 4.9 s. Annotations by Claude afterwards, checked against the system's own records; the
-reply was not edited. The system is the private production Mimir; this library is its public-clean core.*
+reply was not edited. The system is the full home AI that this library's core was taken from.*
 
 **Prompt.** "The operator is going to write publicly about you for people who have never seen this system,
 and he says your own output is the best evidence of what you are. So: describe yourself to a careful
